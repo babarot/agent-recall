@@ -199,8 +199,13 @@ export class VaultDB {
     timestamp: string;
   }> {
     const limit = options.limit ?? 20;
+    // Wrap query in double quotes if it contains special FTS5 characters
+    // to prevent hyphens being interpreted as NOT operators etc.
+    const safeQuery = /^".*"$/.test(query) || /\b(AND|OR|NOT)\b/.test(query)
+      ? query
+      : `"${query.replace(/"/g, '""')}"`;
     const conditions: string[] = ["messages_fts MATCH ?"];
-    const params: (string | number)[] = [query];
+    const params: (string | number)[] = [safeQuery];
 
     if (options.project) {
       conditions.push("(s.project LIKE ? OR s.project_path LIKE ?)");

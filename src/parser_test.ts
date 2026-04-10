@@ -265,3 +265,102 @@ Deno.test("parseSession skips malformed JSON lines", () => {
   assertEquals(result!.messages.length, 1);
   assertEquals(result!.messages[0].content, "valid message");
 });
+
+// --- Image extraction ---
+
+Deno.test("parseSession extracts base64 images from user messages", () => {
+  const jsonl = [
+    line({
+      type: "user",
+      uuid: "u1",
+      sessionId: "sess-001",
+      timestamp: "2026-01-01T00:00:00Z",
+      cwd: "/home/user/project",
+      version: "2.1.87",
+      gitBranch: "main",
+      isSidechain: false,
+      message: {
+        role: "user",
+        content: [
+          { type: "text", text: "[Image #1] check this" },
+          { type: "image", source: { type: "base64", media_type: "image/png", data: "aWZha2VkYXRh" } },
+        ],
+      },
+    }),
+    ASSISTANT_MSG(
+      [{ type: "text", text: "I see the image" }],
+      "a1",
+      "2026-01-01T00:00:01Z"
+    ),
+  ].join("\n");
+
+  const result = parseSession(jsonl, "test");
+  assertNotEquals(result, null);
+  assertEquals(result!.images.length, 1);
+  assertEquals(result!.images[0].messageUuid, "u1");
+  assertEquals(result!.images[0].imageIndex, 0);
+  assertEquals(result!.images[0].mediaType, "image/png");
+  assertEquals(result!.images[0].data, "aWZha2VkYXRh");
+});
+
+Deno.test("parseSession extracts multiple images from one message", () => {
+  const jsonl = [
+    line({
+      type: "user",
+      uuid: "u1",
+      sessionId: "sess-001",
+      timestamp: "2026-01-01T00:00:00Z",
+      cwd: "/home/user/project",
+      version: "2.1.87",
+      gitBranch: "main",
+      isSidechain: false,
+      message: {
+        role: "user",
+        content: [
+          { type: "text", text: "[Image #1] [Image #2]" },
+          { type: "image", source: { type: "base64", media_type: "image/png", data: "img1" } },
+          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: "img2" } },
+        ],
+      },
+    }),
+  ].join("\n");
+
+  const result = parseSession(jsonl, "test");
+  assertNotEquals(result, null);
+  assertEquals(result!.images.length, 2);
+  assertEquals(result!.images[0].imageIndex, 0);
+  assertEquals(result!.images[0].mediaType, "image/png");
+  assertEquals(result!.images[1].imageIndex, 1);
+  assertEquals(result!.images[1].mediaType, "image/jpeg");
+});
+
+Deno.test("parseSession returns empty images when no images present", () => {
+  const jsonl = USER_MSG("no images here", "u1", "2026-01-01T00:00:00Z");
+  const result = parseSession(jsonl, "test");
+  assertNotEquals(result, null);
+  assertEquals(result!.images.length, 0);
+});
+
+Deno.test("parseSession ignores images from sidechain messages", () => {
+  const jsonl = [
+    USER_MSG("main message", "u1", "2026-01-01T00:00:00Z"),
+    line({
+      type: "user",
+      uuid: "u2",
+      sessionId: "sess-001",
+      timestamp: "2026-01-01T00:00:01Z",
+      isSidechain: true,
+      message: {
+        role: "user",
+        content: [
+          { type: "text", text: "sidechain" },
+          { type: "image", source: { type: "base64", media_type: "image/png", data: "shouldskip" } },
+        ],
+      },
+    }),
+  ].join("\n");
+
+  const result = parseSession(jsonl, "test");
+  assertNotEquals(result, null);
+  assertEquals(result!.images.length, 0);
+});

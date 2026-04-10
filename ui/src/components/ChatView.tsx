@@ -1,11 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "preact/hooks";
 import { marked } from "marked";
-
-interface Message {
-  uuid: string;
-  role: string;
-  content: string;
-}
+import { groupMessages, renderImages, stripAnsi } from "../lib/chat-utils";
+import type { Message } from "../lib/chat-utils";
 
 interface SessionData {
   session: {
@@ -37,7 +33,6 @@ export function ChatView({ sessionId, onBack }: { sessionId: string; onBack: () 
       .then((r) => r.json())
       .then((d) => {
         setData(d);
-        // Scroll to top on load
         setTimeout(() => scrollRef.current?.scrollTo(0, 0), 0);
       });
   }, [sessionId]);
@@ -125,119 +120,6 @@ export function ChatView({ sessionId, onBack }: { sessionId: string; onBack: () 
   );
 }
 
-type DisplayMessage =
-  | { type: "chat"; uuid: string; role: string; content: string }
-  | { type: "bash"; command: string; stdout: string; stderr: string }
-  | { type: "command"; name: string; args: string; stdout: string };
-
-function extractTag(content: string, tag: string): string | null {
-  const re = new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`);
-  const m = content.match(re);
-  return m ? m[1].trim() : null;
-}
-
-function groupMessages(messages: Message[]): DisplayMessage[] {
-  const result: DisplayMessage[] = [];
-  let i = 0;
-
-  while (i < messages.length) {
-    const msg = messages[i];
-    const content = msg.content;
-
-    // Detect <local-command-caveat> — skip it, look ahead for bash-input + bash-stdout
-    if (content.includes("<local-command-caveat>")) {
-      // Look ahead for bash-input and bash-stdout
-      let command = "";
-      let stdout = "";
-      let stderr = "";
-      let commandName = "";
-      let commandArgs = "";
-      let j = i + 1;
-
-      while (j < messages.length && j <= i + 3) {
-        const next = messages[j].content;
-        if (next.includes("<bash-input>")) {
-          command = extractTag(next, "bash-input") ?? next;
-        } else if (next.includes("<bash-stdout>") || next.includes("<bash-stderr>")) {
-          stdout = extractTag(next, "bash-stdout") ?? "";
-          stderr = extractTag(next, "bash-stderr") ?? "";
-        } else if (next.includes("<command-name>")) {
-          commandName = extractTag(next, "command-name") ?? "";
-          commandArgs = extractTag(next, "command-args") ?? "";
-        } else if (next.includes("<local-command-stdout>")) {
-          stdout = extractTag(next, "local-command-stdout") ?? "";
-        } else {
-          break;
-        }
-        j++;
-      }
-
-      if (command) {
-        result.push({ type: "bash", command, stdout, stderr });
-      } else if (commandName) {
-        result.push({ type: "command", name: commandName, args: commandArgs, stdout });
-      }
-      i = j;
-      continue;
-    }
-
-    // Detect standalone bash-input (without caveat)
-    if (content.includes("<bash-input>")) {
-      const command = extractTag(content, "bash-input") ?? content;
-      let stdout = "";
-      let stderr = "";
-      if (i + 1 < messages.length) {
-        const next = messages[i + 1].content;
-        if (next.includes("<bash-stdout>") || next.includes("<bash-stderr>")) {
-          stdout = extractTag(next, "bash-stdout") ?? "";
-          stderr = extractTag(next, "bash-stderr") ?? "";
-          i += 2;
-          result.push({ type: "bash", command, stdout, stderr });
-          continue;
-        }
-      }
-      result.push({ type: "bash", command, stdout, stderr });
-      i++;
-      continue;
-    }
-
-    // Detect standalone <command-name> (slash commands)
-    if (content.includes("<command-name>") || content.includes("<command-message>")) {
-      const name = extractTag(content, "command-name") ?? "";
-      const args = extractTag(content, "command-args") ?? "";
-      let stdout = "";
-      if (i + 1 < messages.length) {
-        const next = messages[i + 1].content;
-        if (next.includes("<local-command-stdout>")) {
-          stdout = extractTag(next, "local-command-stdout") ?? "";
-          i += 2;
-          result.push({ type: "command", name, args, stdout });
-          continue;
-        }
-      }
-      result.push({ type: "command", name, args, stdout });
-      i++;
-      continue;
-    }
-
-    // Skip standalone stdout/stderr messages (already consumed)
-    if (content.includes("<bash-stdout>") || content.includes("<bash-stderr>") || content.includes("<local-command-stdout>")) {
-      i++;
-      continue;
-    }
-
-    // Regular message
-    result.push({ type: "chat", uuid: msg.uuid, role: msg.role, content });
-    i++;
-  }
-
-  return result;
-}
-
-function stripAnsi(text: string): string {
-  return text.replace(/\x1b\[[0-9;]*m/g, "").replace(/\^?\[\[[\d;]*m/g, "");
-}
-
 function BashBubble({ command, stdout, stderr }: { command: string; stdout: string; stderr: string }) {
   return (
     <div class="flex justify-end">
@@ -274,30 +156,12 @@ function CommandBubble({ name, args, stdout }: { name: string; args: string; std
   );
 }
 
-function renderImages(content: string, sessionId: string, uuid: string): string {
-  // Replace [Image #N] with DB image
-  // N is a session-global counter, but images are stored per-message with index starting at 0
-  let imgCounter = 0;
-  let result = content.replace(/\[Image #\d+\]/g, () => {
-    const index = imgCounter++;
-    return `![Image](${`/api/image?session=${sessionId}&message=${uuid}&index=${index}`})`;
-  });
-
-  // Replace [Image: source: /path/to/file] with local file
-  result = result.replace(/\[Image:?\s*source:\s*([^\]]+)\]/g, (_match, path) => {
-    return `![Image](${`/api/file?path=${encodeURIComponent(path.trim())}`})`;
-  });
-
-  return result;
-}
-
 function ChatBubble({ sessionId, uuid, role, content }: { sessionId: string; uuid: string; role: string; content: string }) {
   const isUser = role === "user";
   const html = useMemo(() => {
     marked.setOptions({ breaks: true, gfm: true });
     const withImages = renderImages(content, sessionId, uuid);
     const raw = marked.parse(withImages) as string;
-    // Wrap tables in a scrollable container
     return raw.replace(/<table>/g, '<div class="table-wrapper"><table>').replace(/<\/table>/g, '</table></div>');
   }, [content, sessionId, uuid]);
 

@@ -19,3 +19,4 @@ clean:
 
 test:
 	deno task test
+	cd ui && npm test
