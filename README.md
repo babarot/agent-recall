@@ -13,6 +13,7 @@ Claude Code stores conversations as JSONL files under `~/.claude/projects/`, but
 - **Noise filtering** -- Strips tool_use / tool_result / thinking, keeping only conversation text (~7% of raw data)
 - **Idempotent** -- UUID-based deduplication; safe to import repeatedly
 - **MCP server** -- Agents can autonomously search past sessions via `recall_search`, `recall_list`, `recall_export`, `recall_stats` tools
+- **Web UI** -- Browse sessions and chat history in the browser
 - **Zero dependencies** -- Single binary via `deno compile`; no external services
 
 ## Install
@@ -100,6 +101,13 @@ agent-recall export <session-id> --format json --output session.json
 
 # Show statistics
 agent-recall stats
+
+# Web UI
+agent-recall ui                    # Start in background (default port: 6276)
+agent-recall ui --foreground       # Start in foreground
+agent-recall ui --port 8080        # Custom port
+agent-recall ui status             # Show server status
+agent-recall ui stop               # Stop the server
 ```
 
 ### Import
@@ -160,6 +168,22 @@ Options:
   --project <name>    Filter by project
 ```
 
+### UI
+
+```
+agent-recall ui [options]
+
+Options:
+  --port <n>          Port number (default: 6276)
+  --foreground        Run in foreground instead of background
+
+Subcommands:
+  agent-recall ui stop     Stop the running server
+  agent-recall ui status   Show server status
+```
+
+Opens `http://localhost:6276` with session browser, chat viewer, and search.
+
 ## Architecture
 
 ```
@@ -214,6 +238,14 @@ deno task dev -- search "query"
 # MCP server (stdio)
 deno task dev -- mcp
 
+# Web UI (frontend dev server + API server)
+deno task ui:dev               # Vite dev server (port 5173, proxies /api to 6276)
+deno task dev -- ui --foreground  # API server (port 6276)
+
+# Build UI assets
+deno task ui:build             # Vite build → ui/dist/
+deno task ui:embed             # Embed ui/dist/ → src/ui_assets.ts
+
 # Compile and install
 deno task compile
 deno task install
@@ -228,6 +260,8 @@ deno task test
 - `node:sqlite` (DatabaseSync, built-in)
 - SQLite FTS5
 - `@std/cli`, `@std/fmt`, `@std/path`
+- [Preact](https://preactjs.com/) + [Vite](https://vitejs.dev/) + [Tailwind CSS](https://tailwindcss.com/) (Web UI)
+- [marked](https://marked.js.org/) (Markdown rendering)
 
 ## License
 

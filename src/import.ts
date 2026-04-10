@@ -79,12 +79,22 @@ export function runImport(options: ImportOptions): void {
           project,
           indexMap.get(sessionId)
         );
-        if (!parsed || parsed.messages.length <= existingCount) {
+        if (!parsed) {
           skippedSessions++;
           continue;
         }
 
-        // Incremental: insert only new messages
+        // Skip if no new messages AND no new images to import
+        const hasNewMessages = parsed.messages.length > existingCount;
+        const hasNewImages = parsed.images.length > 0 && parsed.images.some(
+          (img) => !db.hasImages(sessionId, img.messageUuid)
+        );
+        if (!hasNewMessages && !hasNewImages) {
+          skippedSessions++;
+          continue;
+        }
+
+        // Incremental: insert only new messages + images
         let newMessages = 0;
         for (const msg of parsed.messages) {
           db.insertMessage({
@@ -96,6 +106,17 @@ export function runImport(options: ImportOptions): void {
             turnIndex: msg.turnIndex,
           });
           newMessages++;
+        }
+        for (const img of parsed.images) {
+          if (!db.hasImages(sessionId, img.messageUuid)) {
+            db.insertImage({
+              sessionId,
+              messageUuid: img.messageUuid,
+              imageIndex: img.imageIndex,
+              mediaType: img.mediaType,
+              data: Uint8Array.from(atob(img.data), (c) => c.charCodeAt(0)),
+            });
+          }
         }
         db.updateSessionCounts(
           sessionId,
@@ -148,6 +169,18 @@ export function runImport(options: ImportOptions): void {
           timestamp: msg.timestamp,
           turnIndex: msg.turnIndex,
         });
+      }
+
+      for (const img of parsed.images) {
+        if (!db.hasImages(parsed.meta.sessionId, img.messageUuid)) {
+          db.insertImage({
+            sessionId: parsed.meta.sessionId,
+            messageUuid: img.messageUuid,
+            imageIndex: img.imageIndex,
+            mediaType: img.mediaType,
+            data: Uint8Array.from(atob(img.data), (c) => c.charCodeAt(0)),
+          });
+        }
       }
 
       importedSessions++;

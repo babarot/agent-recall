@@ -5,13 +5,16 @@
     "@std/path": "jsr:@std/path@^1"
   },
   "tasks": {
-    "dev": "deno run --allow-read --allow-write --allow-env=HOME src/main.ts",
+    "dev": "deno run --allow-read --allow-write --allow-env=HOME --allow-net --allow-run src/main.ts",
     "test": "deno test src/ --allow-read --allow-write --allow-env=HOME",
-    "compile": "deno compile --allow-read --allow-write --allow-env=HOME -o agent-recall src/main.ts",
-    "compile:macos-arm": "deno compile --target aarch64-apple-darwin --allow-read --allow-write --allow-env=HOME -o dist/agent-recall-darwin-arm64 src/main.ts",
-    "compile:macos-x86": "deno compile --target x86_64-apple-darwin --allow-read --allow-write --allow-env=HOME -o dist/agent-recall-darwin-x86_64 src/main.ts",
-    "compile:linux-arm": "deno compile --target aarch64-unknown-linux-gnu --allow-read --allow-write --allow-env=HOME -o dist/agent-recall-linux-arm64 src/main.ts",
-    "compile:linux-x86": "deno compile --target x86_64-unknown-linux-gnu --allow-read --allow-write --allow-env=HOME -o dist/agent-recall-linux-x86_64 src/main.ts",
+    "ui:dev": "cd ui && npm run dev",
+    "ui:build": "cd ui && npm run build",
+    "ui:embed": "deno run --allow-read --allow-write scripts/embed_ui.ts",
+    "compile": "deno compile --allow-read --allow-write --allow-env=HOME --allow-net --allow-run -o agent-recall src/main.ts",
+    "compile:macos-arm": "deno compile --target aarch64-apple-darwin --allow-read --allow-write --allow-env=HOME --allow-net --allow-run -o dist/agent-recall-darwin-arm64 src/main.ts",
+    "compile:macos-x86": "deno compile --target x86_64-apple-darwin --allow-read --allow-write --allow-env=HOME --allow-net --allow-run -o dist/agent-recall-darwin-x86_64 src/main.ts",
+    "compile:linux-arm": "deno compile --target aarch64-unknown-linux-gnu --allow-read --allow-write --allow-env=HOME --allow-net --allow-run -o dist/agent-recall-linux-arm64 src/main.ts",
+    "compile:linux-x86": "deno compile --target x86_64-unknown-linux-gnu --allow-read --allow-write --allow-env=HOME --allow-net --allow-run -o dist/agent-recall-linux-x86_64 src/main.ts",
     "install": "deno task compile && cp agent-recall ~/.claude/agent-recall"
   }
 }

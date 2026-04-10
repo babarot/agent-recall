@@ -44,6 +44,17 @@ CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
     INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', old.id, old.content);
 END;
 
+CREATE TABLE IF NOT EXISTS images (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL REFERENCES sessions(session_id),
+    message_uuid TEXT,
+    image_index INTEGER DEFAULT 0,
+    media_type TEXT NOT NULL,
+    data       BLOB NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_images_session_message ON images(session_id, message_uuid);
+
 CREATE TABLE IF NOT EXISTS schema_version (
     version    INTEGER PRIMARY KEY,
     applied_at TEXT DEFAULT (datetime('now'))

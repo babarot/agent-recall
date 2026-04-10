@@ -35,8 +35,20 @@ export class VaultDB {
       .get() as { version: number } | undefined;
 
     const currentVersion = versionRow?.version ?? 0;
+    if (currentVersion < 2) {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS images (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL REFERENCES sessions(session_id),
+            message_uuid TEXT,
+            image_index INTEGER DEFAULT 0,
+            media_type TEXT NOT NULL,
+            data       BLOB NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_images_session_message ON images(session_id, message_uuid);
+      `);
+    }
     if (currentVersion < SCHEMA_VERSION) {
-      // Future migrations go here
       this.db
         .prepare("INSERT INTO schema_version (version) VALUES (?)")
         .run(SCHEMA_VERSION);
@@ -105,6 +117,53 @@ export class VaultDB {
         params.timestamp,
         params.turnIndex
       );
+  }
+
+  /** Insert an image blob */
+  insertImage(params: {
+    sessionId: string;
+    messageUuid: string;
+    imageIndex: number;
+    mediaType: string;
+    data: Uint8Array;
+  }): void {
+    this.db
+      .prepare(
+        `INSERT INTO images (session_id, message_uuid, image_index, media_type, data)
+       VALUES (?, ?, ?, ?, ?)`
+      )
+      .run(
+        params.sessionId,
+        params.messageUuid,
+        params.imageIndex,
+        params.mediaType,
+        params.data
+      );
+  }
+
+  /** Get an image by session, message uuid and index */
+  getImage(sessionId: string, messageUuid: string, imageIndex: number): {
+    mediaType: string;
+    data: Uint8Array;
+  } | null {
+    const row = this.db
+      .prepare(
+        `SELECT media_type as mediaType, data FROM images
+         WHERE session_id = ? AND message_uuid = ? AND image_index = ?`
+      )
+      .get(sessionId, messageUuid, imageIndex) as {
+      mediaType: string;
+      data: Uint8Array;
+    } | undefined;
+    return row ?? null;
+  }
+
+  /** Check if images exist for a message */
+  hasImages(sessionId: string, messageUuid: string): boolean {
+    const row = this.db
+      .prepare("SELECT 1 FROM images WHERE session_id = ? AND message_uuid = ? LIMIT 1")
+      .get(sessionId, messageUuid);
+    return !!row;
   }
 
   /** Update session message count and ended_at after incremental import */
@@ -237,6 +296,7 @@ export class VaultDB {
       summary: string | null;
     } | null;
     messages: Array<{
+      uuid: string;
       role: string;
       content: string;
       timestamp: string;
@@ -266,11 +326,12 @@ export class VaultDB {
 
     const messages = this.db
       .prepare(
-        `SELECT role, content, timestamp, turn_index as turnIndex
+        `SELECT uuid, role, content, timestamp, turn_index as turnIndex
          FROM messages WHERE session_id = ?
          ORDER BY turn_index`
       )
       .all(session.sessionId) as Array<{
+      uuid: string;
       role: string;
       content: string;
       timestamp: string;

@@ -1,6 +1,8 @@
 import type {
   ContentBlock,
+  ExtractedImage,
   ExtractedMessage,
+  ImageBlock,
   JournalLine,
   ParsedSession,
   SessionIndex,
@@ -48,6 +50,7 @@ export function parseSession(
 ): ParsedSession | null {
   const lines = jsonlContent.split("\n").filter((line) => line.trim());
   const messages: ExtractedMessage[] = [];
+  const images: ExtractedImage[] = [];
   let meta: Partial<SessionMeta> = {
     project,
     projectPath: "",
@@ -88,6 +91,22 @@ export function parseSession(
     // Track end time
     if (parsed.timestamp) {
       meta.endedAt = parsed.timestamp;
+    }
+
+    // Extract images from content blocks
+    if (parsed.uuid && parsed.message?.content && Array.isArray(parsed.message.content)) {
+      let imgIdx = 0;
+      for (const block of parsed.message.content) {
+        if (block.type === "image" && (block as ImageBlock).source?.type === "base64") {
+          const imgBlock = block as ImageBlock;
+          images.push({
+            messageUuid: parsed.uuid,
+            imageIndex: imgIdx++,
+            mediaType: imgBlock.source.media_type,
+            data: imgBlock.source.data,
+          });
+        }
+      }
     }
 
     // Extract text content
@@ -134,6 +153,7 @@ export function parseSession(
   return {
     meta: meta as SessionMeta,
     messages,
+    images,
   };
 }
 
