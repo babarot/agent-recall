@@ -20,7 +20,11 @@ Claude Code stores conversations as JSONL files under `~/.claude/projects/`, but
 Downloads precompiled binaries from GitHub Releases. No runtime dependencies needed.
 
 ```bash
+# curl
 curl -fsSL https://raw.githubusercontent.com/babarot/agent-recall/main/bin/install.sh | bash
+
+# deno
+deno run -A https://raw.githubusercontent.com/babarot/agent-recall/main/bin/install.ts
 ```
 
 ### Build from source
