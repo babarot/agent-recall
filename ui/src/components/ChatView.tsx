@@ -271,7 +271,9 @@ function ChatBubble({ sessionId, uuid, role, content }: { sessionId: string; uui
   const html = useMemo(() => {
     marked.setOptions({ breaks: true, gfm: true });
     const withImages = renderImages(content, sessionId, uuid);
-    return marked.parse(withImages) as string;
+    const raw = marked.parse(withImages) as string;
+    // Wrap tables in a scrollable container
+    return raw.replace(/<table>/g, '<div class="table-wrapper"><table>').replace(/<\/table>/g, '</table></div>');
   }, [content, sessionId, uuid]);
 
   return (
