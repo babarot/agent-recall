@@ -14,19 +14,48 @@ async function main(): Promise<void> {
   await downloadAndVerify("agent-recall", tag, os, arch);
   await Deno.chmod(`${INSTALL_DIR}/agent-recall`, 0o755);
 
-  console.log(`
-Installed to:
-  ${INSTALL_DIR}/agent-recall
+  console.log("\nImporting existing sessions...");
+  const importCmd = new Deno.Command(`${INSTALL_DIR}/agent-recall`, {
+    args: ["import"],
+    stdout: "inherit",
+    stderr: "inherit",
+  });
+  await importCmd.output();
 
-Next steps:
-  1. Import existing sessions:
-     ${INSTALL_DIR}/agent-recall import
+  let claudeFound = false;
+  try {
+    const which = new Deno.Command("which", { args: ["claude"], stdout: "null", stderr: "null" });
+    const { success } = await which.output();
+    claudeFound = success;
+  } catch {
+    // claude CLI not found
+  }
 
-  2. Set up auto-archive hook (add to ~/.claude/settings.json):
-     "hooks": { "SessionEnd": [{ "hooks": [{ "type": "command", "command": "$HOME/.claude/agent-recall import 2>/dev/null", "async": true }] }] }
+  if (claudeFound) {
+    console.log("Registering MCP server...");
+    try {
+      const mcp = new Deno.Command("claude", {
+        args: ["mcp", "add", "agent-recall", "-s", "user", "--", `${INSTALL_DIR}/agent-recall`, "mcp"],
+        stdout: "inherit",
+        stderr: "inherit",
+      });
+      await mcp.output();
+      console.log("  OK");
+    } catch {
+      console.log("  Failed (register manually)");
+    }
+  }
 
-  3. Register MCP server:
-     claude mcp add agent-recall -- ${INSTALL_DIR}/agent-recall mcp`);
+  await setupHook();
+
+  console.log(`\nInstalled to:\n  ${INSTALL_DIR}/agent-recall`);
+
+  if (!claudeFound) {
+    console.log(`
+Manual setup needed:
+  Register MCP server:
+  claude mcp add agent-recall -s user -- ${INSTALL_DIR}/agent-recall mcp`);
+  }
 }
 
 function detectOS(): string {
@@ -88,7 +117,7 @@ async function downloadAndVerify(
   const checksums = await checksumsResp.text();
   const expectedLine = checksums
     .split("\n")
-    .find((line) => line.includes(assetName));
+    .find((line) => line.endsWith(`  ${assetName}`));
   if (!expectedLine) {
     throw new Error(`Checksum not found for ${assetName}`);
   }
@@ -105,6 +134,41 @@ async function downloadAndVerify(
       `Checksum mismatch for ${name}!\n  Expected: ${expected}\n  Actual:   ${actual}`
     );
   }
+  console.log("  OK");
+}
+
+async function setupHook(): Promise<void> {
+  const settingsPath = `${INSTALL_DIR}/settings.json`;
+  const hookCommand = "$HOME/.claude/agent-recall import 2>/dev/null";
+
+  let settings: Record<string, unknown> = {};
+  try {
+    settings = JSON.parse(await Deno.readTextFile(settingsPath));
+  } catch {
+    // settings.json doesn't exist yet
+  }
+
+  // deno-lint-ignore no-explicit-any
+  const hooks = (settings.hooks ?? {}) as Record<string, any[]>;
+  const sessionEnd = (hooks.SessionEnd ?? []) as Array<{ hooks?: Array<{ command?: string }> }>;
+
+  // Check if hook already exists
+  const alreadyConfigured = sessionEnd.some((entry) =>
+    entry.hooks?.some((h) => h.command?.includes("agent-recall"))
+  );
+  if (alreadyConfigured) {
+    console.log("Hook already configured.");
+    return;
+  }
+
+  console.log("Setting up auto-archive hook...");
+  sessionEnd.push({
+    hooks: [{ type: "command", command: hookCommand, async: true }],
+  });
+  hooks.SessionEnd = sessionEnd;
+  settings.hooks = hooks;
+
+  await Deno.writeTextFile(settingsPath, JSON.stringify(settings, null, 2) + "\n");
   console.log("  OK");
 }
 

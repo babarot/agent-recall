@@ -64,7 +64,7 @@ Add to `~/.claude/settings.json`:
 Register the MCP server so agents can search past sessions autonomously:
 
 ```bash
-claude mcp add agent-recall -- ~/.claude/agent-recall mcp
+claude mcp add agent-recall -s user -- ~/.claude/agent-recall mcp
 ```
 
 This exposes 4 tools to the agent:
