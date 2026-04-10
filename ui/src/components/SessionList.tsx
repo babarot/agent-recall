@@ -14,7 +14,7 @@ export function SessionList({ onSelect }: { onSelect: (id: string) => void }) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [query, setQuery] = useState("");
   const [project, setProject] = useState("");
-  const [projects, setProjects] = useState<string[]>([]);
+  const [projects, setProjects] = useState<Array<{ display: string; value: string }>>([]);
   const [loading, setLoading] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -24,7 +24,10 @@ export function SessionList({ onSelect }: { onSelect: (id: string) => void }) {
     fetch("/api/stats")
       .then((r) => r.json())
       .then((data) => {
-        setProjects(data.byProject?.map((p: { project: string }) => p.project) ?? []);
+        setProjects(data.byProject?.map((p: { project: string; projectPath: string }) => ({
+          display: p.project,
+          value: p.projectPath,
+        })) ?? []);
       });
   }, []);
 
@@ -114,7 +117,7 @@ export function SessionList({ onSelect }: { onSelect: (id: string) => void }) {
           >
             <option value="">All projects</option>
             {projects.map((p) => (
-              <option key={p} value={p}>{p}</option>
+              <option key={p.value} value={p.value}>{p.display}</option>
             ))}
           </select>
           <button

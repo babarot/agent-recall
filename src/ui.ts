@@ -188,6 +188,7 @@ function handleAPI(db: VaultDB, url: URL): Response {
       totalMessages: s.totalMessages,
       byProject: s.byProject.map((p) => ({
         project: displayProject(p.projectPath, p.project),
+        projectPath: p.projectPath || p.project,
         sessions: p.sessions,
         messages: p.messages,
       })),

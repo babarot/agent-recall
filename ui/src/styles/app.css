@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-@theme {
+@theme inline {
   --color-bg: var(--ui-bg);
   --color-bg-secondary: var(--ui-bg-secondary);
   --color-bg-tertiary: var(--ui-bg-tertiary);
