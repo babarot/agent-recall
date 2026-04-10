@@ -1,7 +1,11 @@
 import { useState, useEffect, useCallback } from "preact/hooks";
+import { Settings as SettingsIcon } from "lucide-preact";
 import { SessionList } from "./components/SessionList";
 import { ChatView } from "./components/ChatView";
 import { StatsView } from "./components/StatsView";
+import { SettingsDialog } from "./components/SettingsDialog";
+import { loadSettings, saveSettings, applyTheme } from "./lib/settings";
+import type { Settings } from "./lib/settings";
 
 type View = "list" | "chat" | "stats";
 
@@ -17,6 +21,13 @@ export function App() {
   const [view, setView] = useState<View>(() => parseRoute().view);
   const [selectedSession, setSelectedSession] = useState<string | null>(() => parseRoute().sessionId);
   const [stats, setStats] = useState<unknown>(null);
+  const [settings, setSettings] = useState<Settings>(loadSettings);
+  const [showSettings, setShowSettings] = useState(false);
+
+  // Apply theme on mount and change
+  useEffect(() => {
+    applyTheme(settings.theme);
+  }, [settings.theme]);
 
   useEffect(() => {
     fetch("/api/stats")
@@ -24,7 +35,6 @@ export function App() {
       .then(setStats);
   }, []);
 
-  // Listen for browser back/forward
   useEffect(() => {
     const onPopState = () => {
       const route = parseRoute();
@@ -33,6 +43,15 @@ export function App() {
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  // Esc closes settings
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setShowSettings(false);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
   }, []);
 
   const navigate = useCallback((path: string, view: View, sessionId: string | null) => {
@@ -53,6 +72,12 @@ export function App() {
     navigate("/stats", "stats", null);
   };
 
+  const handleSettingsChange = (newSettings: Settings) => {
+    setSettings(newSettings);
+    saveSettings(newSettings);
+    applyTheme(newSettings.theme);
+  };
+
   return (
     <>
       <header class="h-12 shrink-0 flex items-center justify-between px-5 border-b border-border bg-bg-secondary">
@@ -62,13 +87,20 @@ export function App() {
         >
           agent-recall
         </button>
-        <nav class="flex gap-1">
+        <nav class="flex gap-1 items-center">
           <NavButton active={view === "list" || view === "chat"} onClick={handleBack}>
             Sessions
           </NavButton>
           <NavButton active={view === "stats"} onClick={handleStats}>
             Stats
           </NavButton>
+          <button
+            onClick={() => setShowSettings(true)}
+            class="ml-2 p-1.5 text-text-secondary hover:text-text hover:bg-bg-tertiary rounded-md transition-colors cursor-pointer"
+            title="Settings"
+          >
+            <SettingsIcon size={16} />
+          </button>
         </nav>
       </header>
 
@@ -77,12 +109,20 @@ export function App() {
           <SessionList onSelect={handleSelectSession} />
         )}
         {view === "chat" && selectedSession && (
-          <ChatView sessionId={selectedSession} onBack={handleBack} />
+          <ChatView sessionId={selectedSession} onBack={handleBack} settings={settings} />
         )}
         {view === "stats" && (
           <StatsView data={stats} />
         )}
       </main>
+
+      {showSettings && (
+        <SettingsDialog
+          settings={settings}
+          onChange={handleSettingsChange}
+          onClose={() => setShowSettings(false)}
+        />
+      )}
     </>
   );
 }

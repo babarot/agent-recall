@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useMemo } from "preact/hooks";
 import { marked } from "marked";
 import { groupMessages, renderImages, stripAnsi } from "../lib/chat-utils";
-import type { Message } from "../lib/chat-utils";
+import type { Message, DisplayMessage } from "../lib/chat-utils";
+import type { Settings } from "../lib/settings";
 
 interface SessionData {
   session: {
@@ -14,7 +15,7 @@ interface SessionData {
   messages: Message[];
 }
 
-export function ChatView({ sessionId, onBack }: { sessionId: string; onBack: () => void }) {
+export function ChatView({ sessionId, onBack, settings }: { sessionId: string; onBack: () => void; settings: Settings }) {
   const [data, setData] = useState<SessionData | null>(null);
   const [copied, setCopied] = useState(false);
   const [zoomImage, setZoomImage] = useState<string | null>(null);
@@ -98,21 +99,28 @@ export function ChatView({ sessionId, onBack }: { sessionId: string; onBack: () 
         }}
       >
         <div class="max-w-3xl mx-auto space-y-4">
-          {groupMessages(data.messages).map((msg, i) =>
-            msg.type === "bash" ? (
-              <BashBubble key={i} command={msg.command} stdout={msg.stdout} stderr={msg.stderr} />
-            ) : msg.type === "command" ? (
-              <CommandBubble key={i} name={msg.name} args={msg.args} stdout={msg.stdout} />
-            ) : msg.type === "thinking" ? (
-              <ThinkingBubble key={i} content={msg.content} />
-            ) : msg.type === "tool_use" ? (
-              <ToolUseBubble key={i} toolName={msg.toolName} toolInput={msg.toolInput} />
-            ) : msg.type === "tool_result" ? (
-              <ToolResultBubble key={i} content={msg.content} />
-            ) : (
-              <ChatBubble key={i} sessionId={data.session.sessionId} uuid={msg.uuid} role={msg.role} content={msg.content} />
-            )
-          )}
+          {groupMessages(data.messages)
+            .filter((msg) => {
+              if (msg.type === "thinking" && !settings.showThinking) return false;
+              if (msg.type === "tool_use" && !settings.showToolUse) return false;
+              if (msg.type === "tool_result" && !settings.showToolResult) return false;
+              return true;
+            })
+            .map((msg, i) =>
+              msg.type === "bash" ? (
+                <BashBubble key={i} command={msg.command} stdout={msg.stdout} stderr={msg.stderr} />
+              ) : msg.type === "command" ? (
+                <CommandBubble key={i} name={msg.name} args={msg.args} stdout={msg.stdout} />
+              ) : msg.type === "thinking" ? (
+                <ThinkingBubble key={i} content={msg.content} />
+              ) : msg.type === "tool_use" ? (
+                <ToolUseBubble key={i} toolName={msg.toolName} toolInput={msg.toolInput} />
+              ) : msg.type === "tool_result" ? (
+                <ToolResultBubble key={i} content={msg.content} />
+              ) : (
+                <ChatBubble key={i} sessionId={data.session.sessionId} uuid={msg.uuid} role={msg.role} content={msg.content} />
+              )
+            )}
         </div>
       </div>
 
