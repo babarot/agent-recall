@@ -267,8 +267,8 @@ function handleRequest(
 
 // --- stdio transport (NDJSON) ---
 
-async function main(): Promise<void> {
-  const db = new VaultDB(DEFAULT_DB_PATH);
+export async function runMcp(dbPath: string): Promise<void> {
+  const db = new VaultDB(dbPath);
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -315,4 +315,6 @@ async function main(): Promise<void> {
   }
 }
 
-main();
+if (import.meta.main) {
+  runMcp(DEFAULT_DB_PATH);
+}

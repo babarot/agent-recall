@@ -17,18 +17,20 @@ Claude Code stores conversations as JSONL files under `~/.claude/projects/`, but
 
 ## Install
 
+Downloads precompiled binaries from GitHub Releases. No runtime dependencies needed.
+
 ```bash
-# Build from source (requires Deno 2.x)
+curl -fsSL https://raw.githubusercontent.com/babarot/agent-recall/main/bin/install.sh | bash
+```
+
+### Build from source
+
+Requires [Deno](https://deno.com/) 2.x.
+
+```bash
 git clone https://github.com/babarot/agent-recall.git
 cd agent-recall
-
-# CLI
-deno task compile
-cp agent-recall ~/.claude/agent-recall
-
-# MCP server
-deno task compile:mcp
-cp agent-recall-mcp ~/.claude/agent-recall-mcp
+deno task compile && cp agent-recall ~/.claude/agent-recall
 ```
 
 ### Hook Setup (auto-archive on session exit)
@@ -58,7 +60,7 @@ Add to `~/.claude/settings.json`:
 Register the MCP server so agents can search past sessions autonomously:
 
 ```bash
-claude mcp add agent-recall -- ~/.claude/agent-recall-mcp
+claude mcp add agent-recall -- ~/.claude/agent-recall mcp
 ```
 
 This exposes 4 tools to the agent:
@@ -204,16 +206,16 @@ messages_fts (content)  -- FTS5, porter unicode61 tokenizer
 ```bash
 # CLI
 deno task dev -- search "query"
+
+# MCP server (stdio)
+deno task dev -- mcp
+
+# Compile and install
 deno task compile
 deno task install
 
-# MCP server
-deno task mcp                    # run MCP server in dev mode
-deno task compile:mcp
-deno task install:mcp
-
 # Tests
-deno test src/ --allow-read --allow-write --allow-env=HOME
+deno task test
 ```
 
 ## Tech Stack

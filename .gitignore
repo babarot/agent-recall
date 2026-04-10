@@ -1,4 +1,4 @@
 agent-recall
-agent-recall-mcp
+dist/
 coverage/
 *.db

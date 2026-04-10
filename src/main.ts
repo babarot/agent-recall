@@ -5,8 +5,9 @@ import { runSearch } from "./search.ts";
 import { runList } from "./list.ts";
 import { runExport } from "./export.ts";
 import { runStats } from "./stats.ts";
+import { runMcp } from "./mcp.ts";
 
-const USAGE = `agent-recall - Archive and search Claude Code sessions
+const USAGE = `agent-recall - Archive and search coding agent sessions
 
 Usage:
   agent-recall import [options]       Import sessions into the vault
@@ -14,6 +15,7 @@ Usage:
   agent-recall list [options]         List archived sessions
   agent-recall export <id> [options]  Export a session
   agent-recall stats [options]        Show archive statistics
+  agent-recall mcp                    Start MCP server (stdio transport)
 
 Global Options:
   --db <path>     Database path (default: ~/.claude/vault.db)
@@ -41,7 +43,7 @@ Export Options:
   --output <file> Write to file instead of stdout
 `;
 
-function main(): void {
+async function main(): Promise<void> {
   const args = parseArgs(Deno.args, {
     string: ["db", "session", "project", "format", "from", "to", "output"],
     boolean: ["help", "dry-run"],
@@ -114,6 +116,10 @@ function main(): void {
         dbPath,
         project: args.project as string | undefined,
       });
+      break;
+
+    case "mcp":
+      await runMcp(dbPath);
       break;
 
     default:

@@ -6,10 +6,12 @@
   },
   "tasks": {
     "dev": "deno run --allow-read --allow-write --allow-env=HOME src/main.ts",
-    "mcp": "deno run --allow-read --allow-write --allow-env=HOME src/mcp.ts",
+    "test": "deno test src/ --allow-read --allow-write --allow-env=HOME",
     "compile": "deno compile --allow-read --allow-write --allow-env=HOME -o agent-recall src/main.ts",
-    "compile:mcp": "deno compile --allow-read --allow-write --allow-env=HOME -o agent-recall-mcp src/mcp.ts",
-    "install": "deno task compile && cp agent-recall ~/.claude/agent-recall",
-    "install:mcp": "deno task compile:mcp && cp agent-recall-mcp ~/.claude/agent-recall-mcp"
+    "compile:macos-arm": "deno compile --target aarch64-apple-darwin --allow-read --allow-write --allow-env=HOME -o dist/agent-recall-darwin-arm64 src/main.ts",
+    "compile:macos-x86": "deno compile --target x86_64-apple-darwin --allow-read --allow-write --allow-env=HOME -o dist/agent-recall-darwin-x86_64 src/main.ts",
+    "compile:linux-arm": "deno compile --target aarch64-unknown-linux-gnu --allow-read --allow-write --allow-env=HOME -o dist/agent-recall-linux-arm64 src/main.ts",
+    "compile:linux-x86": "deno compile --target x86_64-unknown-linux-gnu --allow-read --allow-write --allow-env=HOME -o dist/agent-recall-linux-x86_64 src/main.ts",
+    "install": "deno task compile && cp agent-recall ~/.claude/agent-recall"
   }
 }
