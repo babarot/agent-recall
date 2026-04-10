@@ -101,7 +101,10 @@ export function runImport(options: ImportOptions): void {
             sessionId,
             uuid: msg.uuid,
             role: msg.role,
+            blockType: msg.blockType,
             content: msg.content,
+            toolName: msg.toolName,
+            toolInput: msg.toolInput,
             timestamp: msg.timestamp,
             turnIndex: msg.turnIndex,
           });
@@ -165,7 +168,10 @@ export function runImport(options: ImportOptions): void {
           sessionId: parsed.meta.sessionId,
           uuid: msg.uuid,
           role: msg.role,
+          blockType: msg.blockType,
           content: msg.content,
+          toolName: msg.toolName,
+          toolInput: msg.toolInput,
           timestamp: msg.timestamp,
           turnIndex: msg.turnIndex,
         });

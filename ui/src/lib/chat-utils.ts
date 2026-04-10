@@ -1,11 +1,17 @@
 export interface Message {
   uuid: string;
   role: string;
+  blockType?: string;
   content: string;
+  toolName?: string;
+  toolInput?: string;
 }
 
 export type DisplayMessage =
   | { type: "chat"; uuid: string; role: string; content: string }
+  | { type: "thinking"; content: string }
+  | { type: "tool_use"; toolName: string; toolInput: string }
+  | { type: "tool_result"; content: string }
   | { type: "bash"; command: string; stdout: string; stderr: string }
   | { type: "command"; name: string; args: string; stdout: string };
 
@@ -110,7 +116,24 @@ export function groupMessages(messages: Message[]): DisplayMessage[] {
       continue;
     }
 
-    // Regular message
+    // Block type handling
+    if (msg.blockType === "thinking") {
+      result.push({ type: "thinking", content });
+      i++;
+      continue;
+    }
+    if (msg.blockType === "tool_use") {
+      result.push({ type: "tool_use", toolName: msg.toolName ?? content, toolInput: msg.toolInput ?? "" });
+      i++;
+      continue;
+    }
+    if (msg.blockType === "tool_result") {
+      result.push({ type: "tool_result", content });
+      i++;
+      continue;
+    }
+
+    // Regular text message
     result.push({ type: "chat", uuid: msg.uuid, role: msg.role, content });
     i++;
   }

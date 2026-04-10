@@ -67,11 +67,16 @@ export interface JournalLine {
   subtype?: string;
 }
 
+export type BlockType = "text" | "thinking" | "tool_use" | "tool_result";
+
 /** Extracted message ready for DB insertion */
 export interface ExtractedMessage {
   uuid: string;
   role: "user" | "assistant";
+  blockType: BlockType;
   content: string;
+  toolName?: string;
+  toolInput?: string;
   timestamp: string;
   turnIndex: number;
 }

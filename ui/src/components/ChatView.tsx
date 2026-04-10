@@ -103,6 +103,12 @@ export function ChatView({ sessionId, onBack }: { sessionId: string; onBack: () 
               <BashBubble key={i} command={msg.command} stdout={msg.stdout} stderr={msg.stderr} />
             ) : msg.type === "command" ? (
               <CommandBubble key={i} name={msg.name} args={msg.args} stdout={msg.stdout} />
+            ) : msg.type === "thinking" ? (
+              <ThinkingBubble key={i} content={msg.content} />
+            ) : msg.type === "tool_use" ? (
+              <ToolUseBubble key={i} toolName={msg.toolName} toolInput={msg.toolInput} />
+            ) : msg.type === "tool_result" ? (
+              <ToolResultBubble key={i} content={msg.content} />
             ) : (
               <ChatBubble key={i} sessionId={data.session.sessionId} uuid={msg.uuid} role={msg.role} content={msg.content} />
             )
@@ -116,6 +122,87 @@ export function ChatView({ sessionId, onBack }: { sessionId: string; onBack: () 
           <img src={zoomImage} alt="Zoomed" />
         </div>
       )}
+    </div>
+  );
+}
+
+function ThinkingBubble({ content }: { content: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div class="flex justify-start">
+      <div class="max-w-[85%]">
+        <button
+          onClick={() => setOpen(!open)}
+          class="flex items-center gap-2 text-xs text-text-muted hover:text-text-secondary transition-colors cursor-pointer py-1"
+        >
+          <span class="text-text-muted">{open ? "▼" : "▶"}</span>
+          Thinking...
+        </button>
+        {open && (
+          <div class="mt-1 px-4 py-3 bg-bg-secondary border border-border rounded-2xl rounded-bl-sm text-xs text-text-secondary whitespace-pre-wrap leading-relaxed">
+            {content}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ToolUseBubble({ toolName, toolInput }: { toolName: string; toolInput: string }) {
+  const [open, setOpen] = useState(false);
+  let inputPreview = "";
+  try {
+    const parsed = JSON.parse(toolInput);
+    if (parsed.command) inputPreview = parsed.command;
+    else if (parsed.pattern) inputPreview = parsed.pattern;
+    else if (parsed.file_path) inputPreview = parsed.file_path;
+    else if (parsed.query) inputPreview = parsed.query;
+    else if (parsed.url) inputPreview = parsed.url;
+  } catch { /* ignore */ }
+
+  return (
+    <div class="flex justify-start">
+      <div class="max-w-[85%]">
+        <button
+          onClick={() => setOpen(!open)}
+          class="flex items-center gap-2 text-xs py-1 cursor-pointer"
+        >
+          <span class="text-text-muted">{open ? "▼" : "▶"}</span>
+          <span class="px-2 py-0.5 bg-bg-tertiary border border-border rounded text-accent font-mono">{toolName}</span>
+          {inputPreview && <span class="text-text-muted truncate max-w-xs">{inputPreview}</span>}
+        </button>
+        {open && toolInput && (
+          <div class="mt-1">
+            <pre class="!p-3 !m-0 !rounded-2xl !rounded-bl-sm text-xs overflow-x-auto"><code>{JSON.stringify(JSON.parse(toolInput), null, 2)}</code></pre>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ToolResultBubble({ content }: { content: string }) {
+  const [open, setOpen] = useState(false);
+  if (!content) return null;
+  const preview = content.length > 80 ? content.slice(0, 80) + "..." : content;
+
+  return (
+    <div class="flex justify-start">
+      <div class="max-w-[85%]">
+        <button
+          onClick={() => setOpen(!open)}
+          class="flex items-center gap-2 text-xs text-text-muted hover:text-text-secondary transition-colors cursor-pointer py-1"
+        >
+          <span>{open ? "▼" : "▶"}</span>
+          <span class="text-text-muted">Result:</span>
+          {!open && <span class="truncate max-w-md">{preview}</span>}
+        </button>
+        {open && (
+          <div class="mt-1">
+            <pre class="!p-3 !m-0 !rounded-2xl !rounded-bl-sm text-xs overflow-x-auto whitespace-pre-wrap"><code>{content}</code></pre>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

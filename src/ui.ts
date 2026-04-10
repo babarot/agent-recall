@@ -175,7 +175,10 @@ function handleAPI(db: VaultDB, url: URL): Response {
       messages: messages.map((m) => ({
         uuid: m.uuid,
         role: m.role,
+        blockType: m.blockType,
         content: m.content,
+        toolName: m.toolName,
+        toolInput: m.toolInput,
       })),
     });
   }

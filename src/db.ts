@@ -100,20 +100,26 @@ export class VaultDB {
     sessionId: string;
     uuid: string;
     role: string;
+    blockType?: string;
     content: string;
+    toolName?: string;
+    toolInput?: string;
     timestamp: string;
     turnIndex: number;
   }): void {
     this.db
       .prepare(
-        `INSERT OR IGNORE INTO messages (session_id, uuid, role, content, timestamp, turn_index)
-       VALUES (?, ?, ?, ?, ?, ?)`
+        `INSERT OR IGNORE INTO messages (session_id, uuid, role, block_type, content, tool_name, tool_input, timestamp, turn_index)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         params.sessionId,
         params.uuid,
         params.role,
+        params.blockType ?? "text",
         params.content,
+        params.toolName ?? null,
+        params.toolInput ?? null,
         params.timestamp,
         params.turnIndex
       );
@@ -303,7 +309,10 @@ export class VaultDB {
     messages: Array<{
       uuid: string;
       role: string;
+      blockType: string;
       content: string;
+      toolName: string | null;
+      toolInput: string | null;
       timestamp: string;
       turnIndex: number;
     }>;
@@ -331,14 +340,17 @@ export class VaultDB {
 
     const messages = this.db
       .prepare(
-        `SELECT uuid, role, content, timestamp, turn_index as turnIndex
+        `SELECT uuid, role, block_type as blockType, content, tool_name as toolName, tool_input as toolInput, timestamp, turn_index as turnIndex
          FROM messages WHERE session_id = ?
          ORDER BY turn_index`
       )
       .all(session.sessionId) as Array<{
       uuid: string;
       role: string;
+      blockType: string;
       content: string;
+      toolName: string | null;
+      toolInput: string | null;
       timestamp: string;
       turnIndex: number;
     }>;
