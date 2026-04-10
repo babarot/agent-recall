@@ -21,7 +21,16 @@ interface SessionData {
 export function ChatView({ sessionId, onBack }: { sessionId: string; onBack: () => void }) {
   const [data, setData] = useState<SessionData | null>(null);
   const [copied, setCopied] = useState(false);
+  const [zoomImage, setZoomImage] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setZoomImage(null);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
 
   useEffect(() => {
     fetch(`/api/sessions/${sessionId}`)
@@ -83,7 +92,16 @@ export function ChatView({ sessionId, onBack }: { sessionId: string; onBack: () 
       </div>
 
       {/* Chat messages */}
-      <div ref={scrollRef} class="flex-1 overflow-y-auto p-4">
+      <div
+        ref={scrollRef}
+        class="flex-1 overflow-y-auto p-4"
+        onClick={(e) => {
+          const target = e.target as HTMLElement;
+          if (target.tagName === "IMG" && target.closest(".markdown-content")) {
+            setZoomImage((target as HTMLImageElement).src);
+          }
+        }}
+      >
         <div class="max-w-3xl mx-auto space-y-4">
           {groupMessages(data.messages).map((msg, i) =>
             msg.type === "bash" ? (
@@ -96,6 +114,13 @@ export function ChatView({ sessionId, onBack }: { sessionId: string; onBack: () 
           )}
         </div>
       </div>
+
+      {/* Image zoom overlay */}
+      {zoomImage && (
+        <div class="image-overlay" onClick={() => setZoomImage(null)}>
+          <img src={zoomImage} alt="Zoomed" />
+        </div>
+      )}
     </div>
   );
 }

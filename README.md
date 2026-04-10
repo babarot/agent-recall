@@ -186,18 +186,29 @@ Opens `http://localhost:6276` with session browser, chat viewer, and search.
 
 ## Architecture
 
-```
-~/.claude/projects/*/*.jsonl
-         |
-         v
-    [parser.ts]         Parse JSONL line by line
-         |               Extract text blocks from user/assistant messages
-         |               Filter out tool_use, tool_result, thinking, system
-         v
-    [SQLite + FTS5]     ~/.claude/vault.db
-         |
-         v
-    search / list / export / stats
+agent-recall is a single binary (`~/.claude/agent-recall`) with three interfaces:
+
+| Interface | How it starts | Purpose |
+|-----------|--------------|---------|
+| **Hook** | Automatically on every Claude Code session exit (`SessionEnd` hook) | Archives sessions to SQLite |
+| **MCP** | Automatically when Claude Code starts (registered via `claude mcp add`) | Lets agents search past sessions autonomously |
+| **CLI** | Manually by the user (`agent-recall search ...`) | Search, list, export, stats from the terminal |
+| **Web UI** | Manually by the user (`agent-recall ui`) | Browse sessions and chat history in the browser |
+
+```mermaid
+flowchart TD
+    JSONL["~/.claude/projects/*/*.jsonl"] -->|SessionEnd hook<br/>automatic| Parser["parser.ts<br/>Extract text, filter noise"]
+    Parser --> DB["SQLite + FTS5<br/>~/.claude/vault.db"]
+    DB --> CLI["CLI<br/>agent-recall search/list/export/stats"]
+    DB --> MCP["MCP Server<br/>agent-recall mcp<br/><i>auto-started by Claude Code</i>"]
+    DB --> UI["Web UI<br/>agent-recall ui<br/><i>http://localhost:6276</i>"]
+
+    style JSONL fill:#1c2128,stroke:#30363d,color:#e6edf3
+    style Parser fill:#1c2128,stroke:#30363d,color:#e6edf3
+    style DB fill:#1c2f50,stroke:#58a6ff,color:#e6edf3
+    style CLI fill:#21262d,stroke:#30363d,color:#e6edf3
+    style MCP fill:#21262d,stroke:#30363d,color:#e6edf3
+    style UI fill:#21262d,stroke:#30363d,color:#e6edf3
 ```
 
 ### DB Schema

@@ -180,7 +180,28 @@ p code {
 }
 .markdown-content img {
   max-width: 100%;
+  max-height: 400px;
+  object-fit: contain;
   border-radius: 6px;
+  cursor: zoom-in;
+}
+
+/* Fullscreen image overlay */
+.image-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+}
+.image-overlay img {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: 8px;
 }
 /* User bubble code blocks */
 .bg-user-bubble .markdown-content code {
