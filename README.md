@@ -1,6 +1,6 @@
 # agent-recall
 
-A CLI tool that archives Claude Code session history into SQLite for full-text search.
+A CLI + MCP server that archives coding agent session history into SQLite for full-text search.
 
 ## Why
 
@@ -12,6 +12,7 @@ Claude Code stores conversations as JSONL files under `~/.claude/projects/`, but
 - **Full-text search** -- Fast search powered by SQLite FTS5 with Porter stemmer
 - **Noise filtering** -- Strips tool_use / tool_result / thinking, keeping only conversation text (~7% of raw data)
 - **Idempotent** -- UUID-based deduplication; safe to import repeatedly
+- **MCP server** -- Agents can autonomously search past sessions via `recall_search`, `recall_list`, `recall_export`, `recall_stats` tools
 - **Zero dependencies** -- Single binary via `deno compile`; no external services
 
 ## Install
@@ -20,11 +21,17 @@ Claude Code stores conversations as JSONL files under `~/.claude/projects/`, but
 # Build from source (requires Deno 2.x)
 git clone https://github.com/babarot/agent-recall.git
 cd agent-recall
+
+# CLI
 deno task compile
 cp agent-recall ~/.claude/agent-recall
+
+# MCP server
+deno task compile:mcp
+cp agent-recall-mcp ~/.claude/agent-recall-mcp
 ```
 
-### Hook Setup
+### Hook Setup (auto-archive on session exit)
 
 Add to `~/.claude/settings.json`:
 
@@ -45,6 +52,25 @@ Add to `~/.claude/settings.json`:
   }
 }
 ```
+
+### MCP Server Setup (agent-autonomous search)
+
+Register the MCP server so agents can search past sessions autonomously:
+
+```bash
+claude mcp add agent-recall -- ~/.claude/agent-recall-mcp
+```
+
+This exposes 4 tools to the agent:
+
+| Tool | Description |
+|------|-------------|
+| `recall_search` | Full-text search across past sessions |
+| `recall_list` | List archived sessions |
+| `recall_export` | Export a specific session's full conversation |
+| `recall_stats` | Show archive statistics |
+
+Agents will call these tools on their own when they need context from past conversations.
 
 ## Usage
 
@@ -176,14 +202,18 @@ messages_fts (content)  -- FTS5, porter unicode61 tokenizer
 ## Development
 
 ```bash
-# Run in development
+# CLI
 deno task dev -- search "query"
-
-# Compile to binary
 deno task compile
-
-# Compile and install to ~/.claude/
 deno task install
+
+# MCP server
+deno task mcp                    # run MCP server in dev mode
+deno task compile:mcp
+deno task install:mcp
+
+# Tests
+deno test src/ --allow-read --allow-write --allow-env=HOME
 ```
 
 ## Tech Stack

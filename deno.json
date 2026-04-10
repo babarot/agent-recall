@@ -6,7 +6,10 @@
   },
   "tasks": {
     "dev": "deno run --allow-read --allow-write --allow-env=HOME src/main.ts",
+    "mcp": "deno run --allow-read --allow-write --allow-env=HOME src/mcp.ts",
     "compile": "deno compile --allow-read --allow-write --allow-env=HOME -o agent-recall src/main.ts",
-    "install": "deno task compile && cp agent-recall ~/.claude/agent-recall"
+    "compile:mcp": "deno compile --allow-read --allow-write --allow-env=HOME -o agent-recall-mcp src/mcp.ts",
+    "install": "deno task compile && cp agent-recall ~/.claude/agent-recall",
+    "install:mcp": "deno task compile:mcp && cp agent-recall-mcp ~/.claude/agent-recall-mcp"
   }
 }
