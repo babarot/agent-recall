@@ -124,6 +124,12 @@ export function SettingsDialog({ settings, onChange, onClose }: Props) {
               checked={settings.showMeta}
               onChange={(v) => update({ showMeta: v })}
             />
+            <Toggle
+              label="Start at bottom"
+              description="Open sessions scrolled to the latest message instead of the first"
+              checked={settings.startAtBottom}
+              onChange={(v) => update({ startAtBottom: v })}
+            />
           </div>
         </section>
       </div>

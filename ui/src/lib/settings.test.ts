@@ -27,6 +27,7 @@ describe("loadSettings", () => {
     expect(s.showToolUse).toBe(true);
     expect(s.showToolResult).toBe(true);
     expect(s.showMeta).toBe(true);
+    expect(s.startAtBottom).toBe(false);
   });
 
   it("loads saved settings", () => {
@@ -66,6 +67,27 @@ describe("loadSettings", () => {
     expect(s.showMeta).toBe(false);
   });
 
+  it("backfills startAtBottom when it is missing from an older saved shape", () => {
+    // Users with saved settings from before startAtBottom existed should
+    // get the default (false) without losing their other prefs.
+    localStorageMock.setItem("agent-recall-settings", JSON.stringify({
+      theme: "dark",
+      showThinking: false,
+    }));
+    const s = loadSettings();
+    expect(s.startAtBottom).toBe(false);
+    expect(s.theme).toBe("dark");
+    expect(s.showThinking).toBe(false);
+  });
+
+  it("honors an explicitly enabled startAtBottom", () => {
+    localStorageMock.setItem("agent-recall-settings", JSON.stringify({
+      startAtBottom: true,
+    }));
+    const s = loadSettings();
+    expect(s.startAtBottom).toBe(true);
+  });
+
   it("handles corrupted JSON gracefully", () => {
     localStorageMock.setItem("agent-recall-settings", "not json");
     const s = loadSettings();
@@ -82,6 +104,7 @@ describe("saveSettings", () => {
       showToolUse: true,
       showToolResult: false,
       showMeta: true,
+      startAtBottom: true,
     };
     saveSettings(settings);
     const raw = localStorageMock.getItem("agent-recall-settings");
@@ -91,6 +114,7 @@ describe("saveSettings", () => {
     expect(parsed.showThinking).toBe(false);
     expect(parsed.showToolResult).toBe(false);
     expect(parsed.showMeta).toBe(true);
+    expect(parsed.startAtBottom).toBe(true);
   });
 
   it("roundtrips through load", () => {
@@ -101,6 +125,7 @@ describe("saveSettings", () => {
       showToolUse: false,
       showToolResult: true,
       showMeta: false,
+      startAtBottom: true,
     };
     saveSettings(settings);
     const loaded = loadSettings();

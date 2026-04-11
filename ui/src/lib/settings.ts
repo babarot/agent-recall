@@ -7,6 +7,7 @@ export interface Settings {
   showToolUse: boolean;
   showToolResult: boolean;
   showMeta: boolean;
+  startAtBottom: boolean;
 }
 
 const STORAGE_KEY = "agent-recall-settings";
@@ -18,6 +19,7 @@ const DEFAULTS: Settings = {
   showToolUse: true,
   showToolResult: true,
   showMeta: true,
+  startAtBottom: false,
 };
 
 export function loadSettings(): Settings {

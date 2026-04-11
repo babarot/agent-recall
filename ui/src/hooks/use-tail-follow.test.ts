@@ -152,4 +152,41 @@ describe("useTailFollow", () => {
     expect(el.scrollTop).toBe(200);
     unmount();
   });
+
+  it("setFollow(true) causes the next data change to scroll to bottom", () => {
+    // Used by the initial-load path: the user isn't necessarily "at bottom"
+    // yet, but the caller wants to start the session there.
+    const el = makeScrollEl({ scrollHeight: 1000, scrollTop: 0, clientHeight: 500 });
+    const { result, rerender, unmount } = hookWith(el, 0);
+    result.current.setFollow(true);
+    rerender({ data: 1 });
+    expect(el.scrollTop).toBe(1000);
+    unmount();
+  });
+
+  it("setFollow(false) suppresses follow even if markIfAtBottom previously set it", () => {
+    // Guarantees the caller can reset stale follow state across session
+    // switches — otherwise a prior "at bottom" mark would yank the new
+    // session to the bottom.
+    const el = makeScrollEl({ scrollHeight: 1000, scrollTop: 500, clientHeight: 500 });
+    const { result, rerender, unmount } = hookWith(el, 0);
+    result.current.markIfAtBottom(); // follow = true
+    result.current.setFollow(false); // explicitly cleared
+    rerender({ data: 1 });
+    expect(el.scrollTop).toBe(500);
+    unmount();
+  });
+
+  it("setFollow bumps the shared seq counter", () => {
+    // Initial load and SSE refresh share one seq regime; setFollow must
+    // invalidate any older in-flight fetch by advancing the counter.
+    const el = makeScrollEl({ scrollHeight: 1000, scrollTop: 500, clientHeight: 500 });
+    const { result, unmount } = hookWith(el, 0);
+    const a = result.current.markIfAtBottom();
+    const b = result.current.setFollow(true);
+    expect(b).toBe(a + 1);
+    expect(result.current.isCurrentSeq(a)).toBe(false);
+    expect(result.current.isCurrentSeq(b)).toBe(true);
+    unmount();
+  });
 });

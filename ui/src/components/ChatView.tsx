@@ -48,17 +48,39 @@ export function ChatView({ sessionId, onBack, settings }: { sessionId: string; o
   // Tail-follow machinery: handles "stick to bottom on live updates",
   // cancels on user scroll-up, survives image layout shifts, and guards
   // against out-of-order fetch responses.
-  const { markIfAtBottom, isCurrentSeq } = useTailFollow(scrollRef, data);
+  const { markIfAtBottom, isCurrentSeq, setFollow } = useTailFollow(scrollRef, data);
 
   useKeyboardShortcut("Escape", () => setZoomImage(null));
 
   useEffect(() => {
-    fetch(`/api/sessions/${sessionId}`)
+    const controller = new AbortController();
+    // Decide follow intent up front. setFollow bumps the shared seq so any
+    // in-flight SSE fetch (from a previous session or from the gap before
+    // this effect ran) becomes stale, and primes followRef so the
+    // post-render effect in useTailFollow does the right thing after setData.
+    const seq = setFollow(settings.startAtBottom);
+    fetch(`/api/sessions/${sessionId}`, { signal: controller.signal })
       .then((r) => r.json())
       .then((d) => {
+        if (controller.signal.aborted) return;
+        // If a newer fetch (SSE refresh or session switch) has bumped the
+        // seq while we were loading, drop our stale snapshot instead of
+        // overwriting the fresher data.
+        if (!isCurrentSeq(seq)) return;
         setData(d);
-        setTimeout(() => scrollRef.current?.scrollTo(0, 0), 0);
+        if (!settings.startAtBottom) {
+          setTimeout(() => scrollRef.current?.scrollTo(0, 0), 0);
+        }
+      })
+      .catch((err) => {
+        if (err?.name === "AbortError") return;
+        // Other fetch failures are non-fatal; next SSE event or manual
+        // navigation will retry.
       });
+    return () => controller.abort();
+    // settings.startAtBottom intentionally omitted: toggling the preference
+    // mid-session should take effect on the next session open, not trigger
+    // a refetch of the current one.
   }, [sessionId]);
 
   // Live refresh on SSE events for the current session. We mark the
