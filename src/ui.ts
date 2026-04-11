@@ -42,29 +42,74 @@ export async function startBackground(options: UIOptions): Promise<void> {
   console.error("Failed to start UI server.");
 }
 
-export function runUI(options: UIOptions): void {
+/**
+ * Handle returned by `runUI`, giving callers programmatic control over the
+ * running server. This replaces the previous fire-and-forget `void` return,
+ * making it possible to:
+ *
+ *   - await a clean shutdown from tests (without calling `Deno.exit`)
+ *   - await `server.finished` from `main.ts` to keep the process alive
+ *   - dispatch shutdown from the `/api/shutdown` HTTP handler
+ */
+export interface UIHandle {
+  server: Deno.HttpServer;
+  /** Gracefully stop the server, the watcher, and close the DB. Safe to call multiple times. */
+  shutdown: () => Promise<void>;
+  /** Resolves when the server has fully stopped serving. */
+  finished: Promise<void>;
+}
+
+export function runUI(options: UIOptions): UIHandle {
   const db = new VaultDB(options.dbPath);
   const ac = new AbortController();
 
-  Deno.serve({ port: options.port, signal: ac.signal, onListen: () => {
-    console.log(`agent-recall UI: http://localhost:${options.port}`);
-  }}, (req) => {
+  // Forward-declared so the request handler and `doShutdown` can both close
+  // over it. Assigned immediately below via `Deno.serve`.
+  let server: Deno.HttpServer;
+
+  let shuttingDown = false;
+  const doShutdown = async (): Promise<void> => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    ac.abort();
+    try {
+      await server.finished;
+    } catch {
+      // already stopped
+    }
+    try {
+      db.close();
+    } catch {
+      // already closed
+    }
+  };
+
+  server = Deno.serve({
+    port: options.port,
+    signal: ac.signal,
+    onListen: ({ port }) => {
+      console.log(`agent-recall UI: http://localhost:${port}`);
+    },
+  }, (req) => {
     const url = new URL(req.url);
 
-    // POST /api/shutdown
+    // POST /api/shutdown — used by `agent-recall ui stop` against a
+    // background-spawned process. Shuts down gracefully then exits so the
+    // detached subprocess actually terminates.
     if (req.method === "POST" && url.pathname === "/api/shutdown") {
-      // Respond first, then shut down
       setTimeout(() => {
-        db.close();
-        ac.abort();
-        Deno.exit(0);
+        doShutdown().finally(() => Deno.exit(0));
       }, 100);
       return new Response(null, { status: 202 });
     }
 
     // GET /api/status
     if (url.pathname === "/api/status") {
-      return jsonResponse({ status: "running", pid: Deno.pid, port: options.port });
+      return jsonResponse({
+        status: "running",
+        pid: Deno.pid,
+        port: (server.addr as Deno.NetAddr).port,
+      });
     }
 
     if (url.pathname.startsWith("/api/")) {
@@ -73,6 +118,12 @@ export function runUI(options: UIOptions): void {
 
     return serveAsset(url.pathname);
   });
+
+  return {
+    server,
+    shutdown: doShutdown,
+    finished: server.finished,
+  };
 }
 
 export async function stopUI(port?: number): Promise<void> {

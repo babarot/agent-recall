@@ -135,7 +135,14 @@ async function main(): Promise<void> {
       } else if (uiAction === "status") {
         await statusUI(port);
       } else if (args.foreground) {
-        runUI({ dbPath, port });
+        const handle = runUI({ dbPath, port });
+        const cleanExit = async () => {
+          await handle.shutdown();
+          Deno.exit(0);
+        };
+        Deno.addSignalListener("SIGINT", cleanExit);
+        Deno.addSignalListener("SIGTERM", cleanExit);
+        await handle.finished;
       } else {
         await startBackground({ dbPath, port });
       }
