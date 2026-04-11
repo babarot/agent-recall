@@ -267,6 +267,7 @@ export class VaultDB {
   listSessions(options: {
     project?: string;
     limit?: number;
+    offset?: number;
   } = {}): Array<{
     sessionId: string;
     project: string;
@@ -285,7 +286,8 @@ export class VaultDB {
       params.push(`%${options.project}%`, `%${options.project}%`);
     }
 
-    params.push(limit);
+    const offset = options.offset ?? 0;
+    params.push(limit, offset);
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
     const sql = `
@@ -294,7 +296,7 @@ export class VaultDB {
              message_count as messageCount, started_at as startedAt
       FROM sessions ${where}
       ORDER BY started_at DESC
-      LIMIT ?`;
+      LIMIT ? OFFSET ?`;
 
     return this.db.prepare(sql).all(...params) as Array<{
       sessionId: string;

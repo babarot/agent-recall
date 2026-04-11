@@ -141,7 +141,8 @@ function handleAPI(db: VaultDB, url: URL): Response {
   if (path === "/api/sessions") {
     const sessions = db.listSessions({
       project: url.searchParams.get("project") ?? undefined,
-      limit: Number(url.searchParams.get("limit") ?? 100),
+      limit: Number(url.searchParams.get("limit") ?? 50),
+      offset: Number(url.searchParams.get("offset") ?? 0),
     });
 
     return jsonResponse(

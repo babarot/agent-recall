@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "preact/hooks";
+import { useState, useEffect, useRef, useCallback } from "preact/hooks";
 
 interface Session {
   sessionId: string;
@@ -10,17 +10,20 @@ interface Session {
   date: string;
 }
 
+const PAGE_SIZE = 50;
+
 export function SessionList({ onSelect }: { onSelect: (id: string) => void }) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [query, setQuery] = useState("");
   const [project, setProject] = useState("");
   const [projects, setProjects] = useState<Array<{ display: string; value: string }>>([]);
   const [loading, setLoading] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
   const searchRef = useRef<HTMLInputElement>(null);
+  const loadingRef = useRef(false);
 
   useEffect(() => {
-    fetchSessions();
-    // Get project list from stats
+    fetchSessions(true);
     fetch("/api/stats")
       .then((r) => r.json())
       .then((data) => {
@@ -42,27 +45,40 @@ export function SessionList({ onSelect }: { onSelect: (id: string) => void }) {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  const fetchSessions = async () => {
+  const fetchSessions = async (reset: boolean) => {
+    if (loadingRef.current) return;
+    loadingRef.current = true;
     setLoading(true);
+
+    const offset = reset ? 0 : sessions.length;
     const params = new URLSearchParams();
     if (project) params.set("project", project);
-    params.set("limit", "100");
+    params.set("limit", String(PAGE_SIZE));
+    params.set("offset", String(offset));
+
     const res = await fetch(`/api/sessions?${params}`);
-    setSessions(await res.json());
+    const data: Session[] = await res.json();
+
+    if (reset) {
+      setSessions(data);
+    } else {
+      setSessions((prev) => [...prev, ...data]);
+    }
+    setHasMore(data.length >= PAGE_SIZE);
     setLoading(false);
+    loadingRef.current = false;
   };
 
   const handleSearch = async () => {
     if (!query.trim()) {
-      fetchSessions();
+      fetchSessions(true);
       return;
     }
     setLoading(true);
-    const params = new URLSearchParams({ q: query, limit: "50" });
+    const params = new URLSearchParams({ q: query, limit: "100" });
     if (project) params.set("project", project);
     const res = await fetch(`/api/search?${params}`);
     const results = await res.json();
-    // Group search results by session
     const sessionMap = new Map<string, Session>();
     for (const r of results) {
       if (!sessionMap.has(r.sessionId)) {
@@ -78,16 +94,35 @@ export function SessionList({ onSelect }: { onSelect: (id: string) => void }) {
       }
     }
     setSessions(Array.from(sessionMap.values()));
+    setHasMore(false);
     setLoading(false);
   };
 
   useEffect(() => {
-    fetchSessions();
+    fetchSessions(true);
   }, [project]);
 
   const handleKeyDown = (e: KeyboardEvent) => {
     if (e.key === "Enter") handleSearch();
   };
+
+  // Infinite scroll sentinel
+  const sentinelRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      if (!node) return;
+      const observer = new IntersectionObserver(
+        (entries) => {
+          if (entries[0].isIntersecting && hasMore && !loadingRef.current) {
+            fetchSessions(false);
+          }
+        },
+        { rootMargin: "200px" }
+      );
+      observer.observe(node);
+      return () => observer.disconnect();
+    },
+    [hasMore, sessions.length, project]
+  );
 
   return (
     <div class="h-full flex flex-col">
@@ -127,7 +162,7 @@ export function SessionList({ onSelect }: { onSelect: (id: string) => void }) {
       {/* Session list */}
       <div class="flex-1 overflow-y-auto p-4">
         <div class="max-w-4xl mx-auto space-y-2">
-          {loading && (
+          {loading && sessions.length === 0 && (
             <div class="text-center py-8 text-text-secondary">Loading...</div>
           )}
           {!loading && sessions.length === 0 && (
@@ -135,7 +170,7 @@ export function SessionList({ onSelect }: { onSelect: (id: string) => void }) {
           )}
           {sessions.map((s) => (
             <div
-              key={s.sessionId}
+              key={s.fullSessionId || s.sessionId}
               onClick={() => onSelect(s.fullSessionId || s.sessionId)}
               class="p-4 bg-bg-secondary border border-border rounded-lg cursor-pointer hover:border-accent/50 transition-colors"
             >
@@ -158,6 +193,11 @@ export function SessionList({ onSelect }: { onSelect: (id: string) => void }) {
               </div>
             </div>
           ))}
+          {/* Sentinel for infinite scroll */}
+          {hasMore && <div ref={sentinelRef} class="h-4" />}
+          {loading && sessions.length > 0 && (
+            <div class="text-center py-4 text-text-muted text-sm">Loading more...</div>
+          )}
         </div>
       </div>
     </div>
