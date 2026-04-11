@@ -3,7 +3,7 @@
  * into SQLite and pushes `session_updated` events through an
  * `SSEBroadcaster` so connected web clients update without a page reload.
  *
- * See `docs/adr/001-fs-watch-for-realtime-updates.md` for why this is
+ * See `docs/adr/002-fs-watch-for-realtime-updates.md` for why this is
  * FS-based instead of hook-based.
  *
  * Design notes:

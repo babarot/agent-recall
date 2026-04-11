@@ -1,4 +1,4 @@
-# ADR-001: FS watch instead of Claude Code hooks for real-time UI updates
+# ADR-002: FS watch instead of Claude Code hooks for real-time UI updates
 
 ## Status
 
@@ -27,7 +27,7 @@ On closer inspection, the two projects have a fundamentally different relationsh
 
 For claude-mem, the hook is load-bearing: if the hook doesn't fire, the data simply does not exist anywhere. They *must* use hooks.
 
-For agent-recall, the hook is only a notification trigger. Regardless of how we get notified, the actual data ingestion is always "read the JSONL, parse it, insert into SQLite". This means we have a free choice between two notification mechanisms:
+For agent-recall, the hook is only a notification trigger. The actual source of truth is the JSONL files on disk, as established in [ADR-001](001-recall-not-memory-extension.md). Regardless of how we get notified, the actual data ingestion is always "read the JSONL, parse it, insert into SQLite". This means we have a free choice between two notification mechanisms:
 
 1. **Hook-based notification**: `PostToolUse` hook POSTs `session_id` to the UI server, which then reads the JSONL file
 2. **Filesystem notification**: `Deno.watchFs` on `~/.claude/projects` sees write events directly and reads the JSONL file

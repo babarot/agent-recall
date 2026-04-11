@@ -230,7 +230,7 @@ Subcommands:
 
 Opens `http://localhost:6276` with session browser, chat viewer, and search.
 
-**Live updates**: while the UI is running, a filesystem watcher observes `~/.claude/projects` and pushes new/changed sessions to the browser over Server-Sent Events. The session list reflects new activity at the top without reload, and the chat view auto-refreshes (and follows the tail if you were already scrolled to the bottom) while a session is still running in Claude Code. No Claude Code hook configuration is required; the watcher runs inside the UI process itself. See [docs/adr/001-fs-watch-for-realtime-updates.md](docs/adr/001-fs-watch-for-realtime-updates.md) for the rationale.
+**Live updates**: while the UI is running, a filesystem watcher observes `~/.claude/projects` and pushes new/changed sessions to the browser over Server-Sent Events. The session list reflects new activity at the top without reload, and the chat view auto-refreshes (and follows the tail if you were already scrolled to the bottom) while a session is still running in Claude Code. No Claude Code hook configuration is required; the watcher runs inside the UI process itself. See [docs/adr/002-fs-watch-for-realtime-updates.md](docs/adr/002-fs-watch-for-realtime-updates.md) for the rationale.
 
 ## Architecture
 
