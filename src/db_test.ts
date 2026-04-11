@@ -521,6 +521,59 @@ Deno.test("insertMessage stores block_type and tool fields", () => {
 
 // --- listSessions with offset ---
 
+// --- imported_bytes ---
+
+Deno.test("getSessionImportedBytes returns null for unknown session", () => {
+  withDB((db) => {
+    assertEquals(db.getSessionImportedBytes("missing"), null);
+  });
+});
+
+Deno.test("getSessionImportedBytes returns 0 by default on fresh insert", () => {
+  withDB((db) => {
+    seedSession(db, "s1");
+    assertEquals(db.getSessionImportedBytes("s1"), 0);
+  });
+});
+
+Deno.test("insertSession accepts explicit importedBytes", () => {
+  withDB((db) => {
+    db.insertSession({
+      sessionId: "s1",
+      project: "proj",
+      projectPath: "/proj",
+      gitBranch: "main",
+      firstPrompt: "hi",
+      messageCount: 0,
+      startedAt: "2026-01-01T00:00:00Z",
+      endedAt: "2026-01-01T00:10:00Z",
+      claudeVersion: "2.1.87",
+      importedBytes: 4096,
+    });
+    assertEquals(db.getSessionImportedBytes("s1"), 4096);
+  });
+});
+
+Deno.test("updateSessionImportedBytes updates byte offset only", () => {
+  withDB((db) => {
+    seedSession(db, "s1");
+    db.updateSessionImportedBytes("s1", 1024);
+    assertEquals(db.getSessionImportedBytes("s1"), 1024);
+
+    // ended_at should be unchanged
+    const { session } = db.exportSession("s1");
+    assertEquals(session!.sessionId, "s1");
+  });
+});
+
+Deno.test("updateSessionImportedBytes updates byte offset and ended_at", () => {
+  withDB((db) => {
+    seedSession(db, "s1");
+    db.updateSessionImportedBytes("s1", 2048, "2026-06-01T00:00:00Z");
+    assertEquals(db.getSessionImportedBytes("s1"), 2048);
+  });
+});
+
 Deno.test("listSessions supports offset for pagination", () => {
   withDB((db) => {
     for (let i = 0; i < 5; i++) {

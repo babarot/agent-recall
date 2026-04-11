@@ -10,7 +10,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     started_at     TEXT,
     ended_at       TEXT,
     claude_version TEXT,
-    imported_at    TEXT DEFAULT (datetime('now'))
+    imported_at    TEXT DEFAULT (datetime('now')),
+    imported_bytes INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project);
