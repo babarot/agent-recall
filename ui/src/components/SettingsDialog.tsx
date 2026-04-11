@@ -1,3 +1,4 @@
+import { Monitor, Moon, Sun } from "lucide-preact";
 import type { Settings } from "../lib/settings";
 
 interface Props {
@@ -29,19 +30,23 @@ export function SettingsDialog({ settings, onChange, onClose }: Props) {
 
         {/* Theme */}
         <section class="mb-6">
-          <h3 class="text-sm font-medium text-text mb-3">Theme</h3>
+          <h3 class="text-base font-semibold text-text mb-3">Theme</h3>
           <div class="flex gap-2">
-            {(["auto", "dark", "light"] as const).map((t) => (
+            {([
+              { key: "auto", label: "Auto", icon: <Monitor size={16} /> },
+              { key: "dark", label: "Dark", icon: <Moon size={16} /> },
+              { key: "light", label: "Light", icon: <Sun size={16} /> },
+            ] as const).map(({ key, label, icon }) => (
               <button
-                key={t}
-                onClick={() => update({ theme: t })}
-                class={`px-4 py-2 text-sm rounded-lg border cursor-pointer transition-colors ${
-                  settings.theme === t
+                key={key}
+                onClick={() => update({ theme: key })}
+                class={`flex items-center gap-2 px-5 py-2.5 text-sm rounded-lg border cursor-pointer transition-colors ${
+                  settings.theme === key
                     ? "bg-accent text-white border-accent"
                     : "bg-bg border-border text-text-secondary hover:text-text"
                 }`}
               >
-                {t === "auto" ? "Auto" : t === "dark" ? "Dark" : "Light"}
+                {icon} {label}
               </button>
             ))}
           </div>
@@ -49,8 +54,8 @@ export function SettingsDialog({ settings, onChange, onClose }: Props) {
 
         {/* Chat display */}
         <section>
-          <h3 class="text-sm font-medium text-text mb-3">Chat Display</h3>
-          <div class="space-y-3">
+          <h3 class="text-base font-semibold text-text mb-3">Chat Display</h3>
+          <div class="space-y-4">
             <Toggle
               label="Show thinking"
               description="Display assistant's reasoning process"
