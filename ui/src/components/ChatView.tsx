@@ -23,6 +23,7 @@ function filterMessages(messages: DisplayMessage[], settings: Settings): Display
     if (msg.type === "thinking" && !settings.showThinking) return false;
     if (msg.type === "tool_use" && !settings.showToolUse) return false;
     if (msg.type === "tool_result" && !settings.showToolResult) return false;
+    if (msg.type === "meta" && !settings.showMeta) return false;
     return true;
   });
 }
@@ -33,6 +34,7 @@ const MESSAGE_RENDERERS: Record<string, (msg: DisplayMessage, i: number, session
   thinking: (msg, i) => msg.type === "thinking" ? <ThinkingBubble key={i} content={msg.content} /> : null,
   tool_use: (msg, i) => msg.type === "tool_use" ? <ToolUseBubble key={i} toolName={msg.toolName} toolInput={msg.toolInput} /> : null,
   tool_result: (msg, i) => msg.type === "tool_result" ? <ToolResultBubble key={i} content={msg.content} /> : null,
+  meta: (msg, i) => msg.type === "meta" ? <MetaBubble key={i} label={msg.label} content={msg.content} /> : null,
   chat: (msg, i, sessionId) => msg.type === "chat" ? <ChatBubble key={i} sessionId={sessionId} uuid={msg.uuid} role={msg.role} content={msg.content} /> : null,
 };
 
@@ -154,6 +156,32 @@ export function ChatView({ sessionId, onBack, settings }: { sessionId: string; o
           <img src={zoomImage} alt="Zoomed" />
         </div>
       )}
+    </div>
+  );
+}
+
+function MetaBubble({ label, content }: { label: string; content: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div class="flex justify-center">
+      <div class="max-w-[90%] w-full">
+        <button
+          onClick={() => setOpen(!open)}
+          class="w-full flex items-center gap-2 text-xs text-text-muted hover:text-text-secondary transition-colors cursor-pointer py-1 px-3 border border-dashed border-border rounded"
+          title="Meta message (synthetic content injected by Claude Code)"
+        >
+          <span class="text-text-muted">{open ? "▼" : "▶"}</span>
+          <span class="uppercase tracking-wider text-[10px] px-1.5 py-0.5 bg-bg-tertiary rounded text-text-muted shrink-0">
+            meta
+          </span>
+          <span class="truncate text-text-secondary">{label}</span>
+        </button>
+        {open && (
+          <div class="mt-1 px-4 py-3 bg-bg-secondary border border-dashed border-border rounded text-xs text-text-secondary whitespace-pre-wrap leading-relaxed max-h-96 overflow-y-auto">
+            {content}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

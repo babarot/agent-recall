@@ -60,6 +60,14 @@ export interface JournalLine {
   version?: string;
   gitBranch?: string;
   isSidechain?: boolean;
+  /**
+   * `true` when Claude Code itself wrote the message rather than the human.
+   * Used for slash command / skill expansions, injected `## Context`
+   * blocks, and bash caveat wrappers. We collapse these to
+   * `blockType: "meta"` during parsing so the UI can render them as a
+   * compact folded box instead of a giant "You" bubble.
+   */
+  isMeta?: boolean;
   message?: {
     role: "user" | "assistant";
     content: string | ContentBlock[];
@@ -67,7 +75,7 @@ export interface JournalLine {
   subtype?: string;
 }
 
-export type BlockType = "text" | "thinking" | "tool_use" | "tool_result";
+export type BlockType = "text" | "thinking" | "tool_use" | "tool_result" | "meta";
 
 /** Extracted message ready for DB insertion */
 export interface ExtractedMessage {

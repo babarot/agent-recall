@@ -121,6 +121,26 @@ export function parseJournalLines(
     const role = parsed.message.role;
     const ts = parsed.timestamp ?? "";
 
+    // Synthetic "meta" messages (slash command / skill expansions, injected
+    // ## Context blocks, local-command-caveat wrappers) are collapsed into a
+    // single `blockType: "meta"` entry. The UI then renders them as a
+    // compact folded box rather than a giant user bubble. The raw text is
+    // still preserved so FTS5 search can hit it.
+    if (parsed.isMeta) {
+      const text = extractText(content);
+      if (text) {
+        messages.push({
+          uuid: parsed.uuid,
+          role,
+          blockType: "meta",
+          content: text,
+          timestamp: ts,
+          turnIndex: turnIndex++,
+        });
+      }
+      continue;
+    }
+
     if (typeof content === "string") {
       // Simple string content (user messages)
       const text = content.trim();

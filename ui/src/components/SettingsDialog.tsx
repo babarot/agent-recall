@@ -118,6 +118,12 @@ export function SettingsDialog({ settings, onChange, onClose }: Props) {
               checked={settings.showToolResult}
               onChange={(v) => update({ showToolResult: v })}
             />
+            <Toggle
+              label="Show meta messages"
+              description="Display synthetic content injected by Claude Code (skill expansions, context blocks, bash caveats)"
+              checked={settings.showMeta}
+              onChange={(v) => update({ showMeta: v })}
+            />
           </div>
         </section>
       </div>
@@ -132,14 +138,16 @@ function Toggle({ label, description, checked, onChange }: {
   onChange: (value: boolean) => void;
 }) {
   return (
-    <label class="flex items-center justify-between cursor-pointer">
-      <div>
+    <label class="flex items-start gap-4 cursor-pointer">
+      {/* flex-1 min-w-0 lets the description wrap inside the available
+          width instead of pushing the toggle out of the row. */}
+      <div class="flex-1 min-w-0">
         <div class="text-sm text-text">{label}</div>
         <div class="text-xs text-text-muted">{description}</div>
       </div>
       <button
         onClick={() => onChange(!checked)}
-        class={`relative w-10 h-6 rounded-full transition-colors cursor-pointer ${
+        class={`relative w-10 h-6 rounded-full transition-colors cursor-pointer shrink-0 mt-0.5 ${
           checked ? "bg-accent" : "bg-border"
         }`}
       >
