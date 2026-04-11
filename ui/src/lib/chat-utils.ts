@@ -141,6 +141,16 @@ export function groupMessages(messages: Message[]): DisplayMessage[] {
   return result;
 }
 
+/** Extract a short preview string from tool input JSON */
+export function getToolInputPreview(toolInput: string): string {
+  try {
+    const parsed = JSON.parse(toolInput);
+    return parsed.command ?? parsed.pattern ?? parsed.file_path ?? parsed.query ?? parsed.url ?? parsed.prompt ?? "";
+  } catch {
+    return "";
+  }
+}
+
 export function stripAnsi(text: string): string {
   return text.replace(/\x1b\[[0-9;]*m/g, "").replace(/\^?\[\[[\d;]*m/g, "");
 }

@@ -4,6 +4,7 @@ import {
   groupMessages,
   stripAnsi,
   renderImages,
+  getToolInputPreview,
 } from "./chat-utils";
 import type { Message } from "./chat-utils";
 
@@ -194,5 +195,70 @@ describe("groupMessages", () => {
 
   it("handles empty message list", () => {
     expect(groupMessages([])).toHaveLength(0);
+  });
+
+  it("maps thinking blockType to thinking display type", () => {
+    const messages: Message[] = [
+      { uuid: "u1", role: "assistant", blockType: "thinking", content: "reasoning..." },
+    ];
+    const result = groupMessages(messages);
+    expect(result).toHaveLength(1);
+    expect(result[0].type).toBe("thinking");
+    if (result[0].type === "thinking") {
+      expect(result[0].content).toBe("reasoning...");
+    }
+  });
+
+  it("maps tool_use blockType to tool_use display type", () => {
+    const messages: Message[] = [
+      { uuid: "u1", role: "assistant", blockType: "tool_use", content: "Bash", toolName: "Bash", toolInput: '{"command":"ls"}' },
+    ];
+    const result = groupMessages(messages);
+    expect(result).toHaveLength(1);
+    expect(result[0].type).toBe("tool_use");
+    if (result[0].type === "tool_use") {
+      expect(result[0].toolName).toBe("Bash");
+    }
+  });
+
+  it("maps tool_result blockType to tool_result display type", () => {
+    const messages: Message[] = [
+      { uuid: "u1", role: "user", blockType: "tool_result", content: "output here" },
+    ];
+    const result = groupMessages(messages);
+    expect(result).toHaveLength(1);
+    expect(result[0].type).toBe("tool_result");
+  });
+});
+
+// --- getToolInputPreview ---
+
+describe("getToolInputPreview", () => {
+  it("extracts command field", () => {
+    expect(getToolInputPreview('{"command":"git push"}')).toBe("git push");
+  });
+
+  it("extracts file_path field", () => {
+    expect(getToolInputPreview('{"file_path":"/tmp/x.ts"}')).toBe("/tmp/x.ts");
+  });
+
+  it("extracts query field", () => {
+    expect(getToolInputPreview('{"query":"terraform"}')).toBe("terraform");
+  });
+
+  it("extracts url field", () => {
+    expect(getToolInputPreview('{"url":"https://example.com"}')).toBe("https://example.com");
+  });
+
+  it("returns empty string for unknown fields", () => {
+    expect(getToolInputPreview('{"foo":"bar"}')).toBe("");
+  });
+
+  it("returns empty string for invalid JSON", () => {
+    expect(getToolInputPreview("not json")).toBe("");
+  });
+
+  it("returns empty string for empty input", () => {
+    expect(getToolInputPreview("")).toBe("");
   });
 });

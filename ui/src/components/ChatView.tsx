@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useMemo } from "preact/hooks";
-import { marked } from "marked";
-import { groupMessages, renderImages, stripAnsi } from "../lib/chat-utils";
+import { groupMessages, renderImages, stripAnsi, getToolInputPreview } from "../lib/chat-utils";
 import type { Message, DisplayMessage } from "../lib/chat-utils";
 import type { Settings } from "../lib/settings";
+import { renderMarkdown } from "../lib/markdown";
+import { useKeyboardShortcut } from "../hooks/use-keyboard-shortcut";
 
 interface SessionData {
   session: {
@@ -15,19 +16,31 @@ interface SessionData {
   messages: Message[];
 }
 
+function filterMessages(messages: DisplayMessage[], settings: Settings): DisplayMessage[] {
+  return messages.filter((msg) => {
+    if (msg.type === "thinking" && !settings.showThinking) return false;
+    if (msg.type === "tool_use" && !settings.showToolUse) return false;
+    if (msg.type === "tool_result" && !settings.showToolResult) return false;
+    return true;
+  });
+}
+
+const MESSAGE_RENDERERS: Record<string, (msg: DisplayMessage, i: number, sessionId: string) => preact.JSX.Element | null> = {
+  bash: (msg, i) => msg.type === "bash" ? <BashBubble key={i} command={msg.command} stdout={msg.stdout} stderr={msg.stderr} /> : null,
+  command: (msg, i) => msg.type === "command" ? <CommandBubble key={i} name={msg.name} args={msg.args} stdout={msg.stdout} /> : null,
+  thinking: (msg, i) => msg.type === "thinking" ? <ThinkingBubble key={i} content={msg.content} /> : null,
+  tool_use: (msg, i) => msg.type === "tool_use" ? <ToolUseBubble key={i} toolName={msg.toolName} toolInput={msg.toolInput} /> : null,
+  tool_result: (msg, i) => msg.type === "tool_result" ? <ToolResultBubble key={i} content={msg.content} /> : null,
+  chat: (msg, i, sessionId) => msg.type === "chat" ? <ChatBubble key={i} sessionId={sessionId} uuid={msg.uuid} role={msg.role} content={msg.content} /> : null,
+};
+
 export function ChatView({ sessionId, onBack, settings }: { sessionId: string; onBack: () => void; settings: Settings }) {
   const [data, setData] = useState<SessionData | null>(null);
   const [copied, setCopied] = useState(false);
   const [zoomImage, setZoomImage] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setZoomImage(null);
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, []);
+  useKeyboardShortcut("Escape", () => setZoomImage(null));
 
   useEffect(() => {
     fetch(`/api/sessions/${sessionId}`)
@@ -51,6 +64,8 @@ export function ChatView({ sessionId, onBack, settings }: { sessionId: string; o
   if (!data.session) {
     return <div class="flex items-center justify-center h-full text-text-secondary">Session not found.</div>;
   }
+
+  const visibleMessages = filterMessages(groupMessages(data.messages), settings);
 
   return (
     <div class="h-full flex flex-col">
@@ -99,28 +114,10 @@ export function ChatView({ sessionId, onBack, settings }: { sessionId: string; o
         }}
       >
         <div class="max-w-3xl mx-auto space-y-4">
-          {groupMessages(data.messages)
-            .filter((msg) => {
-              if (msg.type === "thinking" && !settings.showThinking) return false;
-              if (msg.type === "tool_use" && !settings.showToolUse) return false;
-              if (msg.type === "tool_result" && !settings.showToolResult) return false;
-              return true;
-            })
-            .map((msg, i) =>
-              msg.type === "bash" ? (
-                <BashBubble key={i} command={msg.command} stdout={msg.stdout} stderr={msg.stderr} />
-              ) : msg.type === "command" ? (
-                <CommandBubble key={i} name={msg.name} args={msg.args} stdout={msg.stdout} />
-              ) : msg.type === "thinking" ? (
-                <ThinkingBubble key={i} content={msg.content} />
-              ) : msg.type === "tool_use" ? (
-                <ToolUseBubble key={i} toolName={msg.toolName} toolInput={msg.toolInput} />
-              ) : msg.type === "tool_result" ? (
-                <ToolResultBubble key={i} content={msg.content} />
-              ) : (
-                <ChatBubble key={i} sessionId={data.session.sessionId} uuid={msg.uuid} role={msg.role} content={msg.content} />
-              )
-            )}
+          {visibleMessages.map((msg, i) => {
+            const renderer = MESSAGE_RENDERERS[msg.type];
+            return renderer ? renderer(msg, i, data.session.sessionId) : null;
+          })}
         </div>
       </div>
 
@@ -158,15 +155,7 @@ function ThinkingBubble({ content }: { content: string }) {
 
 function ToolUseBubble({ toolName, toolInput }: { toolName: string; toolInput: string }) {
   const [open, setOpen] = useState(false);
-  let inputPreview = "";
-  try {
-    const parsed = JSON.parse(toolInput);
-    if (parsed.command) inputPreview = parsed.command;
-    else if (parsed.pattern) inputPreview = parsed.pattern;
-    else if (parsed.file_path) inputPreview = parsed.file_path;
-    else if (parsed.query) inputPreview = parsed.query;
-    else if (parsed.url) inputPreview = parsed.url;
-  } catch { /* ignore */ }
+  const inputPreview = getToolInputPreview(toolInput);
 
   return (
     <div class="flex justify-start">
@@ -195,9 +184,7 @@ function ToolResultBubble({ content }: { content: string }) {
   const preview = content.length > 80 ? content.slice(0, 80) + "..." : content;
   const html = useMemo(() => {
     if (!open) return "";
-    marked.setOptions({ breaks: true, gfm: true });
-    const raw = marked.parse(content) as string;
-    return raw.replace(/<table>/g, '<div class="table-wrapper"><table>').replace(/<\/table>/g, '</table></div>');
+    return renderMarkdown(content);
   }, [content, open]);
 
   return (
@@ -260,10 +247,8 @@ function CommandBubble({ name, args, stdout }: { name: string; args: string; std
 function ChatBubble({ sessionId, uuid, role, content }: { sessionId: string; uuid: string; role: string; content: string }) {
   const isUser = role === "user";
   const html = useMemo(() => {
-    marked.setOptions({ breaks: true, gfm: true });
     const withImages = renderImages(content, sessionId, uuid);
-    const raw = marked.parse(withImages) as string;
-    return raw.replace(/<table>/g, '<div class="table-wrapper"><table>').replace(/<\/table>/g, '</table></div>');
+    return renderMarkdown(withImages);
   }, [content, sessionId, uuid]);
 
   return (

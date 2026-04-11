@@ -470,3 +470,72 @@ Deno.test("search filters by project_path", () => {
     assertEquals(results[0].sessionId, "s1");
   });
 });
+
+// --- getFirstUserText ---
+
+Deno.test("getFirstUserText returns first non-tag user text", () => {
+  withDB((db) => {
+    seedSession(db, "s1");
+    db.insertMessage({ sessionId: "s1", uuid: "m1", role: "user", blockType: "text", content: "<command-message>commit</command-message>", timestamp: "2026-01-01T00:00:00Z", turnIndex: 0 });
+    db.insertMessage({ sessionId: "s1", uuid: "m2", role: "user", blockType: "text", content: "real user prompt", timestamp: "2026-01-01T00:00:01Z", turnIndex: 1 });
+
+    assertEquals(db.getFirstUserText("s1"), "real user prompt");
+  });
+});
+
+Deno.test("getFirstUserText returns null when no clean text exists", () => {
+  withDB((db) => {
+    seedSession(db, "s1");
+    db.insertMessage({ sessionId: "s1", uuid: "m1", role: "user", blockType: "text", content: "<command-name>/commit</command-name>", timestamp: "2026-01-01T00:00:00Z", turnIndex: 0 });
+
+    assertEquals(db.getFirstUserText("s1"), null);
+  });
+});
+
+Deno.test("getFirstUserText skips tool_use block types", () => {
+  withDB((db) => {
+    seedSession(db, "s1");
+    db.insertMessage({ sessionId: "s1", uuid: "m1", role: "assistant", blockType: "tool_use", content: "Bash", toolName: "Bash", timestamp: "2026-01-01T00:00:00Z", turnIndex: 0 });
+    db.insertMessage({ sessionId: "s1", uuid: "m2", role: "user", blockType: "text", content: "my question", timestamp: "2026-01-01T00:00:01Z", turnIndex: 1 });
+
+    assertEquals(db.getFirstUserText("s1"), "my question");
+  });
+});
+
+// --- block_type in insertMessage + exportSession ---
+
+Deno.test("insertMessage stores block_type and tool fields", () => {
+  withDB((db) => {
+    seedSession(db, "s1");
+    db.insertMessage({ sessionId: "s1", uuid: "m1", role: "assistant", blockType: "tool_use", content: "Bash", toolName: "Bash", toolInput: '{"command":"ls"}', timestamp: "2026-01-01T00:00:00Z", turnIndex: 0 });
+    db.insertMessage({ sessionId: "s1", uuid: "m2", role: "assistant", blockType: "thinking", content: "let me think", timestamp: "2026-01-01T00:00:01Z", turnIndex: 1 });
+
+    const { messages } = db.exportSession("s1");
+    assertEquals(messages[0].blockType, "tool_use");
+    assertEquals(messages[0].toolName, "Bash");
+    assertEquals(messages[0].toolInput, '{"command":"ls"}');
+    assertEquals(messages[1].blockType, "thinking");
+    assertEquals(messages[1].toolName, null);
+  });
+});
+
+// --- listSessions with offset ---
+
+Deno.test("listSessions supports offset for pagination", () => {
+  withDB((db) => {
+    for (let i = 0; i < 5; i++) {
+      db.insertSession({
+        sessionId: `s${i}`, project: "proj", projectPath: "/proj",
+        gitBranch: "main", firstPrompt: `prompt ${i}`, messageCount: 1,
+        startedAt: `2026-01-0${i + 1}T00:00:00Z`, endedAt: `2026-01-0${i + 1}T00:10:00Z`, claudeVersion: "2.1.87",
+      });
+    }
+
+    const page1 = db.listSessions({ limit: 2, offset: 0 });
+    const page2 = db.listSessions({ limit: 2, offset: 2 });
+    assertEquals(page1.length, 2);
+    assertEquals(page2.length, 2);
+    assertEquals(page1[0].sessionId, "s4"); // newest first
+    assertEquals(page2[0].sessionId, "s2");
+  });
+});

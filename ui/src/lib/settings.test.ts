@@ -22,6 +22,7 @@ describe("loadSettings", () => {
   it("returns defaults when nothing is saved", () => {
     const s = loadSettings();
     expect(s.theme).toBe("auto");
+    expect(s.colorScheme).toBe("default");
     expect(s.showThinking).toBe(true);
     expect(s.showToolUse).toBe(true);
     expect(s.showToolResult).toBe(true);
@@ -51,6 +52,7 @@ describe("saveSettings", () => {
   it("persists settings to localStorage", () => {
     const settings: Settings = {
       theme: "light",
+      colorScheme: "tokyo-night",
       showThinking: false,
       showToolUse: true,
       showToolResult: false,
@@ -67,6 +69,7 @@ describe("saveSettings", () => {
   it("roundtrips through load", () => {
     const settings: Settings = {
       theme: "dark",
+      colorScheme: "nord",
       showThinking: false,
       showToolUse: false,
       showToolResult: true,

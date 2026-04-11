@@ -32,28 +32,29 @@ export function saveSettings(settings: Settings): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
 }
 
-export function applyTheme(theme: Settings["theme"]): void {
-  const root = document.documentElement;
-  if (theme === "auto") {
-    root.removeAttribute("data-theme");
-  } else {
-    root.setAttribute("data-theme", theme);
-  }
-}
-
-function getEffectiveMode(theme: Settings["theme"]): "dark" | "light" {
+export function getEffectiveMode(theme: Settings["theme"]): "dark" | "light" {
   if (theme === "auto") {
     return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
   }
   return theme;
 }
 
-export function applyColorSchemeFromSettings(settings: Settings): void {
+/** Apply all visual settings (theme mode + color scheme) in one call */
+export function applyAllSettings(settings: Settings): void {
+  // Theme mode (data-theme attribute)
+  const root = document.documentElement;
+  if (settings.theme === "auto") {
+    root.removeAttribute("data-theme");
+  } else {
+    root.setAttribute("data-theme", settings.theme);
+  }
+
+  // Color scheme (CSS variables)
   if (settings.colorScheme === "default") {
     clearColorScheme();
-    return;
+  } else {
+    const scheme = getScheme(settings.colorScheme);
+    const mode = getEffectiveMode(settings.theme);
+    applyColorScheme(scheme, mode);
   }
-  const scheme = getScheme(settings.colorScheme);
-  const mode = getEffectiveMode(settings.theme);
-  applyColorScheme(scheme, mode);
 }

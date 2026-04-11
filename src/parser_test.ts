@@ -95,7 +95,7 @@ Deno.test("parseSession filters out system and snapshot messages", () => {
   assertEquals(result!.messages[1].content, "response");
 });
 
-Deno.test("parseSession filters out tool_use and thinking from assistant messages", () => {
+Deno.test("parseSession extracts all block types from assistant messages", () => {
   const jsonl = [
     USER_MSG("do something", "u1", "2026-01-01T00:00:00Z"),
     ASSISTANT_MSG(
@@ -111,11 +111,16 @@ Deno.test("parseSession filters out tool_use and thinking from assistant message
 
   const result = parseSession(jsonl, "test");
   assertNotEquals(result, null);
-  assertEquals(result!.messages.length, 2);
-  assertEquals(result!.messages[1].content, "Done!");
+  assertEquals(result!.messages.length, 4);
+  assertEquals(result!.messages[0].blockType, "text");
+  assertEquals(result!.messages[1].blockType, "thinking");
+  assertEquals(result!.messages[2].blockType, "tool_use");
+  assertEquals(result!.messages[2].toolName, "Bash");
+  assertEquals(result!.messages[3].blockType, "text");
+  assertEquals(result!.messages[3].content, "Done!");
 });
 
-Deno.test("parseSession skips assistant messages with only tool_use (no text)", () => {
+Deno.test("parseSession extracts tool_use from assistant messages with no text", () => {
   const jsonl = [
     USER_MSG("do something", "u1", "2026-01-01T00:00:00Z"),
     ASSISTANT_MSG(
@@ -132,9 +137,12 @@ Deno.test("parseSession skips assistant messages with only tool_use (no text)", 
 
   const result = parseSession(jsonl, "test");
   assertNotEquals(result, null);
-  assertEquals(result!.messages.length, 2);
-  assertEquals(result!.messages[0].content, "do something");
-  assertEquals(result!.messages[1].content, "Here is the result");
+  assertEquals(result!.messages.length, 3);
+  assertEquals(result!.messages[0].blockType, "text");
+  assertEquals(result!.messages[1].blockType, "tool_use");
+  assertEquals(result!.messages[1].toolName, "Read");
+  assertEquals(result!.messages[2].blockType, "text");
+  assertEquals(result!.messages[2].content, "Here is the result");
 });
 
 Deno.test("parseSession skips sidechain messages", () => {
@@ -222,7 +230,7 @@ Deno.test("parseSession enriches from session index entry", () => {
   assertEquals(result!.meta.summary, "a summary from index");
 });
 
-Deno.test("parseSession concatenates multiple text blocks", () => {
+Deno.test("parseSession creates separate messages for each text block", () => {
   const jsonl = [
     USER_MSG("question", "u1", "2026-01-01T00:00:00Z"),
     ASSISTANT_MSG(
@@ -238,10 +246,10 @@ Deno.test("parseSession concatenates multiple text blocks", () => {
 
   const result = parseSession(jsonl, "test");
   assertNotEquals(result, null);
-  assertEquals(
-    result!.messages[1].content,
-    "First paragraph.\nSecond paragraph."
-  );
+  const textMsgs = result!.messages.filter((m) => m.blockType === "text");
+  assertEquals(textMsgs.length, 3); // user + 2 assistant text blocks
+  assertEquals(textMsgs[1].content, "First paragraph.");
+  assertEquals(textMsgs[2].content, "Second paragraph.");
 });
 
 Deno.test("parseSession truncates firstPrompt to 500 chars", () => {

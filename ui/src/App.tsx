@@ -4,8 +4,9 @@ import { SessionList } from "./components/SessionList";
 import { ChatView } from "./components/ChatView";
 import { StatsView } from "./components/StatsView";
 import { SettingsDialog } from "./components/SettingsDialog";
-import { loadSettings, saveSettings, applyTheme, applyColorSchemeFromSettings } from "./lib/settings";
+import { loadSettings, saveSettings, applyAllSettings } from "./lib/settings";
 import type { Settings } from "./lib/settings";
+import { useKeyboardShortcut } from "./hooks/use-keyboard-shortcut";
 
 type View = "list" | "chat" | "stats";
 
@@ -24,10 +25,8 @@ export function App() {
   const [settings, setSettings] = useState<Settings>(loadSettings);
   const [showSettings, setShowSettings] = useState(false);
 
-  // Apply theme on mount and change
   useEffect(() => {
-    applyTheme(settings.theme);
-    applyColorSchemeFromSettings(settings);
+    applyAllSettings(settings);
   }, [settings.theme, settings.colorScheme]);
 
   useEffect(() => {
@@ -46,14 +45,7 @@ export function App() {
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
 
-  // Esc closes settings
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setShowSettings(false);
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, []);
+  useKeyboardShortcut("Escape", () => setShowSettings(false));
 
   const navigate = useCallback((path: string, view: View, sessionId: string | null) => {
     window.history.pushState(null, "", path);
@@ -76,8 +68,7 @@ export function App() {
   const handleSettingsChange = (newSettings: Settings) => {
     setSettings(newSettings);
     saveSettings(newSettings);
-    applyTheme(newSettings.theme);
-    applyColorSchemeFromSettings(newSettings);
+    applyAllSettings(newSettings);
   };
 
   return (

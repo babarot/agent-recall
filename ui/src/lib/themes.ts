@@ -168,6 +168,23 @@ export const COLOR_SCHEMES: ColorScheme[] = [
   },
 ];
 
+/** Mapping from ThemeColors keys to CSS variable names (single source of truth) */
+const CSS_VAR_MAP: Record<keyof ThemeColors, string> = {
+  bg: "--ui-bg",
+  bgSecondary: "--ui-bg-secondary",
+  bgTertiary: "--ui-bg-tertiary",
+  border: "--ui-border",
+  text: "--ui-text",
+  textSecondary: "--ui-text-secondary",
+  textMuted: "--ui-text-muted",
+  accent: "--ui-accent",
+  accentHover: "--ui-accent-hover",
+  userBubble: "--ui-user-bubble",
+  assistantBubble: "--ui-assistant-bubble",
+  success: "--ui-success",
+  codeBg: "--ui-code-bg",
+};
+
 export function getScheme(name: string): ColorScheme {
   return COLOR_SCHEMES.find((s) => s.name === name) ?? COLOR_SCHEMES[0];
 }
@@ -175,30 +192,14 @@ export function getScheme(name: string): ColorScheme {
 export function applyColorScheme(scheme: ColorScheme, mode: "dark" | "light"): void {
   const colors = scheme[mode];
   const root = document.documentElement;
-  root.style.setProperty("--ui-bg", colors.bg);
-  root.style.setProperty("--ui-bg-secondary", colors.bgSecondary);
-  root.style.setProperty("--ui-bg-tertiary", colors.bgTertiary);
-  root.style.setProperty("--ui-border", colors.border);
-  root.style.setProperty("--ui-text", colors.text);
-  root.style.setProperty("--ui-text-secondary", colors.textSecondary);
-  root.style.setProperty("--ui-text-muted", colors.textMuted);
-  root.style.setProperty("--ui-accent", colors.accent);
-  root.style.setProperty("--ui-accent-hover", colors.accentHover);
-  root.style.setProperty("--ui-user-bubble", colors.userBubble);
-  root.style.setProperty("--ui-assistant-bubble", colors.assistantBubble);
-  root.style.setProperty("--ui-success", colors.success);
-  root.style.setProperty("--ui-code-bg", colors.codeBg);
+  for (const [key, cssVar] of Object.entries(CSS_VAR_MAP)) {
+    root.style.setProperty(cssVar, colors[key as keyof ThemeColors]);
+  }
 }
 
 export function clearColorScheme(): void {
   const root = document.documentElement;
-  const vars = [
-    "--ui-bg", "--ui-bg-secondary", "--ui-bg-tertiary", "--ui-border",
-    "--ui-text", "--ui-text-secondary", "--ui-text-muted",
-    "--ui-accent", "--ui-accent-hover",
-    "--ui-user-bubble", "--ui-assistant-bubble", "--ui-success", "--ui-code-bg",
-  ];
-  for (const v of vars) {
-    root.style.removeProperty(v);
+  for (const cssVar of Object.values(CSS_VAR_MAP)) {
+    root.style.removeProperty(cssVar);
   }
 }
