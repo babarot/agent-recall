@@ -99,7 +99,13 @@ export class VaultDB {
     }
   }
 
-  /** Insert a message, ignoring duplicates by uuid */
+  /**
+   * Insert a message, ignoring duplicates (by uuid or by
+   * (session_id, turn_index) uniqueness). Returns `{ changes: 1 }` when a row
+   * was actually inserted and `{ changes: 0 }` when it was ignored as a
+   * duplicate. Callers that need to count real inserts (e.g. the incremental
+   * importer) must use this return value rather than the parse count.
+   */
   insertMessage(params: {
     sessionId: string;
     uuid: string;
@@ -110,8 +116,8 @@ export class VaultDB {
     toolInput?: string;
     timestamp: string;
     turnIndex: number;
-  }): void {
-    this.db
+  }): { changes: number } {
+    const result = this.db
       .prepare(
         `INSERT OR IGNORE INTO messages (session_id, uuid, role, block_type, content, tool_name, tool_input, timestamp, turn_index)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -127,6 +133,7 @@ export class VaultDB {
         params.timestamp,
         params.turnIndex
       );
+    return { changes: Number(result.changes ?? 0) };
   }
 
   /** Insert an image blob */
