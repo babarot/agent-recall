@@ -4,6 +4,8 @@ import type { Message, DisplayMessage } from "../lib/chat-utils";
 import type { Settings } from "../lib/settings";
 import { renderMarkdown } from "../lib/markdown";
 import { useKeyboardShortcut } from "../hooks/use-keyboard-shortcut";
+import { useSSE } from "../hooks/use-sse";
+import { useTailFollow } from "../hooks/use-tail-follow";
 
 interface SessionData {
   session: {
@@ -40,6 +42,11 @@ export function ChatView({ sessionId, onBack, settings }: { sessionId: string; o
   const [zoomImage, setZoomImage] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // Tail-follow machinery: handles "stick to bottom on live updates",
+  // cancels on user scroll-up, survives image layout shifts, and guards
+  // against out-of-order fetch responses.
+  const { markIfAtBottom, isCurrentSeq } = useTailFollow(scrollRef, data);
+
   useKeyboardShortcut("Escape", () => setZoomImage(null));
 
   useEffect(() => {
@@ -50,6 +57,26 @@ export function ChatView({ sessionId, onBack, settings }: { sessionId: string; o
         setTimeout(() => scrollRef.current?.scrollTo(0, 0), 0);
       });
   }, [sessionId]);
+
+  // Live refresh on SSE events for the current session. We mark the
+  // "was at bottom" state *before* firing the fetch so the post-render
+  // effect in useTailFollow knows whether to scroll back down, and we
+  // drop the response if a newer fetch has been issued in the meantime.
+  useSSE((event) => {
+    if (event.type !== "session_updated") return;
+    if (event.sessionId !== sessionId) return;
+
+    const seq = markIfAtBottom();
+    fetch(`/api/sessions/${sessionId}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (!isCurrentSeq(seq)) return;
+        setData(d);
+      })
+      .catch(() => {
+        // Transient fetch failure — next event will retry.
+      });
+  });
 
   const copyId = () => {
     navigator.clipboard.writeText(sessionId);

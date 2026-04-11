@@ -14,7 +14,8 @@ export class VaultDB {
   }
 
   private migrate(): void {
-    // Check if schema_version table exists
+    // PoC: no backward compatibility. Fresh DBs get the current schema;
+    // old DBs should be deleted (`rm ~/.claude/vault.db`) and rebuilt from JSONL.
     const row = this.db
       .prepare(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_version'"
@@ -22,33 +23,7 @@ export class VaultDB {
       .get() as { name: string } | undefined;
 
     if (!row) {
-      // Fresh database: apply full schema
       this.db.exec(SCHEMA_SQL);
-      this.db
-        .prepare("INSERT INTO schema_version (version) VALUES (?)")
-        .run(SCHEMA_VERSION);
-      return;
-    }
-
-    const versionRow = this.db
-      .prepare("SELECT MAX(version) as version FROM schema_version")
-      .get() as { version: number } | undefined;
-
-    const currentVersion = versionRow?.version ?? 0;
-    if (currentVersion < 2) {
-      this.db.exec(`
-        CREATE TABLE IF NOT EXISTS images (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            session_id TEXT NOT NULL REFERENCES sessions(session_id),
-            message_uuid TEXT,
-            image_index INTEGER DEFAULT 0,
-            media_type TEXT NOT NULL,
-            data       BLOB NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_images_session_message ON images(session_id, message_uuid);
-      `);
-    }
-    if (currentVersion < SCHEMA_VERSION) {
       this.db
         .prepare("INSERT INTO schema_version (version) VALUES (?)")
         .run(SCHEMA_VERSION);
@@ -75,11 +50,12 @@ export class VaultDB {
     startedAt: string;
     endedAt: string;
     claudeVersion: string;
+    importedBytes?: number;
   }): void {
     this.db
       .prepare(
-        `INSERT INTO sessions (session_id, project, project_path, git_branch, first_prompt, summary, message_count, started_at, ended_at, claude_version)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO sessions (session_id, project, project_path, git_branch, first_prompt, summary, message_count, started_at, ended_at, claude_version, imported_bytes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         params.sessionId,
@@ -91,11 +67,65 @@ export class VaultDB {
         params.messageCount,
         params.startedAt,
         params.endedAt,
-        params.claudeVersion
+        params.claudeVersion,
+        params.importedBytes ?? 0
       );
   }
 
-  /** Insert a message, ignoring duplicates by uuid */
+  /** Delete a session and all dependent rows so it can be fully re-imported. */
+  resetSession(sessionId: string): void {
+    this.db.exec("BEGIN");
+    try {
+      this.db
+        .prepare("DELETE FROM images WHERE session_id = ?")
+        .run(sessionId);
+      this.db
+        .prepare("DELETE FROM messages WHERE session_id = ?")
+        .run(sessionId);
+      this.db
+        .prepare("DELETE FROM sessions WHERE session_id = ?")
+        .run(sessionId);
+      this.db.exec("COMMIT");
+    } catch (e) {
+      this.db.exec("ROLLBACK");
+      throw e;
+    }
+  }
+
+  /** Get the byte offset up to which this session's JSONL has been imported */
+  getSessionImportedBytes(sessionId: string): number | null {
+    const row = this.db
+      .prepare("SELECT imported_bytes FROM sessions WHERE session_id = ?")
+      .get(sessionId) as { imported_bytes: number } | undefined;
+    return row?.imported_bytes ?? null;
+  }
+
+  /** Update a session's imported_bytes (and optionally ended_at) after a tail read */
+  updateSessionImportedBytes(
+    sessionId: string,
+    importedBytes: number,
+    endedAt?: string
+  ): void {
+    if (endedAt !== undefined) {
+      this.db
+        .prepare(
+          "UPDATE sessions SET imported_bytes = ?, ended_at = ? WHERE session_id = ?"
+        )
+        .run(importedBytes, endedAt, sessionId);
+    } else {
+      this.db
+        .prepare("UPDATE sessions SET imported_bytes = ? WHERE session_id = ?")
+        .run(importedBytes, sessionId);
+    }
+  }
+
+  /**
+   * Insert a message, ignoring duplicates (by uuid or by
+   * (session_id, turn_index) uniqueness). Returns `{ changes: 1 }` when a row
+   * was actually inserted and `{ changes: 0 }` when it was ignored as a
+   * duplicate. Callers that need to count real inserts (e.g. the incremental
+   * importer) must use this return value rather than the parse count.
+   */
   insertMessage(params: {
     sessionId: string;
     uuid: string;
@@ -106,8 +136,8 @@ export class VaultDB {
     toolInput?: string;
     timestamp: string;
     turnIndex: number;
-  }): void {
-    this.db
+  }): { changes: number } {
+    const result = this.db
       .prepare(
         `INSERT OR IGNORE INTO messages (session_id, uuid, role, block_type, content, tool_name, tool_input, timestamp, turn_index)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -123,6 +153,7 @@ export class VaultDB {
         params.timestamp,
         params.turnIndex
       );
+    return { changes: Number(result.changes ?? 0) };
   }
 
   /** Insert an image blob */

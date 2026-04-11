@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "preact/hooks";
+import { useSSE } from "../hooks/use-sse";
 
 interface Session {
   sessionId: string;
@@ -14,7 +15,13 @@ const PAGE_SIZE = 50;
 
 export function SessionList({ onSelect }: { onSelect: (id: string) => void }) {
   const [sessions, setSessions] = useState<Session[]>([]);
+  // `query` is the raw text in the search box (updates on every keystroke).
+  // `committedQuery` is the value that was last actually submitted via the
+  // Search button / Enter key — this is what gates live updates. Separating
+  // them ensures that *typing* into the search box does not freeze live
+  // updates; only *committing* a non-empty search does.
   const [query, setQuery] = useState("");
+  const [committedQuery, setCommittedQuery] = useState("");
   const [project, setProject] = useState("");
   const [projects, setProjects] = useState<Array<{ display: string; value: string }>>([]);
   const [loading, setLoading] = useState(false);
@@ -71,10 +78,14 @@ export function SessionList({ onSelect }: { onSelect: (id: string) => void }) {
 
   const handleSearch = async () => {
     if (!query.trim()) {
+      // Submitting an empty search behaves like clearing: drop back to the
+      // normal live list and un-freeze SSE updates.
+      setCommittedQuery("");
       fetchSessions(true);
       return;
     }
     setLoading(true);
+    setCommittedQuery(query);
     const params = new URLSearchParams({ q: query, limit: "100" });
     if (project) params.set("project", project);
     const res = await fetch(`/api/search?${params}`);
@@ -98,9 +109,75 @@ export function SessionList({ onSelect }: { onSelect: (id: string) => void }) {
     setLoading(false);
   };
 
+  // Called on every keystroke in the search input. If the user clears the
+  // box completely, immediately drop the frozen search result and re-fetch
+  // the live list so they don't stare at stale rows waiting for Enter.
+  const handleQueryInput = (val: string) => {
+    setQuery(val);
+    if (val === "" && committedQuery !== "") {
+      setCommittedQuery("");
+      fetchSessions(true);
+    }
+  };
+
   useEffect(() => {
     fetchSessions(true);
   }, [project]);
+
+  // Real-time updates via SSE.
+  // - While a search has been committed (Enter / Search button), ignore
+  //   events so we don't disrupt the frozen result set. Typing without
+  //   committing still allows live updates — otherwise the list would
+  //   mysteriously freeze the moment the user touches the search box.
+  // - For a session already on screen: update its message count and bubble
+  //   it to the top (sessions are sorted by started_at desc anyway).
+  // - For a brand-new session: refetch the top of the list and prepend it
+  //   if the server now lists it first. We can't build a complete Session
+  //   row from the SSE payload alone (no firstPrompt / date / branch).
+  useSSE((event) => {
+    if (committedQuery !== "") return;
+    if (event.type !== "session_updated") return;
+
+    const sessionId = event.sessionId as string | undefined;
+    if (!sessionId) return;
+    const totalMessages = event.totalMessages as number | undefined;
+
+    let wasKnown = false;
+    setSessions((prev) => {
+      const idx = prev.findIndex((s) => s.fullSessionId === sessionId);
+      if (idx === -1) return prev;
+      wasKnown = true;
+      const existing = prev[idx];
+      const updated = {
+        ...existing,
+        messages: totalMessages ?? existing.messages,
+      };
+      return [updated, ...prev.slice(0, idx), ...prev.slice(idx + 1)];
+    });
+
+    if (wasKnown) return;
+
+    // Unknown session → fetch the head of the list. If the new session is
+    // actually the most recent, it will be position 0 of that response.
+    (async () => {
+      try {
+        const params = new URLSearchParams();
+        if (project) params.set("project", project);
+        params.set("limit", "1");
+        params.set("offset", "0");
+        const res = await fetch(`/api/sessions?${params}`);
+        const data: Session[] = await res.json();
+        const first = data[0];
+        if (!first || first.fullSessionId !== sessionId) return;
+        setSessions((prev) => {
+          if (prev.some((s) => s.fullSessionId === sessionId)) return prev;
+          return [first, ...prev];
+        });
+      } catch {
+        // Swallow — the next manual refresh will pick it up.
+      }
+    })();
+  });
 
   const handleKeyDown = (e: KeyboardEvent) => {
     if (e.key === "Enter") handleSearch();
@@ -134,7 +211,7 @@ export function SessionList({ onSelect }: { onSelect: (id: string) => void }) {
               ref={searchRef}
               type="text"
               value={query}
-              onInput={(e) => setQuery((e.target as HTMLInputElement).value)}
+              onInput={(e) => handleQueryInput((e.target as HTMLInputElement).value)}
               onKeyDown={handleKeyDown}
               placeholder='Search sessions... (press "/" to focus)'
               class="w-full px-4 py-2 bg-bg border border-border rounded-lg text-text placeholder-text-muted focus:outline-none focus:border-accent text-sm"

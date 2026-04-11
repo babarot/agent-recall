@@ -42,27 +42,47 @@ function extractText(content: string | ContentBlock[]): string {
     .trim();
 }
 
-/** Parse a session JSONL file into structured data */
-export function parseSession(
+/** Metadata captured from the first meaningful journal line */
+export interface JournalHeader {
+  sessionId: string;
+  projectPath: string;
+  gitBranch: string;
+  claudeVersion: string;
+  startedAt: string;
+}
+
+/** Result of parsing raw JSONL lines (stateless about session identity) */
+export interface ParsedJournalLines {
+  messages: ExtractedMessage[];
+  images: ExtractedImage[];
+  /** Header from the first journal line that carried sessionId info */
+  header?: JournalHeader;
+  /** First user-facing text seen (raw, before truncation) — feeds SessionMeta.firstPrompt */
+  firstUserText?: string;
+  /** Timestamp of the last processed line — feeds SessionMeta.endedAt */
+  lastTimestamp?: string;
+}
+
+/**
+ * Parse raw JSONL content into messages/images without any session-level state.
+ *
+ * This is the building block for both full-file parsing (`parseSession`) and
+ * tail-based incremental imports driven by the FS watcher. Callers pass
+ * `startTurnIndex` to continue numbering from an existing session's message
+ * count when doing tail reads.
+ */
+export function parseJournalLines(
   jsonlContent: string,
-  project: string,
-  indexEntry?: SessionIndexEntry
-): ParsedSession | null {
+  startTurnIndex = 0
+): ParsedJournalLines {
   const lines = jsonlContent.split("\n").filter((line) => line.trim());
   const messages: ExtractedMessage[] = [];
   const images: ExtractedImage[] = [];
-  let meta: Partial<SessionMeta> = {
-    project,
-    projectPath: "",
-    gitBranch: "",
-    firstPrompt: "",
-    startedAt: "",
-    endedAt: "",
-    claudeVersion: "",
-    sessionId: "",
-  };
+  let header: JournalHeader | undefined;
+  let firstUserText: string | undefined;
+  let lastTimestamp: string | undefined;
 
-  let turnIndex = 0;
+  let turnIndex = startTurnIndex;
 
   for (const line of lines) {
     let parsed: JournalLine;
@@ -79,18 +99,20 @@ export function parseSession(
     // Skip sidechains (abandoned conversation branches)
     if (parsed.isSidechain) continue;
 
-    // Extract metadata from first message
-    if (!meta.sessionId && parsed.sessionId) {
-      meta.sessionId = parsed.sessionId;
-      meta.projectPath = parsed.cwd ?? "";
-      meta.gitBranch = parsed.gitBranch ?? "";
-      meta.claudeVersion = parsed.version ?? "";
-      meta.startedAt = parsed.timestamp ?? "";
+    // Capture header from the first line that carries session identity
+    if (!header && parsed.sessionId) {
+      header = {
+        sessionId: parsed.sessionId,
+        projectPath: parsed.cwd ?? "",
+        gitBranch: parsed.gitBranch ?? "",
+        claudeVersion: parsed.version ?? "",
+        startedAt: parsed.timestamp ?? "",
+      };
     }
 
     // Track end time
     if (parsed.timestamp) {
-      meta.endedAt = parsed.timestamp;
+      lastTimestamp = parsed.timestamp;
     }
 
     if (!parsed.uuid || !parsed.message?.content) continue;
@@ -103,8 +125,8 @@ export function parseSession(
       // Simple string content (user messages)
       const text = content.trim();
       if (!text) continue;
-      if (!meta.firstPrompt && parsed.type === "user") {
-        meta.firstPrompt = text.slice(0, 500);
+      if (!firstUserText && parsed.type === "user") {
+        firstUserText = text;
       }
       messages.push({ uuid: parsed.uuid, role, blockType: "text", content: text, timestamp: ts, turnIndex: turnIndex++ });
       continue;
@@ -118,8 +140,8 @@ export function parseSession(
       if (block.type === "text") {
         const text = (block as { text?: string }).text?.trim();
         if (!text) continue;
-        if (!meta.firstPrompt && parsed.type === "user") {
-          meta.firstPrompt = text.slice(0, 500);
+        if (!firstUserText && parsed.type === "user") {
+          firstUserText = text;
         }
         messages.push({ uuid: parsed.uuid, role, blockType: "text", content: text, timestamp: ts, turnIndex: turnIndex++ });
       } else if (block.type === "thinking") {
@@ -156,9 +178,31 @@ export function parseSession(
     }
   }
 
-  if (!meta.sessionId || messages.length === 0) {
+  return { messages, images, header, firstUserText, lastTimestamp };
+}
+
+/** Parse a session JSONL file into structured data */
+export function parseSession(
+  jsonlContent: string,
+  project: string,
+  indexEntry?: SessionIndexEntry
+): ParsedSession | null {
+  const result = parseJournalLines(jsonlContent, 0);
+
+  if (!result.header || result.messages.length === 0) {
     return null;
   }
+
+  const meta: SessionMeta = {
+    sessionId: result.header.sessionId,
+    project,
+    projectPath: result.header.projectPath,
+    gitBranch: result.header.gitBranch,
+    firstPrompt: result.firstUserText?.slice(0, 500) ?? "",
+    startedAt: result.header.startedAt,
+    endedAt: result.lastTimestamp ?? "",
+    claudeVersion: result.header.claudeVersion,
+  };
 
   // Enrich from sessions-index.json if available
   if (indexEntry) {
@@ -177,9 +221,9 @@ export function parseSession(
   }
 
   return {
-    meta: meta as SessionMeta,
-    messages,
-    images,
+    meta,
+    messages: result.messages,
+    images: result.images,
   };
 }
 

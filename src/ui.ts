@@ -1,12 +1,23 @@
 import { VaultDB } from "./db.ts";
 import { displayProject } from "./display.ts";
 import { getAsset } from "./ui_assets.ts";
+import { SSEBroadcaster } from "./sse.ts";
+import { startProjectWatcher, type WatcherStatus } from "./watcher.ts";
+import { PROJECTS_DIR } from "./config.ts";
+
+const SSE_KEEPALIVE_MS = 15_000;
 
 const DEFAULT_PORT = 6276;
 
 interface UIOptions {
   dbPath: string;
   port: number;
+  /**
+   * Directory to watch for real-time JSONL updates. Defaults to the
+   * production `~/.claude/projects`; tests override it with a tmpdir.
+   * Pass `null` to disable the watcher entirely.
+   */
+  projectsDir?: string | null;
 }
 
 export async function startBackground(options: UIOptions): Promise<void> {
@@ -42,29 +53,117 @@ export async function startBackground(options: UIOptions): Promise<void> {
   console.error("Failed to start UI server.");
 }
 
-export function runUI(options: UIOptions): void {
+/**
+ * Handle returned by `runUI`, giving callers programmatic control over the
+ * running server. This replaces the previous fire-and-forget `void` return,
+ * making it possible to:
+ *
+ *   - await a clean shutdown from tests (without calling `Deno.exit`)
+ *   - await `server.finished` from `main.ts` to keep the process alive
+ *   - dispatch shutdown from the `/api/shutdown` HTTP handler
+ */
+export interface UIHandle {
+  server: Deno.HttpServer;
+  /** SSE broadcaster — exposed so the watcher can push events. */
+  broadcaster: SSEBroadcaster;
+  watcherStatus: WatcherStatus;
+  /** Gracefully stop the server, the watcher, and close the DB. Safe to call multiple times. */
+  shutdown: () => Promise<void>;
+  /** Resolves when the server has fully stopped serving. */
+  finished: Promise<void>;
+}
+
+export function runUI(options: UIOptions): UIHandle {
   const db = new VaultDB(options.dbPath);
   const ac = new AbortController();
+  const broadcaster = new SSEBroadcaster();
+  const watcherStatus: WatcherStatus = {
+    enabled: false,
+    running: false,
+    projectsDir: "",
+    debounceMs: 0,
+  };
 
-  Deno.serve({ port: options.port, signal: ac.signal, onListen: () => {
-    console.log(`agent-recall UI: http://localhost:${options.port}`);
-  }}, (req) => {
+  // Forward-declared so the request handler and `doShutdown` can both close
+  // over it. Assigned immediately below via `Deno.serve`.
+  let server: Deno.HttpServer;
+
+  // Kick off the FS watcher unless it was explicitly disabled. It runs
+  // concurrently with the HTTP server and stops when `ac.signal` aborts.
+  // Errors are logged but do not tear the server down.
+  const projectsDir =
+    options.projectsDir === undefined ? PROJECTS_DIR : options.projectsDir;
+  let watcherPromise: Promise<void> = Promise.resolve();
+  if (projectsDir !== null) {
+    watcherStatus.enabled = true;
+    watcherStatus.projectsDir = projectsDir;
+    watcherPromise = startProjectWatcher(db, broadcaster, projectsDir, {
+      signal: ac.signal,
+      status: watcherStatus,
+    }).catch((e) => {
+      watcherStatus.running = false;
+      watcherStatus.lastError = e instanceof Error ? e.message : String(e);
+      watcherStatus.lastErrorAt = new Date().toISOString();
+      console.error("[watcher] crashed:", e);
+    });
+  }
+
+  let shuttingDown = false;
+  const doShutdown = async (): Promise<void> => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    broadcaster.closeAll();
+    ac.abort();
+    try {
+      await watcherPromise;
+    } catch {
+      // watcher errors are already logged
+    }
+    try {
+      await server.finished;
+    } catch {
+      // already stopped
+    }
+    try {
+      db.close();
+    } catch {
+      // already closed
+    }
+  };
+
+  server = Deno.serve({
+    port: options.port,
+    signal: ac.signal,
+    onListen: ({ port }) => {
+      console.log(`agent-recall UI: http://localhost:${port}`);
+    },
+  }, (req) => {
     const url = new URL(req.url);
 
-    // POST /api/shutdown
+    // POST /api/shutdown — used by `agent-recall ui stop` against a
+    // background-spawned process. Shuts down gracefully then exits so the
+    // detached subprocess actually terminates.
     if (req.method === "POST" && url.pathname === "/api/shutdown") {
-      // Respond first, then shut down
       setTimeout(() => {
-        db.close();
-        ac.abort();
-        Deno.exit(0);
+        doShutdown().finally(() => Deno.exit(0));
       }, 100);
       return new Response(null, { status: 202 });
     }
 
     // GET /api/status
     if (url.pathname === "/api/status") {
-      return jsonResponse({ status: "running", pid: Deno.pid, port: options.port });
+      return jsonResponse({
+        status: "running",
+        pid: Deno.pid,
+        port: (server.addr as Deno.NetAddr).port,
+        sseClients: broadcaster.clientCount(),
+        watcher: watcherStatus,
+      });
+    }
+
+    // GET /api/stream — Server-Sent Events for live UI updates
+    if (url.pathname === "/api/stream") {
+      return handleSSEStream(broadcaster);
     }
 
     if (url.pathname.startsWith("/api/")) {
@@ -72,6 +171,63 @@ export function runUI(options: UIOptions): void {
     }
 
     return serveAsset(url.pathname);
+  });
+
+  return {
+    server,
+    broadcaster,
+    watcherStatus,
+    shutdown: doShutdown,
+    finished: server.finished,
+  };
+}
+
+/**
+ * Long-lived SSE response. Each client gets a fresh ReadableStream that the
+ * broadcaster writes into; a 15-second keep-alive comment keeps the
+ * connection alive through HTTP/proxy idle timeouts.
+ */
+function handleSSEStream(broadcaster: SSEBroadcaster): Response {
+  let keepAliveId: number | undefined;
+  let ctl: ReadableStreamDefaultController<Uint8Array> | undefined;
+
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      ctl = controller;
+      broadcaster.addClient(controller);
+
+      // Initial hello so clients can confirm the stream is alive before any
+      // real events arrive.
+      try {
+        controller.enqueue(
+          new TextEncoder().encode(
+            `data: ${JSON.stringify({ type: "connected", timestamp: Date.now() })}\n\n`
+          )
+        );
+      } catch {
+        // ignore
+      }
+
+      keepAliveId = setInterval(() => {
+        broadcaster.ping(controller);
+      }, SSE_KEEPALIVE_MS);
+    },
+    cancel() {
+      if (keepAliveId !== undefined) {
+        clearInterval(keepAliveId);
+        keepAliveId = undefined;
+      }
+      if (ctl) broadcaster.removeClient(ctl);
+    },
+  });
+
+  return new Response(body, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+      "X-Accel-Buffering": "no",
+    },
   });
 }
 

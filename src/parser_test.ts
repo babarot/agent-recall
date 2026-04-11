@@ -1,5 +1,5 @@
 import { assertEquals, assertNotEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { parseSession } from "./parser.ts";
+import { parseJournalLines, parseSession } from "./parser.ts";
 
 function line(obj: Record<string, unknown>): string {
   return JSON.stringify(obj);
@@ -371,4 +371,77 @@ Deno.test("parseSession ignores images from sidechain messages", () => {
   const result = parseSession(jsonl, "test");
   assertNotEquals(result, null);
   assertEquals(result!.images.length, 0);
+});
+
+// --- parseJournalLines tests (tail-read support) ---
+
+Deno.test("parseJournalLines returns empty result for empty input", () => {
+  const result = parseJournalLines("");
+  assertEquals(result.messages.length, 0);
+  assertEquals(result.images.length, 0);
+  assertEquals(result.header, undefined);
+  assertEquals(result.firstUserText, undefined);
+  assertEquals(result.lastTimestamp, undefined);
+});
+
+Deno.test("parseJournalLines captures header from first line with sessionId", () => {
+  const jsonl = [
+    USER_MSG("Hello", "u1", "2026-01-01T00:00:00Z"),
+    ASSISTANT_MSG([{ type: "text", text: "Hi" }], "a1", "2026-01-01T00:00:01Z"),
+  ].join("\n");
+
+  const result = parseJournalLines(jsonl);
+  assertNotEquals(result.header, undefined);
+  assertEquals(result.header!.sessionId, "sess-001");
+  assertEquals(result.header!.projectPath, "/home/user/project");
+  assertEquals(result.header!.gitBranch, "main");
+  assertEquals(result.header!.claudeVersion, "2.1.87");
+  assertEquals(result.header!.startedAt, "2026-01-01T00:00:00Z");
+});
+
+Deno.test("parseJournalLines records firstUserText (not truncated)", () => {
+  const longText = "x".repeat(800);
+  const jsonl = USER_MSG(longText, "u1", "2026-01-01T00:00:00Z");
+
+  const result = parseJournalLines(jsonl);
+  assertEquals(result.firstUserText, longText);
+});
+
+Deno.test("parseJournalLines records lastTimestamp as latest seen", () => {
+  const jsonl = [
+    USER_MSG("first", "u1", "2026-01-01T00:00:00Z"),
+    ASSISTANT_MSG([{ type: "text", text: "second" }], "a1", "2026-01-01T00:00:05Z"),
+    USER_MSG("third", "u2", "2026-01-01T00:00:10Z"),
+  ].join("\n");
+
+  const result = parseJournalLines(jsonl);
+  assertEquals(result.lastTimestamp, "2026-01-01T00:00:10Z");
+});
+
+Deno.test("parseJournalLines respects startTurnIndex for tail reads", () => {
+  const jsonl = [
+    USER_MSG("new message", "u1", "2026-01-01T00:00:00Z"),
+    ASSISTANT_MSG([{ type: "text", text: "response" }], "a1", "2026-01-01T00:00:01Z"),
+  ].join("\n");
+
+  const result = parseJournalLines(jsonl, 42);
+  assertEquals(result.messages.length, 2);
+  assertEquals(result.messages[0].turnIndex, 42);
+  assertEquals(result.messages[1].turnIndex, 43);
+});
+
+Deno.test("parseJournalLines output is consistent with parseSession wrapper", () => {
+  // Regression: parseSession must keep its original contract after the refactor.
+  const jsonl = [
+    USER_MSG("hello", "u1", "2026-01-01T00:00:00Z"),
+    ASSISTANT_MSG([{ type: "text", text: "world" }], "a1", "2026-01-01T00:00:01Z"),
+  ].join("\n");
+
+  const session = parseSession(jsonl, "test-project");
+  const lines = parseJournalLines(jsonl);
+
+  assertNotEquals(session, null);
+  assertEquals(session!.messages.length, lines.messages.length);
+  assertEquals(session!.meta.sessionId, lines.header!.sessionId);
+  assertEquals(session!.meta.endedAt, lines.lastTimestamp);
 });
