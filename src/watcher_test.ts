@@ -219,6 +219,66 @@ Deno.test({
 });
 
 Deno.test({
+  name: "watcher debounces rapid writes into a single import",
+  async fn() {
+    const tempDir = Deno.makeTempDirSync();
+    const db = new VaultDB(":memory:");
+    const spy = new SpyBroadcaster();
+    const ac = new AbortController();
+
+    const projectDir = join(tempDir, "proj-debounce");
+    Deno.mkdirSync(projectDir);
+
+    // Use a relatively long debounce so the rapid writes all land inside
+    // the same window even on a slow CI machine.
+    const watcherPromise = startProjectWatcher(db, spy, tempDir, {
+      debounceMs: 200,
+      signal: ac.signal,
+    });
+
+    try {
+      await new Promise((r) => setTimeout(r, 100));
+
+      const filePath = join(projectDir, "sess-debounce.jsonl");
+
+      // Fire several rapid writes. Each one touches the file from the
+      // kernel's perspective, so a naive (non-debounced) watcher would
+      // import five times.
+      for (let i = 0; i < 5; i++) {
+        Deno.writeTextFileSync(
+          filePath,
+          userLine(
+            `hello ${i}`,
+            `u${i}`,
+            `2026-04-12T00:00:0${i}Z`,
+            "sess-debounce"
+          ) + "\n",
+          i === 0 ? undefined : { append: true }
+        );
+      }
+
+      // Wait for the debounce window plus a margin for the import to run.
+      await new Promise((r) => setTimeout(r, 500));
+
+      const updates = spy.events.filter(
+        (e) => e.type === "session_updated" && e.sessionId === "sess-debounce"
+      );
+      // Should collapse to exactly 1 broadcast for the burst.
+      assertEquals(updates.length, 1);
+      // And it should have picked up all 5 messages in one go.
+      assertEquals(db.sessionExists("sess-debounce"), 5);
+    } finally {
+      ac.abort();
+      await watcherPromise;
+      db.close();
+      Deno.removeSync(tempDir, { recursive: true });
+    }
+  },
+  sanitizeOps: false,
+  sanitizeResources: false,
+});
+
+Deno.test({
   name: "watcher stops when abort signal fires",
   async fn() {
     const tempDir = Deno.makeTempDirSync();
