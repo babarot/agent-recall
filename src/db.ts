@@ -35,8 +35,20 @@ export class VaultDB {
       .get() as { version: number } | undefined;
 
     const currentVersion = versionRow?.version ?? 0;
+    if (currentVersion < 2) {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS images (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL REFERENCES sessions(session_id),
+            message_uuid TEXT,
+            image_index INTEGER DEFAULT 0,
+            media_type TEXT NOT NULL,
+            data       BLOB NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_images_session_message ON images(session_id, message_uuid);
+      `);
+    }
     if (currentVersion < SCHEMA_VERSION) {
-      // Future migrations go here
       this.db
         .prepare("INSERT INTO schema_version (version) VALUES (?)")
         .run(SCHEMA_VERSION);
@@ -88,23 +100,88 @@ export class VaultDB {
     sessionId: string;
     uuid: string;
     role: string;
+    blockType?: string;
     content: string;
+    toolName?: string;
+    toolInput?: string;
     timestamp: string;
     turnIndex: number;
   }): void {
     this.db
       .prepare(
-        `INSERT OR IGNORE INTO messages (session_id, uuid, role, content, timestamp, turn_index)
-       VALUES (?, ?, ?, ?, ?, ?)`
+        `INSERT OR IGNORE INTO messages (session_id, uuid, role, block_type, content, tool_name, tool_input, timestamp, turn_index)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         params.sessionId,
         params.uuid,
         params.role,
+        params.blockType ?? "text",
         params.content,
+        params.toolName ?? null,
+        params.toolInput ?? null,
         params.timestamp,
         params.turnIndex
       );
+  }
+
+  /** Insert an image blob */
+  insertImage(params: {
+    sessionId: string;
+    messageUuid: string;
+    imageIndex: number;
+    mediaType: string;
+    data: Uint8Array;
+  }): void {
+    this.db
+      .prepare(
+        `INSERT INTO images (session_id, message_uuid, image_index, media_type, data)
+       VALUES (?, ?, ?, ?, ?)`
+      )
+      .run(
+        params.sessionId,
+        params.messageUuid,
+        params.imageIndex,
+        params.mediaType,
+        params.data
+      );
+  }
+
+  /** Get an image by session, message uuid and index */
+  getImage(sessionId: string, messageUuid: string, imageIndex: number): {
+    mediaType: string;
+    data: Uint8Array;
+  } | null {
+    const row = this.db
+      .prepare(
+        `SELECT media_type as mediaType, data FROM images
+         WHERE session_id = ? AND message_uuid = ? AND image_index = ?`
+      )
+      .get(sessionId, messageUuid, imageIndex) as {
+      mediaType: string;
+      data: Uint8Array;
+    } | undefined;
+    return row ?? null;
+  }
+
+  /** Get the first real user text for a session (skipping tag-only messages) */
+  getFirstUserText(sessionId: string): string | null {
+    const row = this.db
+      .prepare(
+        `SELECT content FROM messages
+         WHERE session_id = ? AND block_type = 'text' AND role = 'user' AND content NOT LIKE '<%'
+         ORDER BY turn_index LIMIT 1`
+      )
+      .get(sessionId) as { content: string } | undefined;
+    return row?.content?.slice(0, 500) ?? null;
+  }
+
+  /** Check if images exist for a message */
+  hasImages(sessionId: string, messageUuid: string): boolean {
+    const row = this.db
+      .prepare("SELECT 1 FROM images WHERE session_id = ? AND message_uuid = ? LIMIT 1")
+      .get(sessionId, messageUuid);
+    return !!row;
   }
 
   /** Update session message count and ended_at after incremental import */
@@ -140,8 +217,13 @@ export class VaultDB {
     timestamp: string;
   }> {
     const limit = options.limit ?? 20;
+    // Wrap query in double quotes if it contains special FTS5 characters
+    // to prevent hyphens being interpreted as NOT operators etc.
+    const safeQuery = /^".*"$/.test(query) || /\b(AND|OR|NOT)\b/.test(query)
+      ? query
+      : `"${query.replace(/"/g, '""')}"`;
     const conditions: string[] = ["messages_fts MATCH ?"];
-    const params: (string | number)[] = [query];
+    const params: (string | number)[] = [safeQuery];
 
     if (options.project) {
       conditions.push("(s.project LIKE ? OR s.project_path LIKE ?)");
@@ -185,6 +267,7 @@ export class VaultDB {
   listSessions(options: {
     project?: string;
     limit?: number;
+    offset?: number;
   } = {}): Array<{
     sessionId: string;
     project: string;
@@ -203,7 +286,8 @@ export class VaultDB {
       params.push(`%${options.project}%`, `%${options.project}%`);
     }
 
-    params.push(limit);
+    const offset = options.offset ?? 0;
+    params.push(limit, offset);
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
     const sql = `
@@ -212,7 +296,7 @@ export class VaultDB {
              message_count as messageCount, started_at as startedAt
       FROM sessions ${where}
       ORDER BY started_at DESC
-      LIMIT ?`;
+      LIMIT ? OFFSET ?`;
 
     return this.db.prepare(sql).all(...params) as Array<{
       sessionId: string;
@@ -237,8 +321,12 @@ export class VaultDB {
       summary: string | null;
     } | null;
     messages: Array<{
+      uuid: string;
       role: string;
+      blockType: string;
       content: string;
+      toolName: string | null;
+      toolInput: string | null;
       timestamp: string;
       turnIndex: number;
     }>;
@@ -266,13 +354,17 @@ export class VaultDB {
 
     const messages = this.db
       .prepare(
-        `SELECT role, content, timestamp, turn_index as turnIndex
+        `SELECT uuid, role, block_type as blockType, content, tool_name as toolName, tool_input as toolInput, timestamp, turn_index as turnIndex
          FROM messages WHERE session_id = ?
          ORDER BY turn_index`
       )
       .all(session.sessionId) as Array<{
+      uuid: string;
       role: string;
+      blockType: string;
       content: string;
+      toolName: string | null;
+      toolInput: string | null;
       timestamp: string;
       turnIndex: number;
     }>;

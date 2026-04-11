@@ -6,6 +6,7 @@ import { runList } from "./list.ts";
 import { runExport } from "./export.ts";
 import { runStats } from "./stats.ts";
 import { runMcp } from "./mcp.ts";
+import { runUI, startBackground, stopUI, statusUI } from "./ui.ts";
 
 const USAGE = `agent-recall - Archive and search coding agent sessions
 
@@ -16,6 +17,10 @@ Usage:
   agent-recall export <id> [options]  Export a session
   agent-recall stats [options]        Show archive statistics
   agent-recall mcp                    Start MCP server (stdio transport)
+  agent-recall ui [--port <n>]        Start web UI in background (default: 6276)
+  agent-recall ui --foreground        Start web UI in foreground
+  agent-recall ui stop                Stop running UI server
+  agent-recall ui status              Show UI server status
 
 Global Options:
   --db <path>     Database path (default: ~/.claude/vault.db)
@@ -45,8 +50,8 @@ Export Options:
 
 async function main(): Promise<void> {
   const args = parseArgs(Deno.args, {
-    string: ["db", "session", "project", "format", "from", "to", "output"],
-    boolean: ["help", "dry-run"],
+    string: ["db", "session", "project", "format", "from", "to", "output", "port"],
+    boolean: ["help", "dry-run", "foreground"],
     default: { db: DEFAULT_DB_PATH },
     alias: { h: "help", n: "dry-run" },
   });
@@ -121,6 +126,21 @@ async function main(): Promise<void> {
     case "mcp":
       await runMcp(dbPath);
       break;
+
+    case "ui": {
+      const uiAction = args._[1] ? String(args._[1]) : "start";
+      const port = args.port ? Number(args.port) : 6276;
+      if (uiAction === "stop") {
+        await stopUI(port);
+      } else if (uiAction === "status") {
+        await statusUI(port);
+      } else if (args.foreground) {
+        runUI({ dbPath, port });
+      } else {
+        await startBackground({ dbPath, port });
+      }
+      break;
+    }
 
     default:
       console.error(`Unknown command: ${subcommand}`);

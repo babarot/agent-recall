@@ -8,10 +8,22 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: denoland/setup-deno@e95548e56dfa95d4e1a28d6f422fafe75c4c26fb # v2.0.3
         with:
           deno-version: v2.x
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: 22
+
+      # Build UI assets (required by src/ui.ts import)
+      - run: cd ui && npm ci && npm run build
+      - run: deno task ui:embed
+
+      # Backend tests
       - run: deno task test
+
+      # Frontend tests
+      - run: cd ui && npm test

@@ -320,3 +320,222 @@ Deno.test("stats filters by project", () => {
     assertEquals(s.totalMessages, 10);
   });
 });
+
+// --- Images ---
+
+Deno.test("insertImage and getImage", () => {
+  withDB((db) => {
+    seedSession(db, "s1");
+    seedMessage(db, "s1", "m1", "user", "hello", 0);
+
+    const data = new TextEncoder().encode("fake-png-data");
+    db.insertImage({
+      sessionId: "s1",
+      messageUuid: "m1",
+      imageIndex: 0,
+      mediaType: "image/png",
+      data,
+    });
+
+    const img = db.getImage("s1", "m1", 0);
+    assertNotEquals(img, null);
+    assertEquals(img!.mediaType, "image/png");
+    assertEquals(new TextDecoder().decode(img!.data), "fake-png-data");
+  });
+});
+
+Deno.test("getImage returns null for nonexistent image", () => {
+  withDB((db) => {
+    seedSession(db, "s1");
+    assertEquals(db.getImage("s1", "m1", 0), null);
+  });
+});
+
+Deno.test("hasImages returns correct boolean", () => {
+  withDB((db) => {
+    seedSession(db, "s1");
+    seedMessage(db, "s1", "m1", "user", "hello", 0);
+
+    assertEquals(db.hasImages("s1", "m1"), false);
+
+    db.insertImage({
+      sessionId: "s1",
+      messageUuid: "m1",
+      imageIndex: 0,
+      mediaType: "image/png",
+      data: new Uint8Array([1, 2, 3]),
+    });
+
+    assertEquals(db.hasImages("s1", "m1"), true);
+  });
+});
+
+Deno.test("multiple images per message", () => {
+  withDB((db) => {
+    seedSession(db, "s1");
+    seedMessage(db, "s1", "m1", "user", "hello", 0);
+
+    db.insertImage({ sessionId: "s1", messageUuid: "m1", imageIndex: 0, mediaType: "image/png", data: new Uint8Array([1]) });
+    db.insertImage({ sessionId: "s1", messageUuid: "m1", imageIndex: 1, mediaType: "image/jpeg", data: new Uint8Array([2]) });
+
+    assertEquals(db.getImage("s1", "m1", 0)!.mediaType, "image/png");
+    assertEquals(db.getImage("s1", "m1", 1)!.mediaType, "image/jpeg");
+    assertEquals(db.getImage("s1", "m1", 2), null);
+  });
+});
+
+// --- FTS5 safe query ---
+
+Deno.test("search handles hyphens in query without crashing", () => {
+  withDB((db) => {
+    seedSession(db, "s1");
+    seedMessage(db, "s1", "m1", "user", "session 43968160-3681-46c0", 0);
+
+    const results = db.search("43968160-3681");
+    assertEquals(results.length, 1);
+  });
+});
+
+Deno.test("search preserves explicit FTS5 operators", () => {
+  withDB((db) => {
+    seedSession(db, "s1");
+    seedMessage(db, "s1", "m1", "user", "terraform module deploy", 0);
+
+    const results = db.search("terraform AND module");
+    assertEquals(results.length, 1);
+
+    const noResults = db.search("terraform AND nonexistent");
+    assertEquals(noResults.length, 0);
+  });
+});
+
+Deno.test("search with quoted phrase", () => {
+  withDB((db) => {
+    seedSession(db, "s1");
+    seedMessage(db, "s1", "m1", "user", "terraform state migration plan", 0);
+
+    const results = db.search('"state migration"');
+    assertEquals(results.length, 1);
+  });
+});
+
+Deno.test("exportSession includes uuid in messages", () => {
+  withDB((db) => {
+    seedSession(db, "s1");
+    seedMessage(db, "s1", "msg-uuid-1", "user", "hello", 0);
+
+    const { messages } = db.exportSession("s1");
+    assertEquals(messages[0].uuid, "msg-uuid-1");
+  });
+});
+
+// --- project_path filtering ---
+
+Deno.test("listSessions filters by project_path", () => {
+  withDB((db) => {
+    db.insertSession({
+      sessionId: "s1", project: "-Users-bob-src-myproject", projectPath: "/Users/bob/src/myproject",
+      gitBranch: "main", firstPrompt: "test", messageCount: 1,
+      startedAt: "2026-01-01T00:00:00Z", endedAt: "2026-01-01T00:10:00Z", claudeVersion: "2.1.87",
+    });
+    db.insertSession({
+      sessionId: "s2", project: "-Users-bob-src-other", projectPath: "/Users/bob/src/other",
+      gitBranch: "main", firstPrompt: "test", messageCount: 1,
+      startedAt: "2026-01-01T00:00:00Z", endedAt: "2026-01-01T00:10:00Z", claudeVersion: "2.1.87",
+    });
+
+    const results = db.listSessions({ project: "/Users/bob/src/myproject" });
+    assertEquals(results.length, 1);
+    assertEquals(results[0].sessionId, "s1");
+  });
+});
+
+Deno.test("search filters by project_path", () => {
+  withDB((db) => {
+    db.insertSession({
+      sessionId: "s1", project: "-Users-bob-src-alpha", projectPath: "/Users/bob/src/alpha",
+      gitBranch: "main", firstPrompt: "test", messageCount: 1,
+      startedAt: "2026-01-01T00:00:00Z", endedAt: "2026-01-01T00:10:00Z", claudeVersion: "2.1.87",
+    });
+    db.insertSession({
+      sessionId: "s2", project: "-Users-bob-src-beta", projectPath: "/Users/bob/src/beta",
+      gitBranch: "main", firstPrompt: "test", messageCount: 1,
+      startedAt: "2026-01-01T00:00:00Z", endedAt: "2026-01-01T00:10:00Z", claudeVersion: "2.1.87",
+    });
+    seedMessage(db, "s1", "m1", "user", "hello world", 0);
+    seedMessage(db, "s2", "m2", "user", "hello world", 0);
+
+    const results = db.search("hello", { project: "/Users/bob/src/alpha" });
+    assertEquals(results.length, 1);
+    assertEquals(results[0].sessionId, "s1");
+  });
+});
+
+// --- getFirstUserText ---
+
+Deno.test("getFirstUserText returns first non-tag user text", () => {
+  withDB((db) => {
+    seedSession(db, "s1");
+    db.insertMessage({ sessionId: "s1", uuid: "m1", role: "user", blockType: "text", content: "<command-message>commit</command-message>", timestamp: "2026-01-01T00:00:00Z", turnIndex: 0 });
+    db.insertMessage({ sessionId: "s1", uuid: "m2", role: "user", blockType: "text", content: "real user prompt", timestamp: "2026-01-01T00:00:01Z", turnIndex: 1 });
+
+    assertEquals(db.getFirstUserText("s1"), "real user prompt");
+  });
+});
+
+Deno.test("getFirstUserText returns null when no clean text exists", () => {
+  withDB((db) => {
+    seedSession(db, "s1");
+    db.insertMessage({ sessionId: "s1", uuid: "m1", role: "user", blockType: "text", content: "<command-name>/commit</command-name>", timestamp: "2026-01-01T00:00:00Z", turnIndex: 0 });
+
+    assertEquals(db.getFirstUserText("s1"), null);
+  });
+});
+
+Deno.test("getFirstUserText skips tool_use block types", () => {
+  withDB((db) => {
+    seedSession(db, "s1");
+    db.insertMessage({ sessionId: "s1", uuid: "m1", role: "assistant", blockType: "tool_use", content: "Bash", toolName: "Bash", timestamp: "2026-01-01T00:00:00Z", turnIndex: 0 });
+    db.insertMessage({ sessionId: "s1", uuid: "m2", role: "user", blockType: "text", content: "my question", timestamp: "2026-01-01T00:00:01Z", turnIndex: 1 });
+
+    assertEquals(db.getFirstUserText("s1"), "my question");
+  });
+});
+
+// --- block_type in insertMessage + exportSession ---
+
+Deno.test("insertMessage stores block_type and tool fields", () => {
+  withDB((db) => {
+    seedSession(db, "s1");
+    db.insertMessage({ sessionId: "s1", uuid: "m1", role: "assistant", blockType: "tool_use", content: "Bash", toolName: "Bash", toolInput: '{"command":"ls"}', timestamp: "2026-01-01T00:00:00Z", turnIndex: 0 });
+    db.insertMessage({ sessionId: "s1", uuid: "m2", role: "assistant", blockType: "thinking", content: "let me think", timestamp: "2026-01-01T00:00:01Z", turnIndex: 1 });
+
+    const { messages } = db.exportSession("s1");
+    assertEquals(messages[0].blockType, "tool_use");
+    assertEquals(messages[0].toolName, "Bash");
+    assertEquals(messages[0].toolInput, '{"command":"ls"}');
+    assertEquals(messages[1].blockType, "thinking");
+    assertEquals(messages[1].toolName, null);
+  });
+});
+
+// --- listSessions with offset ---
+
+Deno.test("listSessions supports offset for pagination", () => {
+  withDB((db) => {
+    for (let i = 0; i < 5; i++) {
+      db.insertSession({
+        sessionId: `s${i}`, project: "proj", projectPath: "/proj",
+        gitBranch: "main", firstPrompt: `prompt ${i}`, messageCount: 1,
+        startedAt: `2026-01-0${i + 1}T00:00:00Z`, endedAt: `2026-01-0${i + 1}T00:10:00Z`, claudeVersion: "2.1.87",
+      });
+    }
+
+    const page1 = db.listSessions({ limit: 2, offset: 0 });
+    const page2 = db.listSessions({ limit: 2, offset: 2 });
+    assertEquals(page1.length, 2);
+    assertEquals(page2.length, 2);
+    assertEquals(page1[0].sessionId, "s4"); // newest first
+    assertEquals(page2[0].sessionId, "s2");
+  });
+});

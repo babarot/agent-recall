@@ -13,6 +13,7 @@ Claude Code stores conversations as JSONL files under `~/.claude/projects/`, but
 - **Noise filtering** -- Strips tool_use / tool_result / thinking, keeping only conversation text (~7% of raw data)
 - **Idempotent** -- UUID-based deduplication; safe to import repeatedly
 - **MCP server** -- Agents can autonomously search past sessions via `recall_search`, `recall_list`, `recall_export`, `recall_stats` tools
+- **Web UI** -- Browse sessions and chat history in the browser
 - **Zero dependencies** -- Single binary via `deno compile`; no external services
 
 ## Install
@@ -100,6 +101,13 @@ agent-recall export <session-id> --format json --output session.json
 
 # Show statistics
 agent-recall stats
+
+# Web UI
+agent-recall ui                    # Start in background (default port: 6276)
+agent-recall ui --foreground       # Start in foreground
+agent-recall ui --port 8080        # Custom port
+agent-recall ui status             # Show server status
+agent-recall ui stop               # Stop the server
 ```
 
 ### Import
@@ -160,20 +168,47 @@ Options:
   --project <name>    Filter by project
 ```
 
-## Architecture
+### UI
 
 ```
-~/.claude/projects/*/*.jsonl
-         |
-         v
-    [parser.ts]         Parse JSONL line by line
-         |               Extract text blocks from user/assistant messages
-         |               Filter out tool_use, tool_result, thinking, system
-         v
-    [SQLite + FTS5]     ~/.claude/vault.db
-         |
-         v
-    search / list / export / stats
+agent-recall ui [options]
+
+Options:
+  --port <n>          Port number (default: 6276)
+  --foreground        Run in foreground instead of background
+
+Subcommands:
+  agent-recall ui stop     Stop the running server
+  agent-recall ui status   Show server status
+```
+
+Opens `http://localhost:6276` with session browser, chat viewer, and search.
+
+## Architecture
+
+agent-recall is a single binary (`~/.claude/agent-recall`) with three interfaces:
+
+| Interface | How it starts | Purpose |
+|-----------|--------------|---------|
+| **Hook** | Automatically on every Claude Code session exit (`SessionEnd` hook) | Archives sessions to SQLite |
+| **MCP** | Automatically when Claude Code starts (registered via `claude mcp add`) | Lets agents search past sessions autonomously |
+| **CLI** | Manually by the user (`agent-recall search ...`) | Search, list, export, stats from the terminal |
+| **Web UI** | Manually by the user (`agent-recall ui`) | Browse sessions and chat history in the browser |
+
+```mermaid
+flowchart TD
+    JSONL["~/.claude/projects/*/*.jsonl"] -->|SessionEnd hook<br/>automatic| Parser["parser.ts<br/>Extract text, filter noise"]
+    Parser --> DB["SQLite + FTS5<br/>~/.claude/vault.db"]
+    DB --> CLI["CLI<br/>agent-recall search/list/export/stats"]
+    DB --> MCP["MCP Server<br/>agent-recall mcp<br/><i>auto-started by Claude Code</i>"]
+    DB --> UI["Web UI<br/>agent-recall ui<br/><i>http://localhost:6276</i>"]
+
+    style JSONL fill:#1c2128,stroke:#30363d,color:#e6edf3
+    style Parser fill:#1c2128,stroke:#30363d,color:#e6edf3
+    style DB fill:#1c2f50,stroke:#58a6ff,color:#e6edf3
+    style CLI fill:#21262d,stroke:#30363d,color:#e6edf3
+    style MCP fill:#21262d,stroke:#30363d,color:#e6edf3
+    style UI fill:#21262d,stroke:#30363d,color:#e6edf3
 ```
 
 ### DB Schema
@@ -214,6 +249,14 @@ deno task dev -- search "query"
 # MCP server (stdio)
 deno task dev -- mcp
 
+# Web UI (frontend dev server + API server)
+deno task ui:dev               # Vite dev server (port 5173, proxies /api to 6276)
+deno task dev -- ui --foreground  # API server (port 6276)
+
+# Build UI assets
+deno task ui:build             # Vite build → ui/dist/
+deno task ui:embed             # Embed ui/dist/ → src/ui_assets.ts
+
 # Compile and install
 deno task compile
 deno task install
@@ -228,6 +271,8 @@ deno task test
 - `node:sqlite` (DatabaseSync, built-in)
 - SQLite FTS5
 - `@std/cli`, `@std/fmt`, `@std/path`
+- [Preact](https://preactjs.com/) + [Vite](https://vitejs.dev/) + [Tailwind CSS](https://tailwindcss.com/) (Web UI)
+- [marked](https://marked.js.org/) (Markdown rendering)
 
 ## License
 

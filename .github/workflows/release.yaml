@@ -46,6 +46,16 @@ jobs:
         with:
           deno-version: v2.x
 
+      - name: Setup Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: 22
+
+      - name: Build UI assets
+        run: |
+          cd ui && npm ci && npm run build && cd ..
+          deno task ui:embed
+
       - name: Compile binaries
         run: |
           mkdir -p dist

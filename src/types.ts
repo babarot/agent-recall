@@ -33,11 +33,21 @@ export interface ThinkingBlock {
   signature?: string;
 }
 
+export interface ImageBlock {
+  type: "image";
+  source: {
+    type: "base64";
+    media_type: string;
+    data: string;
+  };
+}
+
 export type ContentBlock =
   | TextBlock
   | ToolUseBlock
   | ToolResultBlock
-  | ThinkingBlock;
+  | ThinkingBlock
+  | ImageBlock;
 
 /** A single line from a session JSONL file */
 export interface JournalLine {
@@ -57,11 +67,16 @@ export interface JournalLine {
   subtype?: string;
 }
 
+export type BlockType = "text" | "thinking" | "tool_use" | "tool_result";
+
 /** Extracted message ready for DB insertion */
 export interface ExtractedMessage {
   uuid: string;
   role: "user" | "assistant";
+  blockType: BlockType;
   content: string;
+  toolName?: string;
+  toolInput?: string;
   timestamp: string;
   turnIndex: number;
 }
@@ -79,10 +94,19 @@ export interface SessionMeta {
   claudeVersion: string;
 }
 
+/** Extracted image from a message */
+export interface ExtractedImage {
+  messageUuid: string;
+  imageIndex: number;
+  mediaType: string;
+  data: string; // base64
+}
+
 /** Parsed session result */
 export interface ParsedSession {
   meta: SessionMeta;
   messages: ExtractedMessage[];
+  images: ExtractedImage[];
 }
 
 /** Entry in sessions-index.json */

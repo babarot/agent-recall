@@ -2,3 +2,6 @@ agent-recall
 dist/
 coverage/
 *.db
+ui/dist/
+ui/node_modules/
+src/ui_assets.ts
