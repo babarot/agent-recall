@@ -193,6 +193,12 @@ function ToolResultBubble({ content }: { content: string }) {
   const [open, setOpen] = useState(false);
   if (!content) return null;
   const preview = content.length > 80 ? content.slice(0, 80) + "..." : content;
+  const html = useMemo(() => {
+    if (!open) return "";
+    marked.setOptions({ breaks: true, gfm: true });
+    const raw = marked.parse(content) as string;
+    return raw.replace(/<table>/g, '<div class="table-wrapper"><table>').replace(/<\/table>/g, '</table></div>');
+  }, [content, open]);
 
   return (
     <div class="flex justify-start">
@@ -206,8 +212,8 @@ function ToolResultBubble({ content }: { content: string }) {
           {!open && <span class="truncate max-w-md">{preview}</span>}
         </button>
         {open && (
-          <div class="mt-1">
-            <pre class="!p-3 !m-0 !rounded-2xl !rounded-bl-sm text-xs overflow-x-auto whitespace-pre-wrap"><code>{content}</code></pre>
+          <div class="mt-1 px-4 py-3 bg-bg-secondary border border-border rounded-2xl rounded-bl-sm text-sm leading-relaxed">
+            <div class="markdown-content break-words" dangerouslySetInnerHTML={{ __html: html }} />
           </div>
         )}
       </div>
