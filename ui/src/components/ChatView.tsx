@@ -3,6 +3,7 @@ import { groupMessages, renderImages, stripAnsi, getToolInputPreview } from "../
 import type { Message, DisplayMessage } from "../lib/chat-utils";
 import type { Settings } from "../lib/settings";
 import { renderMarkdown } from "../lib/markdown";
+import { ansiToHtml, hasAnsi } from "../lib/ansi";
 import { useKeyboardShortcut } from "../hooks/use-keyboard-shortcut";
 import { useSSE } from "../hooks/use-sse";
 import { useTailFollow } from "../hooks/use-tail-follow";
@@ -236,11 +237,13 @@ function ToolUseBubble({ toolName, toolInput }: { toolName: string; toolInput: s
 function ToolResultBubble({ content }: { content: string }) {
   const [open, setOpen] = useState(false);
   if (!content) return null;
-  const preview = content.length > 80 ? content.slice(0, 80) + "..." : content;
+  const ansi = hasAnsi(content);
+  const previewSrc = ansi ? stripAnsi(content) : content;
+  const preview = previewSrc.length > 80 ? previewSrc.slice(0, 80) + "..." : previewSrc;
   const html = useMemo(() => {
     if (!open) return "";
-    return renderMarkdown(content);
-  }, [content, open]);
+    return ansi ? ansiToHtml(content) : renderMarkdown(content);
+  }, [content, open, ansi]);
 
   return (
     <div class="flex justify-start">
@@ -255,7 +258,14 @@ function ToolResultBubble({ content }: { content: string }) {
         </button>
         {open && (
           <div class="mt-1 px-4 py-3 bg-bg-secondary border border-border rounded-2xl rounded-bl-sm text-sm leading-relaxed">
-            <div class="markdown-content break-words" dangerouslySetInnerHTML={{ __html: html }} />
+            {ansi ? (
+              <pre
+                class="!p-0 !m-0 !border-0 text-xs text-text-secondary whitespace-pre-wrap break-words font-mono"
+                dangerouslySetInnerHTML={{ __html: html }}
+              />
+            ) : (
+              <div class="markdown-content break-words" dangerouslySetInnerHTML={{ __html: html }} />
+            )}
           </div>
         )}
       </div>
