@@ -140,8 +140,11 @@ export function SessionList({ onSelect }: { onSelect: (id: string) => void }) {
               class="p-4 bg-bg-secondary border border-border rounded-lg cursor-pointer hover:border-accent/50 transition-colors"
             >
               <div class="flex items-center justify-between mb-1.5">
-                <span class="text-sm font-medium text-text">{s.project}</span>
-                <span class="text-xs text-text-muted">{s.date}</span>
+                <div class="flex items-center gap-2 min-w-0">
+                  <span class="text-sm font-medium text-text truncate">{s.project}</span>
+                  {s.branch && <span class="text-xs px-1.5 py-0.5 bg-bg-tertiary rounded text-text-muted shrink-0">{s.branch}</span>}
+                </div>
+                <span class="text-xs text-text-muted shrink-0 ml-3">{s.date}</span>
               </div>
               <p class="text-sm truncate mb-2">
                 {s.firstPrompt
@@ -151,7 +154,6 @@ export function SessionList({ onSelect }: { onSelect: (id: string) => void }) {
               </p>
               <div class="flex items-center gap-2 text-xs text-text-muted">
                 <span class="font-mono">{s.sessionId.slice(0, 8)}</span>
-                {s.branch && <span class="px-1.5 py-0.5 bg-bg-tertiary rounded">{s.branch}</span>}
                 <span>{s.messages} msgs</span>
               </div>
             </div>
