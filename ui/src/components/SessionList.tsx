@@ -89,11 +89,6 @@ export function SessionList({ onSelect }: { onSelect: (id: string) => void }) {
     if (e.key === "Enter") handleSearch();
   };
 
-  const copySessionId = (e: Event, fullId: string) => {
-    e.stopPropagation();
-    navigator.clipboard.writeText(fullId);
-  };
-
   return (
     <div class="h-full flex flex-col">
       {/* Search bar */}
@@ -144,29 +139,21 @@ export function SessionList({ onSelect }: { onSelect: (id: string) => void }) {
               onClick={() => onSelect(s.fullSessionId || s.sessionId)}
               class="p-4 bg-bg-secondary border border-border rounded-lg cursor-pointer hover:border-accent/50 transition-colors"
             >
-              <div class="flex items-center justify-between mb-2">
-                <div class="flex items-center gap-3">
-                  <span class="text-sm font-mono text-accent">{s.sessionId.slice(0, 8)}</span>
-                  <button
-                    onClick={(e) => copySessionId(e, s.fullSessionId || s.sessionId)}
-                    class="text-xs text-text-muted hover:text-text transition-colors cursor-pointer"
-                    title="Copy session ID"
-                  >
-                    copy
-                  </button>
-                  <span class="text-sm text-text-secondary">{s.project}</span>
-                </div>
-                <div class="flex items-center gap-3 text-xs text-text-muted">
-                  {s.branch && <span class="px-2 py-0.5 bg-bg-tertiary rounded">{s.branch}</span>}
-                  <span>{s.messages} msgs</span>
-                  <span>{s.date}</span>
-                </div>
+              <div class="flex items-center justify-between mb-1.5">
+                <span class="text-sm font-medium text-text">{s.project}</span>
+                <span class="text-xs text-text-muted">{s.date}</span>
               </div>
-              {s.firstPrompt && (
-                <p class="text-sm text-text-secondary truncate">
-                  {s.firstPrompt.slice(0, 150)}
-                </p>
-              )}
+              <p class="text-sm truncate mb-2">
+                {s.firstPrompt
+                  ? <span class="text-text-secondary">{s.firstPrompt}</span>
+                  : <span class="text-text-muted italic">Started with slash command</span>
+                }
+              </p>
+              <div class="flex items-center gap-2 text-xs text-text-muted">
+                <span class="font-mono">{s.sessionId.slice(0, 8)}</span>
+                {s.branch && <span class="px-1.5 py-0.5 bg-bg-tertiary rounded">{s.branch}</span>}
+                <span>{s.messages} msgs</span>
+              </div>
             </div>
           ))}
         </div>

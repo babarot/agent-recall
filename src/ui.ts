@@ -145,15 +145,21 @@ function handleAPI(db: VaultDB, url: URL): Response {
     });
 
     return jsonResponse(
-      sessions.map((s) => ({
-        sessionId: s.sessionId.slice(0, 8),
-        fullSessionId: s.sessionId,
-        project: displayProject(s.projectPath, s.project),
-        branch: s.gitBranch,
-        firstPrompt: s.firstPrompt?.slice(0, 200),
-        messages: s.messageCount,
-        date: s.startedAt?.slice(0, 10),
-      }))
+      sessions.map((s) => {
+        let prompt = s.firstPrompt?.slice(0, 200) ?? "";
+        if (!prompt || prompt.startsWith("<")) {
+          prompt = db.getFirstUserText(s.sessionId) ?? prompt;
+        }
+        return {
+          sessionId: s.sessionId.slice(0, 8),
+          fullSessionId: s.sessionId,
+          project: displayProject(s.projectPath, s.project),
+          branch: s.gitBranch,
+          firstPrompt: prompt,
+          messages: s.messageCount,
+          date: s.startedAt?.slice(0, 10),
+        };
+      })
     );
   }
 
