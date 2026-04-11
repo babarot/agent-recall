@@ -4,7 +4,7 @@ import { SessionList } from "./components/SessionList";
 import { ChatView } from "./components/ChatView";
 import { StatsView } from "./components/StatsView";
 import { SettingsDialog } from "./components/SettingsDialog";
-import { loadSettings, saveSettings, applyTheme } from "./lib/settings";
+import { loadSettings, saveSettings, applyTheme, applyColorSchemeFromSettings } from "./lib/settings";
 import type { Settings } from "./lib/settings";
 
 type View = "list" | "chat" | "stats";
@@ -27,7 +27,8 @@ export function App() {
   // Apply theme on mount and change
   useEffect(() => {
     applyTheme(settings.theme);
-  }, [settings.theme]);
+    applyColorSchemeFromSettings(settings);
+  }, [settings.theme, settings.colorScheme]);
 
   useEffect(() => {
     fetch("/api/stats")
@@ -76,6 +77,7 @@ export function App() {
     setSettings(newSettings);
     saveSettings(newSettings);
     applyTheme(newSettings.theme);
+    applyColorSchemeFromSettings(newSettings);
   };
 
   return (

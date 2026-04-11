@@ -1,5 +1,8 @@
+import { getScheme, applyColorScheme, clearColorScheme } from "./themes";
+
 export interface Settings {
   theme: "dark" | "light" | "auto";
+  colorScheme: string;
   showThinking: boolean;
   showToolUse: boolean;
   showToolResult: boolean;
@@ -9,6 +12,7 @@ const STORAGE_KEY = "agent-recall-settings";
 
 const DEFAULTS: Settings = {
   theme: "auto",
+  colorScheme: "default",
   showThinking: true,
   showToolUse: true,
   showToolResult: true,
@@ -35,4 +39,21 @@ export function applyTheme(theme: Settings["theme"]): void {
   } else {
     root.setAttribute("data-theme", theme);
   }
+}
+
+function getEffectiveMode(theme: Settings["theme"]): "dark" | "light" {
+  if (theme === "auto") {
+    return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  }
+  return theme;
+}
+
+export function applyColorSchemeFromSettings(settings: Settings): void {
+  if (settings.colorScheme === "default") {
+    clearColorScheme();
+    return;
+  }
+  const scheme = getScheme(settings.colorScheme);
+  const mode = getEffectiveMode(settings.theme);
+  applyColorScheme(scheme, mode);
 }

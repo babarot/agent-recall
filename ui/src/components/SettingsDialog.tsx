@@ -1,5 +1,6 @@
-import { Monitor, Moon, Sun } from "lucide-preact";
+import { Monitor, Moon, Sun, Palette, SunMoon, MessageSquare } from "lucide-preact";
 import type { Settings } from "../lib/settings";
+import { COLOR_SCHEMES } from "../lib/themes";
 
 interface Props {
   settings: Settings;
@@ -12,12 +13,15 @@ export function SettingsDialog({ settings, onChange, onClose }: Props) {
     onChange({ ...settings, ...patch });
   };
 
+  const isDark = settings.theme === "dark" ||
+    (settings.theme === "auto" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+
   return (
     <div
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div class="bg-bg-secondary border border-border rounded-xl w-full max-w-md p-6 shadow-xl">
+      <div class="bg-bg-secondary border border-border rounded-xl w-full max-w-lg p-6 shadow-xl max-h-[85vh] overflow-y-auto">
         <div class="flex items-center justify-between mb-6">
           <h2 class="text-lg font-semibold text-text">Settings</h2>
           <button
@@ -30,7 +34,9 @@ export function SettingsDialog({ settings, onChange, onClose }: Props) {
 
         {/* Theme */}
         <section class="mb-6">
-          <h3 class="text-base font-semibold text-text mb-3">Theme</h3>
+          <h3 class="text-base font-semibold text-text mb-3 flex items-center gap-2">
+            <SunMoon size={16} /> Theme
+          </h3>
           <div class="flex gap-2">
             {([
               { key: "auto", label: "Auto", icon: <Monitor size={16} /> },
@@ -52,9 +58,47 @@ export function SettingsDialog({ settings, onChange, onClose }: Props) {
           </div>
         </section>
 
+        {/* Color Scheme */}
+        <section class="mb-6">
+          <h3 class="text-base font-semibold text-text mb-3 flex items-center gap-2">
+            <Palette size={16} /> Color Scheme
+          </h3>
+          <div class="grid grid-cols-4 gap-2">
+            {COLOR_SCHEMES.map((scheme) => {
+              const colors = isDark ? scheme.dark : scheme.light;
+              const isActive = settings.colorScheme === scheme.name;
+              return (
+                <button
+                  key={scheme.name}
+                  onClick={() => update({ colorScheme: scheme.name })}
+                  class={`rounded-lg border p-2 cursor-pointer transition-all ${
+                    isActive
+                      ? "border-accent ring-1 ring-accent"
+                      : "border-border hover:border-text-muted"
+                  }`}
+                >
+                  {/* Color preview */}
+                  <div
+                    class="rounded-md h-8 mb-1.5 flex items-center gap-0.5 px-1.5 overflow-hidden"
+                    style={{ background: colors.bg }}
+                  >
+                    <div class="w-2 h-2 rounded-full" style={{ background: colors.accent }} />
+                    <div class="w-2 h-2 rounded-full" style={{ background: colors.text }} />
+                    <div class="w-2 h-2 rounded-full" style={{ background: colors.textMuted }} />
+                    <div class="flex-1 h-1 rounded ml-0.5" style={{ background: colors.bgTertiary }} />
+                  </div>
+                  <div class="text-xs text-center truncate text-text-secondary">{scheme.label}</div>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
         {/* Chat display */}
         <section>
-          <h3 class="text-base font-semibold text-text mb-3">Chat Display</h3>
+          <h3 class="text-base font-semibold text-text mb-3 flex items-center gap-2">
+            <MessageSquare size={16} /> Chat Display
+          </h3>
           <div class="space-y-4">
             <Toggle
               label="Show thinking"
