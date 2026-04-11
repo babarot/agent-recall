@@ -1,6 +1,9 @@
 import { VaultDB } from "./db.ts";
 import { displayProject } from "./display.ts";
 import { getAsset } from "./ui_assets.ts";
+import { SSEBroadcaster } from "./sse.ts";
+
+const SSE_KEEPALIVE_MS = 15_000;
 
 const DEFAULT_PORT = 6276;
 
@@ -53,6 +56,8 @@ export async function startBackground(options: UIOptions): Promise<void> {
  */
 export interface UIHandle {
   server: Deno.HttpServer;
+  /** SSE broadcaster — exposed so the watcher can push events. */
+  broadcaster: SSEBroadcaster;
   /** Gracefully stop the server, the watcher, and close the DB. Safe to call multiple times. */
   shutdown: () => Promise<void>;
   /** Resolves when the server has fully stopped serving. */
@@ -62,6 +67,7 @@ export interface UIHandle {
 export function runUI(options: UIOptions): UIHandle {
   const db = new VaultDB(options.dbPath);
   const ac = new AbortController();
+  const broadcaster = new SSEBroadcaster();
 
   // Forward-declared so the request handler and `doShutdown` can both close
   // over it. Assigned immediately below via `Deno.serve`.
@@ -71,6 +77,7 @@ export function runUI(options: UIOptions): UIHandle {
   const doShutdown = async (): Promise<void> => {
     if (shuttingDown) return;
     shuttingDown = true;
+    broadcaster.closeAll();
     ac.abort();
     try {
       await server.finished;
@@ -112,6 +119,11 @@ export function runUI(options: UIOptions): UIHandle {
       });
     }
 
+    // GET /api/stream — Server-Sent Events for live UI updates
+    if (url.pathname === "/api/stream") {
+      return handleSSEStream(broadcaster);
+    }
+
     if (url.pathname.startsWith("/api/")) {
       return handleAPI(db, url);
     }
@@ -121,9 +133,59 @@ export function runUI(options: UIOptions): UIHandle {
 
   return {
     server,
+    broadcaster,
     shutdown: doShutdown,
     finished: server.finished,
   };
+}
+
+/**
+ * Long-lived SSE response. Each client gets a fresh ReadableStream that the
+ * broadcaster writes into; a 15-second keep-alive comment keeps the
+ * connection alive through HTTP/proxy idle timeouts.
+ */
+function handleSSEStream(broadcaster: SSEBroadcaster): Response {
+  let keepAliveId: number | undefined;
+  let ctl: ReadableStreamDefaultController<Uint8Array> | undefined;
+
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      ctl = controller;
+      broadcaster.addClient(controller);
+
+      // Initial hello so clients can confirm the stream is alive before any
+      // real events arrive.
+      try {
+        controller.enqueue(
+          new TextEncoder().encode(
+            `data: ${JSON.stringify({ type: "connected", timestamp: Date.now() })}\n\n`
+          )
+        );
+      } catch {
+        // ignore
+      }
+
+      keepAliveId = setInterval(() => {
+        broadcaster.ping(controller);
+      }, SSE_KEEPALIVE_MS);
+    },
+    cancel() {
+      if (keepAliveId !== undefined) {
+        clearInterval(keepAliveId);
+        keepAliveId = undefined;
+      }
+      if (ctl) broadcaster.removeClient(ctl);
+    },
+  });
+
+  return new Response(body, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+      "X-Accel-Buffering": "no",
+    },
+  });
 }
 
 export async function stopUI(port?: number): Promise<void> {
