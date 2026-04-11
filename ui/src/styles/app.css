@@ -220,9 +220,12 @@ p code {
   border-radius: 8px;
 }
 /* User bubble code blocks */
-.bg-user-bubble .markdown-content code {
+.bg-user-bubble .markdown-content :not(pre) > code {
   background: var(--color-bg-tertiary);
 }
 .bg-user-bubble .markdown-content pre {
   background: var(--color-bg) !important;
+}
+.bg-user-bubble .markdown-content pre code {
+  background: transparent;
 }
