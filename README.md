@@ -2,7 +2,7 @@
 
 [![Test](https://github.com/babarot/agent-recall/actions/workflows/test.yaml/badge.svg)](https://github.com/babarot/agent-recall/actions/workflows/test.yaml)
 
-A CLI + MCP server that archives coding agent session history into SQLite for full-text search.
+A searchable archive of your coding agent sessions — CLI, MCP, and a live web UI, all on SQLite FTS5.
 
 ## Why
 
@@ -231,6 +231,13 @@ Subcommands:
 Opens `http://localhost:6276` with session browser, chat viewer, and search.
 
 **Live updates**: while the UI is running, a filesystem watcher observes `~/.claude/projects` and pushes new/changed sessions to the browser over Server-Sent Events. The session list reflects new activity at the top without reload, and the chat view auto-refreshes (and follows the tail if you were already scrolled to the bottom) while a session is still running in Claude Code. No Claude Code hook configuration is required; the watcher runs inside the UI process itself. See [docs/adr/002-fs-watch-for-realtime-updates.md](docs/adr/002-fs-watch-for-realtime-updates.md) for the rationale.
+
+Live update rules for the session list:
+
+- **No search, no filter**: every `session_updated` event is applied. A known session is bumped to the top with its new message count; a brand-new session is prepended if the server now ranks it first.
+- **Project filter active**: events whose session is outside the current project are silently dropped. Sessions inside the filter are updated in place as above.
+- **Search mode** (after pressing Enter / clicking Search with a non-empty query): the result set is frozen and live events are ignored. Typing into the search box **without** committing does not freeze updates — only a committed search does. Clearing the search box (making it empty) immediately returns to the live list.
+- **Chat view**: a `session_updated` event for the session you're currently viewing triggers a refetch. If you were scrolled to (or near) the bottom, the view follows the tail; otherwise your scroll position is preserved.
 
 ## Architecture
 

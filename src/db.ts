@@ -72,6 +72,26 @@ export class VaultDB {
       );
   }
 
+  /** Delete a session and all dependent rows so it can be fully re-imported. */
+  resetSession(sessionId: string): void {
+    this.db.exec("BEGIN");
+    try {
+      this.db
+        .prepare("DELETE FROM images WHERE session_id = ?")
+        .run(sessionId);
+      this.db
+        .prepare("DELETE FROM messages WHERE session_id = ?")
+        .run(sessionId);
+      this.db
+        .prepare("DELETE FROM sessions WHERE session_id = ?")
+        .run(sessionId);
+      this.db.exec("COMMIT");
+    } catch (e) {
+      this.db.exec("ROLLBACK");
+      throw e;
+    }
+  }
+
   /** Get the byte offset up to which this session's JSONL has been imported */
   getSessionImportedBytes(sessionId: string): number | null {
     const row = this.db

@@ -5,7 +5,7 @@ import {
 import { join } from "@std/path";
 import { VaultDB } from "./db.ts";
 import { SSEBroadcaster, type SSEEvent } from "./sse.ts";
-import { startProjectWatcher } from "./watcher.ts";
+import { startProjectWatcher, type WatcherStatus } from "./watcher.ts";
 
 /**
  * SSEBroadcaster subclass that records every broadcast() call so tests can
@@ -209,13 +209,78 @@ Deno.test({
   async fn() {
     const db = new VaultDB(":memory:");
     const spy = new SpyBroadcaster();
+    const status: WatcherStatus = {
+      enabled: false,
+      running: false,
+      projectsDir: "",
+      debounceMs: 0,
+    };
 
     // No signal needed — the function should short-circuit and resolve.
-    await startProjectWatcher(db, spy, "/nonexistent/path/to/projects");
+    await startProjectWatcher(db, spy, "/nonexistent/path/to/projects", { status });
 
     assertEquals(spy.events.length, 0);
+    assertEquals(status.running, false);
+    assertEquals(typeof status.lastError, "string");
     db.close();
   },
+});
+
+Deno.test({
+  name: "watcher broadcasts resynced when a tracked file is replaced with shorter content",
+  async fn() {
+    const tempDir = Deno.makeTempDirSync();
+    const db = new VaultDB(":memory:");
+    const spy = new SpyBroadcaster();
+    const ac = new AbortController();
+
+    const projectDir = join(tempDir, "proj-resync");
+    Deno.mkdirSync(projectDir);
+
+    const watcherPromise = startProjectWatcher(db, spy, tempDir, {
+      debounceMs: 50,
+      signal: ac.signal,
+    });
+
+    try {
+      await new Promise((r) => setTimeout(r, 100));
+
+      const filePath = join(projectDir, "sess-w3.jsonl");
+      Deno.writeTextFileSync(
+        filePath,
+        [
+          userLine("first", "u1", "2026-01-01T00:00:00Z", "sess-w3"),
+          userLine("second", "u2", "2026-01-01T00:00:01Z", "sess-w3"),
+        ].join("\n") + "\n"
+      );
+
+      const gotNew = await waitFor(
+        () => spy.events.some((e) => e.sessionId === "sess-w3" && e.status === "new"),
+        3000
+      );
+      assertEquals(gotNew, true);
+      assertEquals(db.sessionExists("sess-w3"), 2);
+
+      Deno.writeTextFileSync(
+        filePath,
+        userLine("replacement", "u9", "2026-01-01T00:00:05Z", "sess-w3") + "\n"
+      );
+
+      const gotResync = await waitFor(
+        () => spy.events.some((e) => e.sessionId === "sess-w3" && e.status === "resynced"),
+        3000
+      );
+      assertEquals(gotResync, true);
+      assertEquals(db.sessionExists("sess-w3"), 1);
+    } finally {
+      ac.abort();
+      await watcherPromise;
+      db.close();
+      Deno.removeSync(tempDir, { recursive: true });
+    }
+  },
+  sanitizeOps: false,
+  sanitizeResources: false,
 });
 
 Deno.test({

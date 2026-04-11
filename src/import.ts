@@ -18,11 +18,82 @@ interface ImportOptions {
 
 /** Result of a single incremental import attempt */
 export interface IncrementalResult {
-  status: "new" | "updated" | "unchanged";
+  status: "new" | "updated" | "unchanged" | "resynced";
   sessionId: string;
   project: string;
   addedMessages: number;
   totalMessages: number;
+}
+
+function importFullSession(
+  db: VaultDB,
+  filePath: string,
+  project: string,
+  _sessionId: string,
+  status: "new" | "resynced",
+  opts: { indexEntry?: SessionIndexEntry } = {}
+): IncrementalResult | null {
+  let jsonlContent: string;
+  let fileSize: number;
+  try {
+    jsonlContent = Deno.readTextFileSync(filePath);
+    fileSize = Deno.statSync(filePath).size;
+  } catch {
+    return null;
+  }
+
+  const parsed = parseSession(jsonlContent, project, opts.indexEntry);
+  if (!parsed) return null;
+
+  db.insertSession({
+    sessionId: parsed.meta.sessionId,
+    project: parsed.meta.project,
+    projectPath: parsed.meta.projectPath,
+    gitBranch: parsed.meta.gitBranch,
+    firstPrompt: parsed.meta.firstPrompt,
+    summary: parsed.meta.summary,
+    messageCount: parsed.messages.length,
+    startedAt: parsed.meta.startedAt,
+    endedAt: parsed.meta.endedAt,
+    claudeVersion: parsed.meta.claudeVersion,
+    importedBytes: fileSize,
+  });
+
+  let inserted = 0;
+  for (const msg of parsed.messages) {
+    const { changes } = db.insertMessage({
+      sessionId: parsed.meta.sessionId,
+      uuid: msg.uuid,
+      role: msg.role,
+      blockType: msg.blockType,
+      content: msg.content,
+      toolName: msg.toolName,
+      toolInput: msg.toolInput,
+      timestamp: msg.timestamp,
+      turnIndex: msg.turnIndex,
+    });
+    inserted += changes;
+  }
+
+  for (const img of parsed.images) {
+    if (!db.hasImages(parsed.meta.sessionId, img.messageUuid)) {
+      db.insertImage({
+        sessionId: parsed.meta.sessionId,
+        messageUuid: img.messageUuid,
+        imageIndex: img.imageIndex,
+        mediaType: img.mediaType,
+        data: Uint8Array.from(atob(img.data), (c) => c.charCodeAt(0)),
+      });
+    }
+  }
+
+  return {
+    status,
+    sessionId: parsed.meta.sessionId,
+    project: parsed.meta.project,
+    addedMessages: inserted,
+    totalMessages: inserted,
+  };
 }
 
 /**
@@ -61,17 +132,36 @@ export function importSingleSessionIncremental(
 
   const existingBytes = db.getSessionImportedBytes(sessionId);
   const existingCount = db.sessionExists(sessionId) ?? 0;
+  const hadExistingSession = existingBytes !== null;
+
+  const importFull = (): IncrementalResult | null => {
+    return importFullSession(
+      db,
+      filePath,
+      project,
+      sessionId,
+      hadExistingSession ? "resynced" : "new",
+      opts
+    );
+  };
 
   // ----- Existing session: tail read only -----
   if (existingBytes !== null) {
     if (fileSize <= existingBytes) {
-      return {
-        status: "unchanged",
-        sessionId,
-        project,
-        addedMessages: 0,
-        totalMessages: existingCount,
-      };
+      if (fileSize === existingBytes) {
+        return {
+          status: "unchanged",
+          sessionId,
+          project,
+          addedMessages: 0,
+          totalMessages: existingCount,
+        };
+      }
+
+      // The file shrank or was replaced. Drop the stale DB copy and rebuild
+      // from the current on-disk source of truth.
+      db.resetSession(sessionId);
+      return importFull();
     }
 
     const tailLength = fileSize - existingBytes;
@@ -162,65 +252,7 @@ export function importSingleSessionIncremental(
   }
 
   // ----- New session: full read + insert -----
-  let jsonlContent: string;
-  try {
-    jsonlContent = Deno.readTextFileSync(filePath);
-  } catch {
-    return null;
-  }
-
-  const parsed = parseSession(jsonlContent, project, opts.indexEntry);
-  if (!parsed) return null;
-
-  db.insertSession({
-    sessionId: parsed.meta.sessionId,
-    project: parsed.meta.project,
-    projectPath: parsed.meta.projectPath,
-    gitBranch: parsed.meta.gitBranch,
-    firstPrompt: parsed.meta.firstPrompt,
-    summary: parsed.meta.summary,
-    messageCount: parsed.messages.length,
-    startedAt: parsed.meta.startedAt,
-    endedAt: parsed.meta.endedAt,
-    claudeVersion: parsed.meta.claudeVersion,
-    importedBytes: fileSize,
-  });
-
-  let inserted = 0;
-  for (const msg of parsed.messages) {
-    const { changes } = db.insertMessage({
-      sessionId: parsed.meta.sessionId,
-      uuid: msg.uuid,
-      role: msg.role,
-      blockType: msg.blockType,
-      content: msg.content,
-      toolName: msg.toolName,
-      toolInput: msg.toolInput,
-      timestamp: msg.timestamp,
-      turnIndex: msg.turnIndex,
-    });
-    inserted += changes;
-  }
-
-  for (const img of parsed.images) {
-    if (!db.hasImages(parsed.meta.sessionId, img.messageUuid)) {
-      db.insertImage({
-        sessionId: parsed.meta.sessionId,
-        messageUuid: img.messageUuid,
-        imageIndex: img.imageIndex,
-        mediaType: img.mediaType,
-        data: Uint8Array.from(atob(img.data), (c) => c.charCodeAt(0)),
-      });
-    }
-  }
-
-  return {
-    status: "new",
-    sessionId: parsed.meta.sessionId,
-    project: parsed.meta.project,
-    addedMessages: inserted,
-    totalMessages: inserted,
-  };
+  return importFull();
 }
 
 export function runImport(options: ImportOptions): void {

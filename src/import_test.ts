@@ -149,6 +149,35 @@ Deno.test("importSingleSessionIncremental imports appended messages via tail rea
   );
 });
 
+Deno.test("importSingleSessionIncremental resyncs when the file shrinks", () => {
+  withTempSession(
+    [
+      userLine("hello", "u1", "2026-01-01T00:00:00Z"),
+      assistantLine("hi", "a1", "2026-01-01T00:00:01Z"),
+    ],
+    (filePath, db) => {
+      const first = importSingleSessionIncremental(db, filePath);
+      assertEquals(first!.status, "new");
+      assertEquals(db.sessionExists("sess-001"), 2);
+
+      Deno.writeTextFileSync(
+        filePath,
+        userLine("rewritten", "u9", "2026-01-01T00:00:05Z") + "\n"
+      );
+
+      const second = importSingleSessionIncremental(db, filePath);
+      assertEquals(second!.status, "resynced");
+      assertEquals(second!.addedMessages, 1);
+      assertEquals(second!.totalMessages, 1);
+      assertEquals(db.sessionExists("sess-001"), 1);
+
+      const { messages } = db.exportSession("sess-001");
+      assertEquals(messages.length, 1);
+      assertEquals(messages[0].content, "rewritten");
+    }
+  );
+});
+
 // --- Duplicate protection (critical: message_count must not inflate) ---
 //
 // The dedup mechanism is UNIQUE(session_id, turn_index). A race where two

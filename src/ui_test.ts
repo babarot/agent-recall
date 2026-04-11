@@ -294,16 +294,25 @@ function handleAddr(handle: import("./ui.ts").UIHandle): string {
 }
 
 Deno.test({
-  name: "runUI: /api/status returns running with pid and port",
+  name: "runUI: /api/status returns running with pid, port, and watcher state",
   async fn() {
     const handle = await runUIHandleFor();
     try {
       const resp = await fetch(`${handleAddr(handle)}/api/status`);
       assertEquals(resp.status, 200);
-      const data = await resp.json() as { status: string; pid: number; port: number };
+      const data = await resp.json() as {
+        status: string;
+        pid: number;
+        port: number;
+        sseClients: number;
+        watcher: { enabled: boolean; running: boolean };
+      };
       assertEquals(data.status, "running");
       assertEquals(typeof data.pid, "number");
       assertEquals(data.port, (handle.server.addr as Deno.NetAddr).port);
+      assertEquals(data.sseClients, 0);
+      assertEquals(data.watcher.enabled, false);
+      assertEquals(data.watcher.running, false);
     } finally {
       await handle.shutdown();
     }
@@ -441,6 +450,14 @@ Deno.test({
       streamReader = streamResp.body!.getReader();
       await streamReader.read(); // connected
 
+      const statusBefore = await fetch(`${addr}/api/status`).then((r) => r.json()) as {
+        watcher: { enabled: boolean; running: boolean };
+        sseClients: number;
+      };
+      assertEquals(statusBefore.watcher.enabled, true);
+      assertEquals(statusBefore.watcher.running, true);
+      assertEquals(statusBefore.sseClients, 1);
+
       // Write a fresh JSONL file under the watched directory. The watcher
       // debounces for 300 ms before importing.
       const filePath = join(projectDir, "sess-e2e.jsonl");
@@ -482,6 +499,13 @@ Deno.test({
       }
       assertEquals(received.sessionId, "sess-e2e");
       assertEquals(received.status, "new");
+
+      const statusAfter = await fetch(`${addr}/api/status`).then((r) => r.json()) as {
+        watcher: { lastEventAt?: string; lastImportAt?: string; lastError?: string };
+      };
+      assertEquals(typeof statusAfter.watcher.lastEventAt, "string");
+      assertEquals(typeof statusAfter.watcher.lastImportAt, "string");
+      assertEquals(statusAfter.watcher.lastError, undefined);
     } finally {
       if (streamReader) {
         try {

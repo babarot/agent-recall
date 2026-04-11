@@ -2,7 +2,7 @@ import { VaultDB } from "./db.ts";
 import { displayProject } from "./display.ts";
 import { getAsset } from "./ui_assets.ts";
 import { SSEBroadcaster } from "./sse.ts";
-import { startProjectWatcher } from "./watcher.ts";
+import { startProjectWatcher, type WatcherStatus } from "./watcher.ts";
 import { PROJECTS_DIR } from "./config.ts";
 
 const SSE_KEEPALIVE_MS = 15_000;
@@ -66,6 +66,7 @@ export interface UIHandle {
   server: Deno.HttpServer;
   /** SSE broadcaster — exposed so the watcher can push events. */
   broadcaster: SSEBroadcaster;
+  watcherStatus: WatcherStatus;
   /** Gracefully stop the server, the watcher, and close the DB. Safe to call multiple times. */
   shutdown: () => Promise<void>;
   /** Resolves when the server has fully stopped serving. */
@@ -76,6 +77,12 @@ export function runUI(options: UIOptions): UIHandle {
   const db = new VaultDB(options.dbPath);
   const ac = new AbortController();
   const broadcaster = new SSEBroadcaster();
+  const watcherStatus: WatcherStatus = {
+    enabled: false,
+    running: false,
+    projectsDir: "",
+    debounceMs: 0,
+  };
 
   // Forward-declared so the request handler and `doShutdown` can both close
   // over it. Assigned immediately below via `Deno.serve`.
@@ -88,9 +95,15 @@ export function runUI(options: UIOptions): UIHandle {
     options.projectsDir === undefined ? PROJECTS_DIR : options.projectsDir;
   let watcherPromise: Promise<void> = Promise.resolve();
   if (projectsDir !== null) {
+    watcherStatus.enabled = true;
+    watcherStatus.projectsDir = projectsDir;
     watcherPromise = startProjectWatcher(db, broadcaster, projectsDir, {
       signal: ac.signal,
+      status: watcherStatus,
     }).catch((e) => {
+      watcherStatus.running = false;
+      watcherStatus.lastError = e instanceof Error ? e.message : String(e);
+      watcherStatus.lastErrorAt = new Date().toISOString();
       console.error("[watcher] crashed:", e);
     });
   }
@@ -143,6 +156,8 @@ export function runUI(options: UIOptions): UIHandle {
         status: "running",
         pid: Deno.pid,
         port: (server.addr as Deno.NetAddr).port,
+        sseClients: broadcaster.clientCount(),
+        watcher: watcherStatus,
       });
     }
 
@@ -161,6 +176,7 @@ export function runUI(options: UIOptions): UIHandle {
   return {
     server,
     broadcaster,
+    watcherStatus,
     shutdown: doShutdown,
     finished: server.finished,
   };
