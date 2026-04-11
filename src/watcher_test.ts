@@ -104,7 +104,7 @@ Deno.test({
 });
 
 Deno.test({
-  name: "watcher fires additional broadcast when a session JSONL is appended",
+  name: "watcher fires an update broadcast when an already-imported session is appended",
   async fn() {
     const tempDir = Deno.makeTempDirSync();
     const db = new VaultDB(":memory:");
@@ -113,11 +113,6 @@ Deno.test({
 
     const projectDir = join(tempDir, "proj-append");
     Deno.mkdirSync(projectDir);
-    const filePath = join(projectDir, "sess-w2.jsonl");
-    Deno.writeTextFileSync(
-      filePath,
-      userLine("initial", "u1", "2026-01-01T00:00:00Z", "sess-w2") + "\n"
-    );
 
     const watcherPromise = startProjectWatcher(db, spy, tempDir, {
       debounceMs: 50,
@@ -127,18 +122,37 @@ Deno.test({
     try {
       await new Promise((r) => setTimeout(r, 100));
 
-      // Append a second message — this should trigger an "updated" broadcast.
+      const filePath = join(projectDir, "sess-w2.jsonl");
+
+      // Step 1: create the file → first broadcast with status "new".
+      Deno.writeTextFileSync(
+        filePath,
+        userLine("initial", "u1", "2026-01-01T00:00:00Z", "sess-w2") + "\n"
+      );
+
+      const gotNew = await waitFor(
+        () => spy.events.some((e) => e.sessionId === "sess-w2" && e.status === "new"),
+        3000
+      );
+      assertEquals(gotNew, true, "expected 'new' broadcast for initial import");
+      assertEquals(db.sessionExists("sess-w2"), 1);
+
+      // Step 2: append a second line → expect a follow-up "updated" broadcast.
+      const newCountBefore = spy.events.length;
       Deno.writeTextFileSync(
         filePath,
         userLine("appended", "u2", "2026-01-01T00:00:10Z", "sess-w2") + "\n",
         { append: true }
       );
 
-      const ok = await waitFor(
-        () => spy.events.some((e) => e.status === "updated" || e.status === "new"),
+      const gotUpdate = await waitFor(
+        () =>
+          spy.events
+            .slice(newCountBefore)
+            .some((e) => e.sessionId === "sess-w2" && e.status === "updated"),
         3000
       );
-      assertEquals(ok, true);
+      assertEquals(gotUpdate, true, "expected 'updated' broadcast after append");
       assertGreaterOrEqual(db.sessionExists("sess-w2") ?? 0, 2);
     } finally {
       ac.abort();

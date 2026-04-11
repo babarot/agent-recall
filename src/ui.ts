@@ -2,6 +2,8 @@ import { VaultDB } from "./db.ts";
 import { displayProject } from "./display.ts";
 import { getAsset } from "./ui_assets.ts";
 import { SSEBroadcaster } from "./sse.ts";
+import { startProjectWatcher } from "./watcher.ts";
+import { PROJECTS_DIR } from "./config.ts";
 
 const SSE_KEEPALIVE_MS = 15_000;
 
@@ -10,6 +12,12 @@ const DEFAULT_PORT = 6276;
 interface UIOptions {
   dbPath: string;
   port: number;
+  /**
+   * Directory to watch for real-time JSONL updates. Defaults to the
+   * production `~/.claude/projects`; tests override it with a tmpdir.
+   * Pass `null` to disable the watcher entirely.
+   */
+  projectsDir?: string | null;
 }
 
 export async function startBackground(options: UIOptions): Promise<void> {
@@ -73,12 +81,31 @@ export function runUI(options: UIOptions): UIHandle {
   // over it. Assigned immediately below via `Deno.serve`.
   let server: Deno.HttpServer;
 
+  // Kick off the FS watcher unless it was explicitly disabled. It runs
+  // concurrently with the HTTP server and stops when `ac.signal` aborts.
+  // Errors are logged but do not tear the server down.
+  const projectsDir =
+    options.projectsDir === undefined ? PROJECTS_DIR : options.projectsDir;
+  let watcherPromise: Promise<void> = Promise.resolve();
+  if (projectsDir !== null) {
+    watcherPromise = startProjectWatcher(db, broadcaster, projectsDir, {
+      signal: ac.signal,
+    }).catch((e) => {
+      console.error("[watcher] crashed:", e);
+    });
+  }
+
   let shuttingDown = false;
   const doShutdown = async (): Promise<void> => {
     if (shuttingDown) return;
     shuttingDown = true;
     broadcaster.closeAll();
     ac.abort();
+    try {
+      await watcherPromise;
+    } catch {
+      // watcher errors are already logged
+    }
     try {
       await server.finished;
     } catch {
