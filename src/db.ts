@@ -232,6 +232,61 @@ export class VaultDB {
       .run(messageCount, endedAt, sessionId);
   }
 
+  /**
+   * Return activity sparkline data for a set of sessions. Each session gets
+   * an array of `buckets` numbers representing message density over time.
+   * Timestamps are bucketed into equal intervals between the session's first
+   * and last message; each value is the count of messages in that bucket.
+   */
+  getSessionActivities(
+    sessionIds: string[],
+    buckets = 20
+  ): Map<string, number[]> {
+    const result = new Map<string, number[]>();
+    if (sessionIds.length === 0) return result;
+
+    const placeholders = sessionIds.map(() => "?").join(",");
+    const rows = this.db
+      .prepare(
+        `SELECT session_id, timestamp FROM messages
+         WHERE session_id IN (${placeholders}) AND timestamp IS NOT NULL
+         ORDER BY session_id, timestamp`
+      )
+      .all(...sessionIds) as Array<{ session_id: string; timestamp: string }>;
+
+    // Group timestamps by session
+    const bySession = new Map<string, number[]>();
+    for (const row of rows) {
+      let arr = bySession.get(row.session_id);
+      if (!arr) {
+        arr = [];
+        bySession.set(row.session_id, arr);
+      }
+      arr.push(new Date(row.timestamp).getTime());
+    }
+
+    for (const [sid, timestamps] of bySession) {
+      if (timestamps.length < 2) {
+        result.set(sid, new Array(buckets).fill(timestamps.length));
+        continue;
+      }
+      const min = timestamps[0];
+      const max = timestamps[timestamps.length - 1];
+      const range = max - min || 1;
+      const counts = new Array(buckets).fill(0);
+      for (const ts of timestamps) {
+        const idx = Math.min(
+          Math.floor(((ts - min) / range) * buckets),
+          buckets - 1
+        );
+        counts[idx]++;
+      }
+      result.set(sid, counts);
+    }
+
+    return result;
+  }
+
   /** FTS5 search across messages */
   search(
     query: string,

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "preact/hooks";
+import { AreaChart, Area, YAxis, ResponsiveContainer } from "recharts";
 import { useSSE } from "../hooks/use-sse";
 import type { Settings } from "../lib/settings";
 
@@ -11,6 +12,7 @@ interface Session {
   lastPrompt: string;
   messages: number;
   date: string;
+  activity: number[];
 }
 
 const PAGE_SIZE = 50;
@@ -104,6 +106,7 @@ export function SessionList({ onSelect, settings }: { onSelect: (id: string) => 
           lastPrompt: "",
           messages: 0,
           date: r.date,
+          activity: [],
         });
       }
     }
@@ -228,33 +231,47 @@ export function SessionList({ onSelect, settings }: { onSelect: (id: string) => 
           {!loading && sessions.length === 0 && (
             <div class="text-center py-8 text-text-secondary">No sessions found.</div>
           )}
-          {sessions.map((s) => (
+          {(() => {
+            const allValues = sessions.flatMap((s) => s.activity).sort((a, b) => a - b);
+            // Use P95 as the Y-axis ceiling so outlier sessions don't flatten
+            // everything else. Values above P95 simply clip at the card top.
+            const p95 = allValues.length > 0
+              ? allValues[Math.floor(allValues.length * 0.95)]
+              : 1;
+            const globalMax = Math.max(1, p95);
+            return sessions.map((s) => (
             <div
               key={s.fullSessionId || s.sessionId}
               onClick={() => onSelect(s.fullSessionId || s.sessionId)}
-              class="p-4 bg-bg-secondary border border-border rounded-lg cursor-pointer hover:border-accent/50 transition-colors"
+              class="relative p-4 bg-bg-secondary border border-border rounded-lg cursor-pointer hover:border-accent/50 transition-colors overflow-hidden"
             >
-              <div class="flex items-center justify-between mb-1.5">
-                <div class="flex items-center gap-2 min-w-0">
-                  <span class="text-sm font-medium text-text truncate">{s.project}</span>
-                  {s.branch && <span class="text-xs px-1.5 py-0.5 bg-bg-tertiary rounded text-text-muted shrink-0">{s.branch}</span>}
+              {settings.showSparkline && s.activity.length > 0 && (
+                <Sparkline data={s.activity} globalMax={globalMax} />
+              )}
+              <div class="relative">
+                <div class="flex items-center justify-between mb-1.5">
+                  <div class="flex items-center gap-2 min-w-0">
+                    <span class="text-sm font-medium text-text truncate">{s.project}</span>
+                    {s.branch && <span class="text-xs px-1.5 py-0.5 bg-bg-tertiary rounded text-text-muted shrink-0">{s.branch}</span>}
+                  </div>
+                  <span class="text-xs text-text-muted shrink-0 ml-3">{s.date}</span>
                 </div>
-                <span class="text-xs text-text-muted shrink-0 ml-3">{s.date}</span>
-              </div>
-              <p class="text-sm truncate mb-2">
-                {(() => {
-                  const prompt = settings.startAtBottom ? (s.lastPrompt || s.firstPrompt) : s.firstPrompt;
-                  return prompt
-                    ? <span class="text-text-secondary">{prompt}</span>
-                    : <span class="text-text-muted italic">Started with slash command</span>;
-                })()}
-              </p>
-              <div class="flex items-center gap-2 text-xs text-text-muted">
-                <span class="font-mono">{s.sessionId.slice(0, 8)}</span>
-                <span>{s.messages} msgs</span>
+                <p class="text-sm truncate mb-2">
+                  {(() => {
+                    const prompt = settings.startAtBottom ? (s.lastPrompt || s.firstPrompt) : s.firstPrompt;
+                    return prompt
+                      ? <span class="text-text-secondary">{prompt}</span>
+                      : <span class="text-text-muted italic">Started with slash command</span>;
+                  })()}
+                </p>
+                <div class="flex items-center gap-2 text-xs text-text-muted">
+                  <span class="font-mono">{s.sessionId.slice(0, 8)}</span>
+                  <span>{s.messages} msgs</span>
+                </div>
               </div>
             </div>
-          ))}
+          ));
+          })()}
           {/* Sentinel for infinite scroll */}
           {hasMore && <div ref={sentinelRef} class="h-4" />}
           {loading && sessions.length > 0 && (
@@ -262,6 +279,39 @@ export function SessionList({ onSelect, settings }: { onSelect: (id: string) => 
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Recharts sparkline rendered as a card background. */
+function Sparkline({ data, globalMax }: { data: number[]; globalMax: number }) {
+  if (data.length < 2 || globalMax === 0) return null;
+
+  const chartData = data.map((v) => ({ v }));
+
+  return (
+    <div class="absolute inset-0 pointer-events-none">
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={chartData} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+          <defs>
+            <linearGradient id="spark-fill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="var(--color-accent)" stopOpacity={0.08} />
+              <stop offset="100%" stopColor="var(--color-accent)" stopOpacity={0.01} />
+            </linearGradient>
+          </defs>
+          <YAxis domain={[0, globalMax]} hide />
+          <Area
+            type="monotone"
+            dataKey="v"
+            stroke="var(--color-accent)"
+            strokeWidth={1.5}
+            strokeOpacity={0.15}
+            fill="url(#spark-fill)"
+            isAnimationActive={false}
+            dot={false}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
     </div>
   );
 }

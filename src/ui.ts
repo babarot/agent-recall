@@ -301,6 +301,9 @@ function handleAPI(db: VaultDB, url: URL): Response {
       offset: Number(url.searchParams.get("offset") ?? 0),
     });
 
+    const sessionIds = sessions.map((s) => s.sessionId);
+    const activities = db.getSessionActivities(sessionIds);
+
     return jsonResponse(
       sessions.map((s) => {
         let firstPrompt = s.firstPrompt?.slice(0, 200) ?? "";
@@ -317,6 +320,7 @@ function handleAPI(db: VaultDB, url: URL): Response {
           lastPrompt: lastPrompt,
           messages: s.messageCount,
           date: s.startedAt?.slice(0, 10),
+          activity: activities.get(s.sessionId) ?? [],
         };
       })
     );

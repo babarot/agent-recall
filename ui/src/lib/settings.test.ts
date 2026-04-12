@@ -28,6 +28,7 @@ describe("loadSettings", () => {
     expect(s.showToolResult).toBe(true);
     expect(s.showMeta).toBe(true);
     expect(s.startAtBottom).toBe(false);
+    expect(s.showSparkline).toBe(true);
   });
 
   it("loads saved settings", () => {
@@ -105,6 +106,7 @@ describe("saveSettings", () => {
       showToolResult: false,
       showMeta: true,
       startAtBottom: true,
+      showSparkline: false,
     };
     saveSettings(settings);
     const raw = localStorageMock.getItem("agent-recall-settings");
@@ -115,6 +117,7 @@ describe("saveSettings", () => {
     expect(parsed.showToolResult).toBe(false);
     expect(parsed.showMeta).toBe(true);
     expect(parsed.startAtBottom).toBe(true);
+    expect(parsed.showSparkline).toBe(false);
   });
 
   it("roundtrips through load", () => {
@@ -126,6 +129,7 @@ describe("saveSettings", () => {
       showToolResult: true,
       showMeta: false,
       startAtBottom: true,
+      showSparkline: true,
     };
     saveSettings(settings);
     const loaded = loadSettings();
