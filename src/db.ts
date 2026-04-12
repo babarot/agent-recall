@@ -1,6 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
 import { SCHEMA_SQL } from "./schema.ts";
-import { SCHEMA_VERSION } from "./config.ts";
 
 export class VaultDB {
   private db: DatabaseSync;
@@ -13,21 +12,14 @@ export class VaultDB {
     this.migrate();
   }
 
+  /**
+   * Apply the schema. All statements use IF NOT EXISTS so this is safe to
+   * run on every startup. The DB is a derived cache of the JSONL master
+   * data — when the schema changes it is cheaper to `rm ~/.claude/vault.db`
+   * and rebuild than to write incremental migrations.
+   */
   private migrate(): void {
-    // PoC: no backward compatibility. Fresh DBs get the current schema;
-    // old DBs should be deleted (`rm ~/.claude/vault.db`) and rebuilt from JSONL.
-    const row = this.db
-      .prepare(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_version'"
-      )
-      .get() as { name: string } | undefined;
-
-    if (!row) {
-      this.db.exec(SCHEMA_SQL);
-      this.db
-        .prepare("INSERT INTO schema_version (version) VALUES (?)")
-        .run(SCHEMA_VERSION);
-    }
+    this.db.exec(SCHEMA_SQL);
   }
 
   /** Check if a session already exists and return its message count */
@@ -338,7 +330,7 @@ export class VaultDB {
              git_branch as gitBranch, first_prompt as firstPrompt,
              message_count as messageCount, started_at as startedAt
       FROM sessions ${where}
-      ORDER BY started_at DESC
+      ORDER BY COALESCE(ended_at, started_at) DESC
       LIMIT ? OFFSET ?`;
 
     return this.db.prepare(sql).all(...params) as Array<{
