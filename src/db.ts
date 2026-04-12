@@ -207,6 +207,18 @@ export class VaultDB {
     return row?.content?.slice(0, 500) ?? null;
   }
 
+  /** Get the last real user text for a session (skipping tag-only messages) */
+  getLastUserText(sessionId: string): string | null {
+    const row = this.db
+      .prepare(
+        `SELECT content FROM messages
+         WHERE session_id = ? AND block_type = 'text' AND role = 'user' AND content NOT LIKE '<%'
+         ORDER BY turn_index DESC LIMIT 1`
+      )
+      .get(sessionId) as { content: string } | undefined;
+    return row?.content?.slice(0, 500) ?? null;
+  }
+
   /** Check if images exist for a message */
   hasImages(sessionId: string, messageUuid: string): boolean {
     const row = this.db

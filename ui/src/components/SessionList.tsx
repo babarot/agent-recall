@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "preact/hooks";
 import { useSSE } from "../hooks/use-sse";
+import type { Settings } from "../lib/settings";
 
 interface Session {
   sessionId: string;
@@ -7,13 +8,14 @@ interface Session {
   project: string;
   branch: string;
   firstPrompt: string;
+  lastPrompt: string;
   messages: number;
   date: string;
 }
 
 const PAGE_SIZE = 50;
 
-export function SessionList({ onSelect }: { onSelect: (id: string) => void }) {
+export function SessionList({ onSelect, settings }: { onSelect: (id: string) => void; settings: Settings }) {
   const [sessions, setSessions] = useState<Session[]>([]);
   // `query` is the raw text in the search box (updates on every keystroke).
   // `committedQuery` is the value that was last actually submitted via the
@@ -99,6 +101,7 @@ export function SessionList({ onSelect }: { onSelect: (id: string) => void }) {
           project: r.project,
           branch: r.branch,
           firstPrompt: r.content?.slice(0, 200) ?? "",
+          lastPrompt: "",
           messages: 0,
           date: r.date,
         });
@@ -259,10 +262,12 @@ export function SessionList({ onSelect }: { onSelect: (id: string) => void }) {
                 <span class="text-xs text-text-muted shrink-0 ml-3">{s.date}</span>
               </div>
               <p class="text-sm truncate mb-2">
-                {s.firstPrompt
-                  ? <span class="text-text-secondary">{s.firstPrompt}</span>
-                  : <span class="text-text-muted italic">Started with slash command</span>
-                }
+                {(() => {
+                  const prompt = settings.startAtBottom ? (s.lastPrompt || s.firstPrompt) : s.firstPrompt;
+                  return prompt
+                    ? <span class="text-text-secondary">{prompt}</span>
+                    : <span class="text-text-muted italic">Started with slash command</span>;
+                })()}
               </p>
               <div class="flex items-center gap-2 text-xs text-text-muted">
                 <span class="font-mono">{s.sessionId.slice(0, 8)}</span>

@@ -303,16 +303,18 @@ function handleAPI(db: VaultDB, url: URL): Response {
 
     return jsonResponse(
       sessions.map((s) => {
-        let prompt = s.firstPrompt?.slice(0, 200) ?? "";
-        if (!prompt || prompt.startsWith("<")) {
-          prompt = db.getFirstUserText(s.sessionId) ?? prompt;
+        let firstPrompt = s.firstPrompt?.slice(0, 200) ?? "";
+        if (!firstPrompt || firstPrompt.startsWith("<")) {
+          firstPrompt = db.getFirstUserText(s.sessionId) ?? firstPrompt;
         }
+        const lastPrompt = db.getLastUserText(s.sessionId) ?? "";
         return {
           sessionId: s.sessionId.slice(0, 8),
           fullSessionId: s.sessionId,
           project: displayProject(s.projectPath, s.project),
           branch: s.gitBranch,
-          firstPrompt: prompt,
+          firstPrompt: firstPrompt,
+          lastPrompt: lastPrompt,
           messages: s.messageCount,
           date: s.startedAt?.slice(0, 10),
         };

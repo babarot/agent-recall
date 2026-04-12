@@ -502,6 +502,38 @@ Deno.test("getFirstUserText skips tool_use block types", () => {
   });
 });
 
+// --- getLastUserText ---
+
+Deno.test("getLastUserText returns last non-tag user text", () => {
+  withDB((db) => {
+    seedSession(db, "s1");
+    db.insertMessage({ sessionId: "s1", uuid: "m1", role: "user", blockType: "text", content: "first prompt", timestamp: "2026-01-01T00:00:00Z", turnIndex: 0 });
+    db.insertMessage({ sessionId: "s1", uuid: "m2", role: "assistant", blockType: "text", content: "reply", timestamp: "2026-01-01T00:00:01Z", turnIndex: 1 });
+    db.insertMessage({ sessionId: "s1", uuid: "m3", role: "user", blockType: "text", content: "second prompt", timestamp: "2026-01-01T00:00:02Z", turnIndex: 2 });
+
+    assertEquals(db.getLastUserText("s1"), "second prompt");
+  });
+});
+
+Deno.test("getLastUserText skips tag-only messages", () => {
+  withDB((db) => {
+    seedSession(db, "s1");
+    db.insertMessage({ sessionId: "s1", uuid: "m1", role: "user", blockType: "text", content: "real prompt", timestamp: "2026-01-01T00:00:00Z", turnIndex: 0 });
+    db.insertMessage({ sessionId: "s1", uuid: "m2", role: "user", blockType: "text", content: "<command-message>commit</command-message>", timestamp: "2026-01-01T00:00:01Z", turnIndex: 1 });
+
+    assertEquals(db.getLastUserText("s1"), "real prompt");
+  });
+});
+
+Deno.test("getLastUserText returns null when no clean text exists", () => {
+  withDB((db) => {
+    seedSession(db, "s1");
+    db.insertMessage({ sessionId: "s1", uuid: "m1", role: "user", blockType: "text", content: "<command-name>/commit</command-name>", timestamp: "2026-01-01T00:00:00Z", turnIndex: 0 });
+
+    assertEquals(db.getLastUserText("s1"), null);
+  });
+});
+
 // --- block_type in insertMessage + exportSession ---
 
 Deno.test("insertMessage stores block_type and tool fields", () => {
