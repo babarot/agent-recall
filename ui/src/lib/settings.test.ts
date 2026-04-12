@@ -89,6 +89,25 @@ describe("loadSettings", () => {
     expect(s.startAtBottom).toBe(true);
   });
 
+  it("backfills showSparkline when it is missing from an older saved shape", () => {
+    localStorageMock.setItem("agent-recall-settings", JSON.stringify({
+      theme: "dark",
+      showToolUse: false,
+    }));
+    const s = loadSettings();
+    expect(s.showSparkline).toBe(true);
+    expect(s.theme).toBe("dark");
+    expect(s.showToolUse).toBe(false);
+  });
+
+  it("honors an explicitly disabled showSparkline", () => {
+    localStorageMock.setItem("agent-recall-settings", JSON.stringify({
+      showSparkline: false,
+    }));
+    const s = loadSettings();
+    expect(s.showSparkline).toBe(false);
+  });
+
   it("handles corrupted JSON gracefully", () => {
     localStorageMock.setItem("agent-recall-settings", "not json");
     const s = loadSettings();

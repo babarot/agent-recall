@@ -535,6 +535,73 @@ Deno.test("getLastUserText returns null when no clean text exists", () => {
   });
 });
 
+// --- getSessionActivities ---
+
+Deno.test("getSessionActivities buckets messages by timestamp", () => {
+  withDB((db) => {
+    seedSession(db, "s1");
+    // 4 messages spread across time: two early, one middle, one late
+    db.insertMessage({ sessionId: "s1", uuid: "m1", role: "user", blockType: "text", content: "a", timestamp: "2026-01-01T00:00:00Z", turnIndex: 0 });
+    db.insertMessage({ sessionId: "s1", uuid: "m2", role: "assistant", blockType: "text", content: "b", timestamp: "2026-01-01T00:00:01Z", turnIndex: 1 });
+    db.insertMessage({ sessionId: "s1", uuid: "m3", role: "user", blockType: "text", content: "c", timestamp: "2026-01-01T00:30:00Z", turnIndex: 2 });
+    db.insertMessage({ sessionId: "s1", uuid: "m4", role: "user", blockType: "text", content: "d", timestamp: "2026-01-01T01:00:00Z", turnIndex: 3 });
+
+    const result = db.getSessionActivities(["s1"], 4);
+    const activity = result.get("s1");
+    assertNotEquals(activity, undefined);
+    assertEquals(activity!.length, 4);
+    // First bucket should have the two early messages
+    assertEquals(activity![0], 2);
+    // Total across all buckets should equal total messages
+    assertEquals(activity!.reduce((a, b) => a + b, 0), 4);
+  });
+});
+
+Deno.test("getSessionActivities returns flat array for single message", () => {
+  withDB((db) => {
+    seedSession(db, "s1");
+    db.insertMessage({ sessionId: "s1", uuid: "m1", role: "user", blockType: "text", content: "only", timestamp: "2026-01-01T00:00:00Z", turnIndex: 0 });
+
+    const result = db.getSessionActivities(["s1"], 5);
+    const activity = result.get("s1");
+    assertNotEquals(activity, undefined);
+    assertEquals(activity!.length, 5);
+    // Single message → all buckets filled with 1
+    assertEquals(activity!.every((v) => v === 1), true);
+  });
+});
+
+Deno.test("getSessionActivities handles multiple sessions in one call", () => {
+  withDB((db) => {
+    seedSession(db, "s1");
+    seedSession(db, "s2");
+    db.insertMessage({ sessionId: "s1", uuid: "m1", role: "user", blockType: "text", content: "a", timestamp: "2026-01-01T00:00:00Z", turnIndex: 0 });
+    db.insertMessage({ sessionId: "s1", uuid: "m2", role: "user", blockType: "text", content: "b", timestamp: "2026-01-01T01:00:00Z", turnIndex: 1 });
+    db.insertMessage({ sessionId: "s2", uuid: "m3", role: "user", blockType: "text", content: "c", timestamp: "2026-01-01T00:00:00Z", turnIndex: 0 });
+
+    const result = db.getSessionActivities(["s1", "s2"], 3);
+    assertEquals(result.size, 2);
+    assertEquals(result.get("s1")!.reduce((a, b) => a + b, 0), 2);
+    assertEquals(result.get("s2")!.length, 3);
+  });
+});
+
+Deno.test("getSessionActivities returns empty map for empty input", () => {
+  withDB((db) => {
+    const result = db.getSessionActivities([]);
+    assertEquals(result.size, 0);
+  });
+});
+
+Deno.test("getSessionActivities returns empty map for session with no messages", () => {
+  withDB((db) => {
+    seedSession(db, "s1");
+    // Session exists but has no messages at all
+    const result = db.getSessionActivities(["s1"], 5);
+    assertEquals(result.has("s1"), false);
+  });
+});
+
 // --- block_type in insertMessage + exportSession ---
 
 Deno.test("insertMessage stores block_type and tool fields", () => {
