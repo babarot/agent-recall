@@ -59,7 +59,9 @@ export interface ParsedJournalLines {
   header?: JournalHeader;
   /** First user-facing text seen (raw, before truncation) — feeds SessionMeta.firstPrompt */
   firstUserText?: string;
-  /** Timestamp of the last processed line — feeds SessionMeta.endedAt */
+  /** Timestamp of the last user message — feeds SessionMeta.endedAt.
+   *  Only user messages are tracked so that assistant activity (which can
+   *  run in parallel across sessions) doesn't churn the sort order. */
   lastTimestamp?: string;
 }
 
@@ -110,8 +112,9 @@ export function parseJournalLines(
       };
     }
 
-    // Track end time
-    if (parsed.timestamp) {
+    // Track last user activity time — only user messages count so that
+    // parallel assistant runs don't constantly reshuffle session order.
+    if (parsed.timestamp && parsed.type === "user") {
       lastTimestamp = parsed.timestamp;
     }
 

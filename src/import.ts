@@ -237,7 +237,7 @@ export function importSingleSessionIncremental(
     const newOffset = existingBytes + processedLen;
     const endedAt = parsed.lastTimestamp ?? undefined;
 
-    if (inserted > 0 && endedAt) {
+    if (inserted > 0) {
       db.updateSessionCounts(sessionId, newTotal, endedAt);
     }
     db.updateSessionImportedBytes(sessionId, newOffset, endedAt);

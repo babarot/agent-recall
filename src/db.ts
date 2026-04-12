@@ -219,17 +219,17 @@ export class VaultDB {
     return !!row;
   }
 
-  /** Update session message count and ended_at after incremental import */
+  /** Update session message count and optionally ended_at after incremental import */
   updateSessionCounts(
     sessionId: string,
     messageCount: number,
-    endedAt: string
+    endedAt?: string
   ): void {
     this.db
       .prepare(
-        "UPDATE sessions SET message_count = ?, ended_at = ? WHERE session_id = ?"
+        "UPDATE sessions SET message_count = ?, ended_at = COALESCE(?, ended_at) WHERE session_id = ?"
       )
-      .run(messageCount, endedAt, sessionId);
+      .run(messageCount, endedAt ?? null, sessionId);
   }
 
   /**

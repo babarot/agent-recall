@@ -188,20 +188,27 @@ Deno.test("parseSession assigns sequential turnIndex", () => {
   assertEquals(result!.messages[2].turnIndex, 2);
 });
 
-Deno.test("parseSession tracks endedAt as last message timestamp", () => {
+Deno.test("parseSession tracks endedAt as last user message timestamp", () => {
   const jsonl = [
     USER_MSG("first", "u1", "2026-01-01T00:00:00Z"),
     ASSISTANT_MSG(
-      [{ type: "text", text: "last" }],
+      [{ type: "text", text: "reply" }],
       "a1",
       "2026-01-01T00:05:00Z"
+    ),
+    USER_MSG("second", "u2", "2026-01-01T00:10:00Z"),
+    ASSISTANT_MSG(
+      [{ type: "text", text: "last reply" }],
+      "a2",
+      "2026-01-01T00:15:00Z"
     ),
   ].join("\n");
 
   const result = parseSession(jsonl, "test");
   assertNotEquals(result, null);
   assertEquals(result!.meta.startedAt, "2026-01-01T00:00:00Z");
-  assertEquals(result!.meta.endedAt, "2026-01-01T00:05:00Z");
+  // endedAt tracks only user messages, not assistant responses
+  assertEquals(result!.meta.endedAt, "2026-01-01T00:10:00Z");
 });
 
 Deno.test("parseSession returns null for empty input", () => {
@@ -443,6 +450,8 @@ Deno.test("parseJournalLines output is consistent with parseSession wrapper", ()
   assertNotEquals(session, null);
   assertEquals(session!.messages.length, lines.messages.length);
   assertEquals(session!.meta.sessionId, lines.header!.sessionId);
+  // lastTimestamp tracks only user messages
+  assertEquals(lines.lastTimestamp, "2026-01-01T00:00:00Z");
   assertEquals(session!.meta.endedAt, lines.lastTimestamp);
 });
 
