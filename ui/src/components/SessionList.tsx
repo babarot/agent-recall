@@ -132,36 +132,16 @@ export function SessionList({ onSelect, settings }: { onSelect: (id: string) => 
   //   events so we don't disrupt the frozen result set. Typing without
   //   committing still allows live updates — otherwise the list would
   //   mysteriously freeze the moment the user touches the search box.
-  // - For a session already on screen: update its message count and bubble
-  //   it to the top (sessions are sorted by started_at desc anyway).
-  // - For a brand-new session: refetch the top of the list and prepend it
-  //   if the server now lists it first. We can't build a complete Session
-  //   row from the SSE payload alone (no firstPrompt / date / branch).
+  // - For both known and new sessions we re-fetch the single session from
+  //   the API so that firstPrompt, lastPrompt, and message count are all
+  //   up to date. The fresh row is placed at the top of the list.
   useSSE((event) => {
     if (committedQuery !== "") return;
     if (event.type !== "session_updated") return;
 
     const sessionId = event.sessionId as string | undefined;
     if (!sessionId) return;
-    const totalMessages = event.totalMessages as number | undefined;
 
-    let wasKnown = false;
-    setSessions((prev) => {
-      const idx = prev.findIndex((s) => s.fullSessionId === sessionId);
-      if (idx === -1) return prev;
-      wasKnown = true;
-      const existing = prev[idx];
-      const updated = {
-        ...existing,
-        messages: totalMessages ?? existing.messages,
-      };
-      return [updated, ...prev.slice(0, idx), ...prev.slice(idx + 1)];
-    });
-
-    if (wasKnown) return;
-
-    // Unknown session → fetch the head of the list. If the new session is
-    // actually the most recent, it will be position 0 of that response.
     (async () => {
       try {
         const params = new URLSearchParams();
@@ -170,11 +150,11 @@ export function SessionList({ onSelect, settings }: { onSelect: (id: string) => 
         params.set("offset", "0");
         const res = await fetch(`/api/sessions?${params}`);
         const data: Session[] = await res.json();
-        const first = data[0];
-        if (!first || first.fullSessionId !== sessionId) return;
+        const fresh = data[0];
+        if (!fresh || fresh.fullSessionId !== sessionId) return;
         setSessions((prev) => {
-          if (prev.some((s) => s.fullSessionId === sessionId)) return prev;
-          return [first, ...prev];
+          const without = prev.filter((s) => s.fullSessionId !== sessionId);
+          return [fresh, ...without];
         });
       } catch {
         // Swallow — the next manual refresh will pick it up.
