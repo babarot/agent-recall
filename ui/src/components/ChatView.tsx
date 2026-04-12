@@ -3,6 +3,7 @@ import { groupMessages, renderImages, stripAnsi, getToolInputPreview } from "../
 import type { Message, DisplayMessage } from "../lib/chat-utils";
 import type { Settings } from "../lib/settings";
 import { renderMarkdown } from "../lib/markdown";
+import { ansiToHtml, hasAnsi } from "../lib/ansi";
 import { useKeyboardShortcut } from "../hooks/use-keyboard-shortcut";
 import { useSSE } from "../hooks/use-sse";
 import { useTailFollow } from "../hooks/use-tail-follow";
@@ -23,6 +24,7 @@ function filterMessages(messages: DisplayMessage[], settings: Settings): Display
     if (msg.type === "thinking" && !settings.showThinking) return false;
     if (msg.type === "tool_use" && !settings.showToolUse) return false;
     if (msg.type === "tool_result" && !settings.showToolResult) return false;
+    if (msg.type === "meta" && !settings.showMeta) return false;
     return true;
   });
 }
@@ -33,6 +35,7 @@ const MESSAGE_RENDERERS: Record<string, (msg: DisplayMessage, i: number, session
   thinking: (msg, i) => msg.type === "thinking" ? <ThinkingBubble key={i} content={msg.content} /> : null,
   tool_use: (msg, i) => msg.type === "tool_use" ? <ToolUseBubble key={i} toolName={msg.toolName} toolInput={msg.toolInput} /> : null,
   tool_result: (msg, i) => msg.type === "tool_result" ? <ToolResultBubble key={i} content={msg.content} /> : null,
+  meta: (msg, i) => msg.type === "meta" ? <MetaBubble key={i} label={msg.label} content={msg.content} /> : null,
   chat: (msg, i, sessionId) => msg.type === "chat" ? <ChatBubble key={i} sessionId={sessionId} uuid={msg.uuid} role={msg.role} content={msg.content} /> : null,
 };
 
@@ -45,17 +48,39 @@ export function ChatView({ sessionId, onBack, settings }: { sessionId: string; o
   // Tail-follow machinery: handles "stick to bottom on live updates",
   // cancels on user scroll-up, survives image layout shifts, and guards
   // against out-of-order fetch responses.
-  const { markIfAtBottom, isCurrentSeq } = useTailFollow(scrollRef, data);
+  const { markIfAtBottom, isCurrentSeq, setFollow } = useTailFollow(scrollRef, data);
 
   useKeyboardShortcut("Escape", () => setZoomImage(null));
 
   useEffect(() => {
-    fetch(`/api/sessions/${sessionId}`)
+    const controller = new AbortController();
+    // Decide follow intent up front. setFollow bumps the shared seq so any
+    // in-flight SSE fetch (from a previous session or from the gap before
+    // this effect ran) becomes stale, and primes followRef so the
+    // post-render effect in useTailFollow does the right thing after setData.
+    const seq = setFollow(settings.startAtBottom);
+    fetch(`/api/sessions/${sessionId}`, { signal: controller.signal })
       .then((r) => r.json())
       .then((d) => {
+        if (controller.signal.aborted) return;
+        // If a newer fetch (SSE refresh or session switch) has bumped the
+        // seq while we were loading, drop our stale snapshot instead of
+        // overwriting the fresher data.
+        if (!isCurrentSeq(seq)) return;
         setData(d);
-        setTimeout(() => scrollRef.current?.scrollTo(0, 0), 0);
+        if (!settings.startAtBottom) {
+          setTimeout(() => scrollRef.current?.scrollTo(0, 0), 0);
+        }
+      })
+      .catch((err) => {
+        if (err?.name === "AbortError") return;
+        // Other fetch failures are non-fatal; next SSE event or manual
+        // navigation will retry.
       });
+    return () => controller.abort();
+    // settings.startAtBottom intentionally omitted: toggling the preference
+    // mid-session should take effect on the next session open, not trigger
+    // a refetch of the current one.
   }, [sessionId]);
 
   // Live refresh on SSE events for the current session. We mark the
@@ -158,6 +183,32 @@ export function ChatView({ sessionId, onBack, settings }: { sessionId: string; o
   );
 }
 
+function MetaBubble({ label, content }: { label: string; content: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div class="flex justify-center">
+      <div class="max-w-[90%] w-full">
+        <button
+          onClick={() => setOpen(!open)}
+          class="w-full flex items-center gap-2 text-xs text-text-muted hover:text-text-secondary transition-colors cursor-pointer py-1 px-3 border border-dashed border-border rounded"
+          title="Meta message (synthetic content injected by Claude Code)"
+        >
+          <span class="text-text-muted">{open ? "▼" : "▶"}</span>
+          <span class="uppercase tracking-wider text-[10px] px-1.5 py-0.5 bg-bg-tertiary rounded text-text-muted shrink-0">
+            meta
+          </span>
+          <span class="truncate text-text-secondary">{label}</span>
+        </button>
+        {open && (
+          <div class="mt-1 px-4 py-3 bg-bg-secondary border border-dashed border-border rounded text-xs text-text-secondary whitespace-pre-wrap leading-relaxed max-h-96 overflow-y-auto">
+            {content}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ThinkingBubble({ content }: { content: string }) {
   const [open, setOpen] = useState(false);
   return (
@@ -208,11 +259,13 @@ function ToolUseBubble({ toolName, toolInput }: { toolName: string; toolInput: s
 function ToolResultBubble({ content }: { content: string }) {
   const [open, setOpen] = useState(false);
   if (!content) return null;
-  const preview = content.length > 80 ? content.slice(0, 80) + "..." : content;
+  const ansi = hasAnsi(content);
+  const previewSrc = ansi ? stripAnsi(content) : content;
+  const preview = previewSrc.length > 80 ? previewSrc.slice(0, 80) + "..." : previewSrc;
   const html = useMemo(() => {
     if (!open) return "";
-    return renderMarkdown(content);
-  }, [content, open]);
+    return ansi ? ansiToHtml(content) : renderMarkdown(content);
+  }, [content, open, ansi]);
 
   return (
     <div class="flex justify-start">
@@ -227,7 +280,14 @@ function ToolResultBubble({ content }: { content: string }) {
         </button>
         {open && (
           <div class="mt-1 px-4 py-3 bg-bg-secondary border border-border rounded-2xl rounded-bl-sm text-sm leading-relaxed">
-            <div class="markdown-content break-words" dangerouslySetInnerHTML={{ __html: html }} />
+            {ansi ? (
+              <pre
+                class="!p-0 !m-0 !border-0 text-xs text-text-secondary whitespace-pre-wrap break-words font-mono"
+                dangerouslySetInnerHTML={{ __html: html }}
+              />
+            ) : (
+              <div class="markdown-content break-words" dangerouslySetInnerHTML={{ __html: html }} />
+            )}
           </div>
         )}
       </div>
@@ -271,8 +331,14 @@ function CommandBubble({ name, args, stdout }: { name: string; args: string; std
   );
 }
 
+/** Character threshold above which assistant messages are collapsed. */
+const CLAMP_THRESHOLD = 1000;
+
 function ChatBubble({ sessionId, uuid, role, content }: { sessionId: string; uuid: string; role: string; content: string }) {
   const isUser = role === "user";
+  const [expanded, setExpanded] = useState(false);
+  const needsClamp = !isUser && content.length > CLAMP_THRESHOLD;
+
   const html = useMemo(() => {
     const withImages = renderImages(content, sessionId, uuid);
     return renderMarkdown(withImages);
@@ -292,7 +358,18 @@ function ChatBubble({ sessionId, uuid, role, content }: { sessionId: string; uui
             {isUser ? "You" : "Assistant"}
           </span>
         </div>
-        <div class="markdown-content break-words" dangerouslySetInnerHTML={{ __html: html }} />
+        <div
+          class={`markdown-content break-words ${needsClamp && !expanded ? "line-clamp-4" : ""}`}
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+        {needsClamp && (
+          <button
+            onClick={() => setExpanded((prev) => !prev)}
+            class="text-xs text-accent hover:underline mt-2 select-none cursor-pointer"
+          >
+            {expanded ? "Show less" : "Read more"}
+          </button>
+        )}
       </div>
     </div>
   );

@@ -188,20 +188,27 @@ Deno.test("parseSession assigns sequential turnIndex", () => {
   assertEquals(result!.messages[2].turnIndex, 2);
 });
 
-Deno.test("parseSession tracks endedAt as last message timestamp", () => {
+Deno.test("parseSession tracks endedAt as last user message timestamp", () => {
   const jsonl = [
     USER_MSG("first", "u1", "2026-01-01T00:00:00Z"),
     ASSISTANT_MSG(
-      [{ type: "text", text: "last" }],
+      [{ type: "text", text: "reply" }],
       "a1",
       "2026-01-01T00:05:00Z"
+    ),
+    USER_MSG("second", "u2", "2026-01-01T00:10:00Z"),
+    ASSISTANT_MSG(
+      [{ type: "text", text: "last reply" }],
+      "a2",
+      "2026-01-01T00:15:00Z"
     ),
   ].join("\n");
 
   const result = parseSession(jsonl, "test");
   assertNotEquals(result, null);
   assertEquals(result!.meta.startedAt, "2026-01-01T00:00:00Z");
-  assertEquals(result!.meta.endedAt, "2026-01-01T00:05:00Z");
+  // endedAt tracks only user messages, not assistant responses
+  assertEquals(result!.meta.endedAt, "2026-01-01T00:10:00Z");
 });
 
 Deno.test("parseSession returns null for empty input", () => {
@@ -443,5 +450,81 @@ Deno.test("parseJournalLines output is consistent with parseSession wrapper", ()
   assertNotEquals(session, null);
   assertEquals(session!.messages.length, lines.messages.length);
   assertEquals(session!.meta.sessionId, lines.header!.sessionId);
+  // lastTimestamp tracks only user messages
+  assertEquals(lines.lastTimestamp, "2026-01-01T00:00:00Z");
   assertEquals(session!.meta.endedAt, lines.lastTimestamp);
+});
+
+// --- isMeta handling (slash command / skill expansions) ---
+
+const META_MSG = (text: string, uuid: string, ts: string) =>
+  line({
+    type: "user",
+    uuid,
+    sessionId: "sess-001",
+    timestamp: ts,
+    cwd: "/home/user/project",
+    version: "2.1.87",
+    gitBranch: "main",
+    isSidechain: false,
+    isMeta: true,
+    message: { role: "user", content: [{ type: "text", text }] },
+  });
+
+Deno.test("parseJournalLines collapses isMeta messages into blockType=meta", () => {
+  const jsonl = [
+    USER_MSG("hi", "u1", "2026-01-01T00:00:00Z"),
+    META_MSG(
+      "Base directory for this skill: /path/to/skills/open-pr\n\n# Open Pull Request Skill\n\n(long body here)",
+      "m1",
+      "2026-01-01T00:00:01Z"
+    ),
+    ASSISTANT_MSG([{ type: "text", text: "done" }], "a1", "2026-01-01T00:00:02Z"),
+  ].join("\n");
+
+  const result = parseJournalLines(jsonl);
+  assertEquals(result.messages.length, 3);
+  assertEquals(result.messages[0].blockType, "text");
+  assertEquals(result.messages[1].blockType, "meta");
+  assertEquals(result.messages[1].content.startsWith("Base directory"), true);
+  assertEquals(result.messages[2].blockType, "text");
+});
+
+Deno.test("parseJournalLines meta messages do not pollute firstUserText", () => {
+  // Real user input + meta → firstUserText is the real input.
+  const jsonl = [
+    USER_MSG("real human text", "u1", "2026-01-01T00:00:00Z"),
+    META_MSG("## Context\n- git diff:\n...", "m1", "2026-01-01T00:00:01Z"),
+  ].join("\n");
+
+  const result = parseJournalLines(jsonl);
+  assertEquals(result.firstUserText, "real human text");
+});
+
+Deno.test("parseJournalLines still counts meta turns sequentially", () => {
+  const jsonl = [
+    USER_MSG("a", "u1", "2026-01-01T00:00:00Z"),
+    META_MSG("meta body", "m1", "2026-01-01T00:00:01Z"),
+    ASSISTANT_MSG([{ type: "text", text: "b" }], "a1", "2026-01-01T00:00:02Z"),
+  ].join("\n");
+
+  const result = parseJournalLines(jsonl, 10);
+  assertEquals(result.messages[0].turnIndex, 10);
+  assertEquals(result.messages[1].turnIndex, 11);
+  assertEquals(result.messages[2].turnIndex, 12);
+});
+
+Deno.test("parseSession skips meta messages when computing firstPrompt", () => {
+  const jsonl = [
+    META_MSG(
+      "Base directory for this skill: /foo/skills/open-pr\n\n(huge body)",
+      "m1",
+      "2026-01-01T00:00:00Z"
+    ),
+    USER_MSG("actual user question", "u1", "2026-01-01T00:00:01Z"),
+  ].join("\n");
+
+  const session = parseSession(jsonl, "test");
+  assertNotEquals(session, null);
+  assertEquals(session!.meta.firstPrompt, "actual user question");
 });

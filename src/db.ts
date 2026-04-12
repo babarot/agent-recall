@@ -1,6 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
 import { SCHEMA_SQL } from "./schema.ts";
-import { SCHEMA_VERSION } from "./config.ts";
 
 export class VaultDB {
   private db: DatabaseSync;
@@ -13,21 +12,14 @@ export class VaultDB {
     this.migrate();
   }
 
+  /**
+   * Apply the schema. All statements use IF NOT EXISTS so this is safe to
+   * run on every startup. The DB is a derived cache of the JSONL master
+   * data — when the schema changes it is cheaper to `rm ~/.claude/vault.db`
+   * and rebuild than to write incremental migrations.
+   */
   private migrate(): void {
-    // PoC: no backward compatibility. Fresh DBs get the current schema;
-    // old DBs should be deleted (`rm ~/.claude/vault.db`) and rebuilt from JSONL.
-    const row = this.db
-      .prepare(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_version'"
-      )
-      .get() as { name: string } | undefined;
-
-    if (!row) {
-      this.db.exec(SCHEMA_SQL);
-      this.db
-        .prepare("INSERT INTO schema_version (version) VALUES (?)")
-        .run(SCHEMA_VERSION);
-    }
+    this.db.exec(SCHEMA_SQL);
   }
 
   /** Check if a session already exists and return its message count */
@@ -207,25 +199,92 @@ export class VaultDB {
     return row?.content?.slice(0, 500) ?? null;
   }
 
-  /** Check if images exist for a message */
-  hasImages(sessionId: string, messageUuid: string): boolean {
+  /** Get the last real user text for a session (skipping tag-only messages) */
+  getLastUserText(sessionId: string): string | null {
     const row = this.db
-      .prepare("SELECT 1 FROM images WHERE session_id = ? AND message_uuid = ? LIMIT 1")
-      .get(sessionId, messageUuid);
+      .prepare(
+        `SELECT content FROM messages
+         WHERE session_id = ? AND block_type = 'text' AND role = 'user' AND content NOT LIKE '<%'
+         ORDER BY turn_index DESC LIMIT 1`
+      )
+      .get(sessionId) as { content: string } | undefined;
+    return row?.content?.slice(0, 500) ?? null;
+  }
+
+  /** Check if a specific image (by index) exists for a message */
+  hasImage(sessionId: string, messageUuid: string, imageIndex: number): boolean {
+    const row = this.db
+      .prepare("SELECT 1 FROM images WHERE session_id = ? AND message_uuid = ? AND image_index = ? LIMIT 1")
+      .get(sessionId, messageUuid, imageIndex);
     return !!row;
   }
 
-  /** Update session message count and ended_at after incremental import */
+  /** Update session message count and optionally ended_at after incremental import */
   updateSessionCounts(
     sessionId: string,
     messageCount: number,
-    endedAt: string
+    endedAt?: string
   ): void {
     this.db
       .prepare(
-        "UPDATE sessions SET message_count = ?, ended_at = ? WHERE session_id = ?"
+        "UPDATE sessions SET message_count = ?, ended_at = COALESCE(?, ended_at) WHERE session_id = ?"
       )
-      .run(messageCount, endedAt, sessionId);
+      .run(messageCount, endedAt ?? null, sessionId);
+  }
+
+  /**
+   * Return activity sparkline data for a set of sessions. Each session gets
+   * an array of `buckets` numbers representing message density over time.
+   * Timestamps are bucketed into equal intervals between the session's first
+   * and last message; each value is the count of messages in that bucket.
+   */
+  getSessionActivities(
+    sessionIds: string[],
+    buckets = 20
+  ): Map<string, number[]> {
+    const result = new Map<string, number[]>();
+    if (sessionIds.length === 0) return result;
+
+    const placeholders = sessionIds.map(() => "?").join(",");
+    const rows = this.db
+      .prepare(
+        `SELECT session_id, timestamp FROM messages
+         WHERE session_id IN (${placeholders}) AND timestamp IS NOT NULL
+         ORDER BY session_id, timestamp`
+      )
+      .all(...sessionIds) as Array<{ session_id: string; timestamp: string }>;
+
+    // Group timestamps by session
+    const bySession = new Map<string, number[]>();
+    for (const row of rows) {
+      let arr = bySession.get(row.session_id);
+      if (!arr) {
+        arr = [];
+        bySession.set(row.session_id, arr);
+      }
+      arr.push(new Date(row.timestamp).getTime());
+    }
+
+    for (const [sid, timestamps] of bySession) {
+      if (timestamps.length < 2) {
+        result.set(sid, new Array(buckets).fill(timestamps.length));
+        continue;
+      }
+      const min = timestamps[0];
+      const max = timestamps[timestamps.length - 1];
+      const range = max - min || 1;
+      const counts = new Array(buckets).fill(0);
+      for (const ts of timestamps) {
+        const idx = Math.min(
+          Math.floor(((ts - min) / range) * buckets),
+          buckets - 1
+        );
+        counts[idx]++;
+      }
+      result.set(sid, counts);
+    }
+
+    return result;
   }
 
   /** FTS5 search across messages */
@@ -326,7 +385,7 @@ export class VaultDB {
              git_branch as gitBranch, first_prompt as firstPrompt,
              message_count as messageCount, started_at as startedAt
       FROM sessions ${where}
-      ORDER BY started_at DESC
+      ORDER BY COALESCE(ended_at, started_at) DESC
       LIMIT ? OFFSET ?`;
 
     return this.db.prepare(sql).all(...params) as Array<{

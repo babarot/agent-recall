@@ -99,7 +99,7 @@ export function App() {
 
       <main class="flex-1 overflow-hidden">
         {view === "list" && (
-          <SessionList onSelect={handleSelectSession} />
+          <SessionList onSelect={handleSelectSession} settings={settings} />
         )}
         {view === "chat" && selectedSession && (
           <ChatView sessionId={selectedSession} onBack={handleBack} settings={settings} />

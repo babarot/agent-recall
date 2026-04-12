@@ -13,7 +13,8 @@ export type DisplayMessage =
   | { type: "tool_use"; toolName: string; toolInput: string }
   | { type: "tool_result"; content: string }
   | { type: "bash"; command: string; stdout: string; stderr: string }
-  | { type: "command"; name: string; args: string; stdout: string };
+  | { type: "command"; name: string; args: string; stdout: string }
+  | { type: "meta"; label: string; content: string };
 
 export function extractTag(content: string, tag: string): string | null {
   const re = new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`);
@@ -29,8 +30,17 @@ export function groupMessages(messages: Message[]): DisplayMessage[] {
     const msg = messages[i];
     const content = msg.content;
 
+    // The content-based tag detection below ONLY applies to real user-role
+    // text messages. Assistant explanations and tool results can freely
+    // contain literal strings like `<command-name>` or `<bash-input>`
+    // without being an actual invocation — guard against false positives
+    // like an assistant that writes "`<command-name>` is a tag Claude Code
+    // emits" ending up as an empty CommandBubble.
+    const canDetectUserTags =
+      msg.role === "user" && (msg.blockType === "text" || !msg.blockType);
+
     // Detect <local-command-caveat> — skip it, look ahead for bash-input + bash-stdout
-    if (content.includes("<local-command-caveat>")) {
+    if (canDetectUserTags && content.includes("<local-command-caveat>")) {
       let command = "";
       let stdout = "";
       let stderr = "";
@@ -66,7 +76,7 @@ export function groupMessages(messages: Message[]): DisplayMessage[] {
     }
 
     // Detect standalone bash-input (without caveat)
-    if (content.includes("<bash-input>")) {
+    if (canDetectUserTags && content.includes("<bash-input>")) {
       const command = extractTag(content, "bash-input") ?? content;
       let stdout = "";
       let stderr = "";
@@ -86,7 +96,7 @@ export function groupMessages(messages: Message[]): DisplayMessage[] {
     }
 
     // Detect standalone <command-name> (slash commands)
-    if (content.includes("<command-name>") || content.includes("<command-message>")) {
+    if (canDetectUserTags && (content.includes("<command-name>") || content.includes("<command-message>"))) {
       const name = extractTag(content, "command-name") ?? "";
       const args = extractTag(content, "command-args") ?? "";
       let stdout = "";
@@ -104,8 +114,16 @@ export function groupMessages(messages: Message[]): DisplayMessage[] {
       continue;
     }
 
-    // Skip standalone stdout/stderr messages (already consumed)
-    if (content.includes("<bash-stdout>") || content.includes("<bash-stderr>") || content.includes("<local-command-stdout>")) {
+    // Skip standalone stdout/stderr messages (already consumed).
+    // Same guard as above: only user-role text can be a stray
+    // bash output wrapper; assistant explanations mentioning these
+    // tags should stay readable.
+    if (
+      canDetectUserTags &&
+      (content.includes("<bash-stdout>") ||
+        content.includes("<bash-stderr>") ||
+        content.includes("<local-command-stdout>"))
+    ) {
       i++;
       continue;
     }
@@ -132,6 +150,11 @@ export function groupMessages(messages: Message[]): DisplayMessage[] {
       i++;
       continue;
     }
+    if (msg.blockType === "meta") {
+      result.push({ type: "meta", label: summarizeMeta(content), content });
+      i++;
+      continue;
+    }
 
     // Regular text message
     result.push({ type: "chat", uuid: msg.uuid, role: msg.role, content });
@@ -139,6 +162,30 @@ export function groupMessages(messages: Message[]): DisplayMessage[] {
   }
 
   return result;
+}
+
+/**
+ * Build a short 1-line label for a collapsed meta block. Used as the
+ * visible summary on the folded bubble so the user can tell what kind of
+ * meta it is without having to expand it.
+ */
+export function summarizeMeta(content: string): string {
+  const trimmed = content.trimStart();
+
+  // Skill expansions: "Base directory for this skill: /path/to/.../skills/<name>"
+  const skillMatch = trimmed.match(/^Base directory for this skill:.*\/skills\/([^/\s]+)/);
+  if (skillMatch) return `Skill: ${skillMatch[1]}`;
+
+  // /commit-commands:commit and similar that inject a "## Context" block
+  if (/^##\s*Context\b/.test(trimmed)) return "Injected context";
+
+  // Bash caveats
+  if (trimmed.startsWith("<local-command-caveat>")) return "Command caveat";
+
+  // Fallback: first non-empty line, truncated
+  const firstLine = trimmed.split("\n", 1)[0] ?? "";
+  const stripped = firstLine.replace(/^#+\s*/, "").trim();
+  return (stripped.length > 60 ? stripped.slice(0, 60) + "…" : stripped) || "Meta message";
 }
 
 /** Extract a short preview string from tool input JSON */

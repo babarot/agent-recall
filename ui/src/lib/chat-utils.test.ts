@@ -5,11 +5,12 @@ import {
   stripAnsi,
   renderImages,
   getToolInputPreview,
+  summarizeMeta,
 } from "./chat-utils";
 import type { Message } from "./chat-utils";
 
-function msg(uuid: string, role: string, content: string): Message {
-  return { uuid, role, content };
+function msg(uuid: string, role: string, content: string, blockType?: string): Message {
+  return { uuid, role, content, blockType };
 }
 
 // --- extractTag ---
@@ -260,5 +261,171 @@ describe("getToolInputPreview", () => {
 
   it("returns empty string for empty input", () => {
     expect(getToolInputPreview("")).toBe("");
+  });
+});
+
+// --- summarizeMeta ---
+
+describe("summarizeMeta", () => {
+  it("labels skill expansions with the skill name", () => {
+    const content = "Base directory for this skill: /Users/foo/.claude/plugins/marketplaces/bar/skills/open-pr\n\n# Open PR";
+    expect(summarizeMeta(content)).toBe("Skill: open-pr");
+  });
+
+  it("labels ## Context injections", () => {
+    expect(summarizeMeta("## Context\n\n- Current git status: ...")).toBe("Injected context");
+  });
+
+  it("labels command caveats", () => {
+    expect(summarizeMeta("<local-command-caveat>Caveat: ...</local-command-caveat>")).toBe("Command caveat");
+  });
+
+  it("falls back to the first non-empty line truncated", () => {
+    const content = "Something unexpected happened\nsecond line\nthird line";
+    expect(summarizeMeta(content)).toBe("Something unexpected happened");
+  });
+
+  it("strips leading markdown heading markers", () => {
+    expect(summarizeMeta("### Some header\nbody")).toBe("Some header");
+  });
+
+  it("truncates very long single-line fallbacks", () => {
+    const long = "a".repeat(200);
+    const result = summarizeMeta(long);
+    expect(result.endsWith("…")).toBe(true);
+    expect(result.length).toBeLessThanOrEqual(61);
+  });
+
+  it("returns 'Meta message' for empty input", () => {
+    expect(summarizeMeta("")).toBe("Meta message");
+  });
+});
+
+// --- groupMessages meta handling ---
+
+describe("groupMessages meta handling", () => {
+  it("emits a meta display message for blockType=meta", () => {
+    const result = groupMessages([
+      msg("u1", "user", "real human text"),
+      msg(
+        "m1",
+        "user",
+        "Base directory for this skill: /.../skills/open-pr\n\n# Open PR Skill",
+        "meta"
+      ),
+      msg("a1", "assistant", "ok"),
+    ]);
+
+    expect(result).toHaveLength(3);
+    expect(result[0].type).toBe("chat");
+    expect(result[1].type).toBe("meta");
+    if (result[1].type === "meta") {
+      expect(result[1].label).toBe("Skill: open-pr");
+      expect(result[1].content.startsWith("Base directory")).toBe(true);
+    }
+    expect(result[2].type).toBe("chat");
+  });
+
+  it("meta display does not swallow an adjacent command bubble", () => {
+    // A <command-name> message is NOT isMeta in the real JSONL, but this
+    // test just verifies that when we have both on-screen they render as
+    // separate display messages.
+    const result = groupMessages([
+      msg("c1", "user", "<command-message>commit</command-message> <command-name>/commit</command-name>"),
+      msg("m1", "user", "## Context\n...", "meta"),
+    ]);
+
+    expect(result).toHaveLength(2);
+    expect(result[0].type).toBe("command");
+    expect(result[1].type).toBe("meta");
+    if (result[1].type === "meta") {
+      expect(result[1].label).toBe("Injected context");
+    }
+  });
+});
+
+// --- False-positive guards for content-based tag detection ---
+//
+// These regressions come from assistant explanations that mention command
+// tags verbatim (e.g. "the `<command-name>` tag…"). Before the guard was
+// added, those produced empty Command bubbles because extractTag failed to
+// find a closing tag inside the inline mention.
+
+describe("groupMessages false-positive guard", () => {
+  it("does not misclassify an assistant text that mentions <command-name>", () => {
+    const result = groupMessages([
+      msg(
+        "a1",
+        "assistant",
+        "The `<command-name>` tag is what Claude Code emits when you invoke a slash command.",
+        "text"
+      ),
+    ]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].type).toBe("chat");
+    if (result[0].type === "chat") {
+      expect(result[0].role).toBe("assistant");
+    }
+  });
+
+  it("does not misclassify an assistant text that mentions <bash-input>", () => {
+    const result = groupMessages([
+      msg(
+        "a1",
+        "assistant",
+        "Claude Code wraps shell commands in `<bash-input>...</bash-input>`.",
+        "text"
+      ),
+    ]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].type).toBe("chat");
+  });
+
+  it("does not misclassify an assistant text that mentions <local-command-caveat>", () => {
+    const result = groupMessages([
+      msg(
+        "a1",
+        "assistant",
+        "Bash caveats arrive in a `<local-command-caveat>` wrapper.",
+        "text"
+      ),
+    ]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].type).toBe("chat");
+  });
+
+  it("does not hide a tool_result whose grep output contains <command-name>", () => {
+    const result = groupMessages([
+      msg(
+        "t1",
+        "user",
+        'grep hit: <command-name>foo</command-name> found in file.jsonl',
+        "tool_result"
+      ),
+    ]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].type).toBe("tool_result");
+  });
+
+  it("still recognizes a real user <command-name> message", () => {
+    const result = groupMessages([
+      msg(
+        "c1",
+        "user",
+        "<command-message>open-pr</command-message> <command-name>/core:open-pr</command-name> <command-args>英語で</command-args>",
+        "text"
+      ),
+    ]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].type).toBe("command");
+    if (result[0].type === "command") {
+      expect(result[0].name).toBe("/core:open-pr");
+      expect(result[0].args).toBe("英語で");
+    }
   });
 });

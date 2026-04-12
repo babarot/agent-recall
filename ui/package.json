@@ -10,7 +10,8 @@
     "dompurify": "^3.3.3",
     "lucide-preact": "^1.7.0",
     "marked": "^17.0.5",
-    "preact": "^10.25.0"
+    "preact": "^10.25.0",
+    "recharts": "^3.8.1"
   },
   "devDependencies": {
     "@preact/preset-vite": "^2.9.0",

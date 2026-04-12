@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 
 CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project);
 CREATE INDEX IF NOT EXISTS idx_sessions_started_at ON sessions(started_at);
+CREATE INDEX IF NOT EXISTS idx_sessions_ended_at ON sessions(ended_at);
 
 CREATE TABLE IF NOT EXISTS messages (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -61,8 +62,4 @@ CREATE TABLE IF NOT EXISTS images (
 
 CREATE INDEX IF NOT EXISTS idx_images_session_message ON images(session_id, message_uuid);
 
-CREATE TABLE IF NOT EXISTS schema_version (
-    version    INTEGER PRIMARY KEY,
-    applied_at TEXT DEFAULT (datetime('now'))
-);
 `;

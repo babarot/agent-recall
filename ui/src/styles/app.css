@@ -200,6 +200,8 @@ p code {
   object-fit: contain;
   border-radius: 6px;
   cursor: zoom-in;
+  margin-top: 8px;
+  margin-bottom: 8px;
 }
 
 /* Fullscreen image overlay */
@@ -220,9 +222,12 @@ p code {
   border-radius: 8px;
 }
 /* User bubble code blocks */
-.bg-user-bubble .markdown-content code {
+.bg-user-bubble .markdown-content :not(pre) > code {
   background: var(--color-bg-tertiary);
 }
 .bg-user-bubble .markdown-content pre {
   background: var(--color-bg) !important;
+}
+.bg-user-bubble .markdown-content pre code {
+  background: transparent;
 }

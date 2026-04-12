@@ -76,7 +76,7 @@ function importFullSession(
   }
 
   for (const img of parsed.images) {
-    if (!db.hasImages(parsed.meta.sessionId, img.messageUuid)) {
+    if (!db.hasImage(parsed.meta.sessionId, img.messageUuid, img.imageIndex)) {
       db.insertImage({
         sessionId: parsed.meta.sessionId,
         messageUuid: img.messageUuid,
@@ -222,7 +222,7 @@ export function importSingleSessionIncremental(
     }
 
     for (const img of parsed.images) {
-      if (!db.hasImages(sessionId, img.messageUuid)) {
+      if (!db.hasImage(sessionId, img.messageUuid, img.imageIndex)) {
         db.insertImage({
           sessionId,
           messageUuid: img.messageUuid,
@@ -237,7 +237,7 @@ export function importSingleSessionIncremental(
     const newOffset = existingBytes + processedLen;
     const endedAt = parsed.lastTimestamp ?? undefined;
 
-    if (inserted > 0 && endedAt) {
+    if (inserted > 0) {
       db.updateSessionCounts(sessionId, newTotal, endedAt);
     }
     db.updateSessionImportedBytes(sessionId, newOffset, endedAt);

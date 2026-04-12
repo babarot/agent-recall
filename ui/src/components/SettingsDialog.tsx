@@ -1,4 +1,4 @@
-import { Monitor, Moon, Sun, Palette, SunMoon, MessageSquare } from "lucide-preact";
+import { Monitor, Moon, Sun, Palette, SunMoon, MessageSquare, List } from "lucide-preact";
 import type { Settings } from "../lib/settings";
 import { COLOR_SCHEMES } from "../lib/themes";
 
@@ -118,6 +118,33 @@ export function SettingsDialog({ settings, onChange, onClose }: Props) {
               checked={settings.showToolResult}
               onChange={(v) => update({ showToolResult: v })}
             />
+            <Toggle
+              label="Show meta messages"
+              description="Display synthetic content injected by Claude Code (skill expansions, context blocks, bash caveats)"
+              checked={settings.showMeta}
+              onChange={(v) => update({ showMeta: v })}
+            />
+          </div>
+        </section>
+
+        {/* Session List */}
+        <section class="mt-6">
+          <h3 class="text-base font-semibold text-text mb-3 flex items-center gap-2">
+            <List size={16} /> Session List
+          </h3>
+          <div class="space-y-4">
+            <Toggle
+              label="Start at bottom"
+              description="Open sessions scrolled to the latest message instead of the first"
+              checked={settings.startAtBottom}
+              onChange={(v) => update({ startAtBottom: v })}
+            />
+            <Toggle
+              label="Show sparklines"
+              description="Display activity sparkline charts in session cards"
+              checked={settings.showSparkline}
+              onChange={(v) => update({ showSparkline: v })}
+            />
           </div>
         </section>
       </div>
@@ -132,14 +159,16 @@ function Toggle({ label, description, checked, onChange }: {
   onChange: (value: boolean) => void;
 }) {
   return (
-    <label class="flex items-center justify-between cursor-pointer">
-      <div>
+    <label class="flex items-start gap-4 cursor-pointer">
+      {/* flex-1 min-w-0 lets the description wrap inside the available
+          width instead of pushing the toggle out of the row. */}
+      <div class="flex-1 min-w-0">
         <div class="text-sm text-text">{label}</div>
         <div class="text-xs text-text-muted">{description}</div>
       </div>
       <button
         onClick={() => onChange(!checked)}
-        class={`relative w-10 h-6 rounded-full transition-colors cursor-pointer ${
+        class={`relative w-10 h-6 rounded-full transition-colors cursor-pointer shrink-0 mt-0.5 ${
           checked ? "bg-accent" : "bg-border"
         }`}
       >

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "preact/hooks";
+import { useCallback, useEffect, useLayoutEffect, useRef } from "preact/hooks";
 import type { RefObject } from "preact";
 
 /** Consider the viewport "at the bottom" if it's within this many pixels. */
@@ -36,6 +36,7 @@ export function useTailFollow<T>(
 ): {
   markIfAtBottom: () => number;
   isCurrentSeq: (seq: number) => boolean;
+  setFollow: (value: boolean) => number;
 } {
   const followRef = useRef(false);
   const seqRef = useRef(0);
@@ -63,6 +64,19 @@ export function useTailFollow<T>(
     []
   );
 
+  /**
+   * Explicitly set the follow state and bump the sequence counter. Used by
+   * the initial load path so it joins the same seq-guard regime as SSE
+   * fetches: any previously in-flight fetch whose seq is now stale will be
+   * dropped when its response resolves. Also lets the caller reset
+   * `followRef` so follow state doesn't leak across session switches.
+   */
+  const setFollow = useCallback((value: boolean): number => {
+    followRef.current = value;
+    seqRef.current += 1;
+    return seqRef.current;
+  }, []);
+
   // User scroll cancels tail-follow intent. If the user drags the scrollbar
   // up between markIfAtBottom() and the post-render scroll, we should not
   // yank them back down.
@@ -81,7 +95,15 @@ export function useTailFollow<T>(
   // flag is set. The ResizeObserver keeps watching for a short window so
   // late-arriving layout (image loads, syntax highlighting, etc.) doesn't
   // leave the viewport stranded above the new tail.
-  useEffect(() => {
+  //
+  // We use `useLayoutEffect` (not `useEffect`) so the initial scroll fires
+  // synchronously after DOM mutation but *before* the browser paints. That
+  // prevents the "flash of top-aligned content" when opening a session
+  // with "Start at bottom" enabled: without layout-effect timing, paint
+  // happens first at scrollTop=0, then useEffect runs and scrolls, causing
+  // a visible jump. With layout-effect timing, the user only ever sees
+  // the already-scrolled state.
+  useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     if (!followRef.current) return;
@@ -91,7 +113,7 @@ export function useTailFollow<T>(
       el.scrollTo({ top: el.scrollHeight });
     };
 
-    // Immediate scroll based on the content that has rendered so far.
+    // Immediate (pre-paint) scroll based on the content that has rendered so far.
     scrollToBottom();
 
     // Then keep watching for a brief period in case images or other async
@@ -113,5 +135,5 @@ export function useTailFollow<T>(
     };
   }, [data, scrollRef]);
 
-  return { markIfAtBottom, isCurrentSeq };
+  return { markIfAtBottom, isCurrentSeq, setFollow };
 }

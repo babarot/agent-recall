@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "preact/hooks";
+import { AreaChart, Area, YAxis, ResponsiveContainer } from "recharts";
 import { useSSE } from "../hooks/use-sse";
+import type { Settings } from "../lib/settings";
 
 interface Session {
   sessionId: string;
@@ -7,13 +9,15 @@ interface Session {
   project: string;
   branch: string;
   firstPrompt: string;
+  lastPrompt: string;
   messages: number;
   date: string;
+  activity: number[];
 }
 
 const PAGE_SIZE = 50;
 
-export function SessionList({ onSelect }: { onSelect: (id: string) => void }) {
+export function SessionList({ onSelect, settings }: { onSelect: (id: string) => void; settings: Settings }) {
   const [sessions, setSessions] = useState<Session[]>([]);
   // `query` is the raw text in the search box (updates on every keystroke).
   // `committedQuery` is the value that was last actually submitted via the
@@ -99,8 +103,10 @@ export function SessionList({ onSelect }: { onSelect: (id: string) => void }) {
           project: r.project,
           branch: r.branch,
           firstPrompt: r.content?.slice(0, 200) ?? "",
+          lastPrompt: "",
           messages: 0,
           date: r.date,
+          activity: [],
         });
       }
     }
@@ -129,36 +135,16 @@ export function SessionList({ onSelect }: { onSelect: (id: string) => void }) {
   //   events so we don't disrupt the frozen result set. Typing without
   //   committing still allows live updates — otherwise the list would
   //   mysteriously freeze the moment the user touches the search box.
-  // - For a session already on screen: update its message count and bubble
-  //   it to the top (sessions are sorted by started_at desc anyway).
-  // - For a brand-new session: refetch the top of the list and prepend it
-  //   if the server now lists it first. We can't build a complete Session
-  //   row from the SSE payload alone (no firstPrompt / date / branch).
+  // - For both known and new sessions we re-fetch the single session from
+  //   the API so that firstPrompt, lastPrompt, and message count are all
+  //   up to date. The fresh row is placed at the top of the list.
   useSSE((event) => {
     if (committedQuery !== "") return;
     if (event.type !== "session_updated") return;
 
     const sessionId = event.sessionId as string | undefined;
     if (!sessionId) return;
-    const totalMessages = event.totalMessages as number | undefined;
 
-    let wasKnown = false;
-    setSessions((prev) => {
-      const idx = prev.findIndex((s) => s.fullSessionId === sessionId);
-      if (idx === -1) return prev;
-      wasKnown = true;
-      const existing = prev[idx];
-      const updated = {
-        ...existing,
-        messages: totalMessages ?? existing.messages,
-      };
-      return [updated, ...prev.slice(0, idx), ...prev.slice(idx + 1)];
-    });
-
-    if (wasKnown) return;
-
-    // Unknown session → fetch the head of the list. If the new session is
-    // actually the most recent, it will be position 0 of that response.
     (async () => {
       try {
         const params = new URLSearchParams();
@@ -167,11 +153,11 @@ export function SessionList({ onSelect }: { onSelect: (id: string) => void }) {
         params.set("offset", "0");
         const res = await fetch(`/api/sessions?${params}`);
         const data: Session[] = await res.json();
-        const first = data[0];
-        if (!first || first.fullSessionId !== sessionId) return;
+        const fresh = data[0];
+        if (!fresh || fresh.fullSessionId !== sessionId) return;
         setSessions((prev) => {
-          if (prev.some((s) => s.fullSessionId === sessionId)) return prev;
-          return [first, ...prev];
+          const without = prev.filter((s) => s.fullSessionId !== sessionId);
+          return [fresh, ...without];
         });
       } catch {
         // Swallow — the next manual refresh will pick it up.
@@ -245,31 +231,47 @@ export function SessionList({ onSelect }: { onSelect: (id: string) => void }) {
           {!loading && sessions.length === 0 && (
             <div class="text-center py-8 text-text-secondary">No sessions found.</div>
           )}
-          {sessions.map((s) => (
+          {(() => {
+            const allValues = sessions.flatMap((s) => s.activity).sort((a, b) => a - b);
+            // Use P95 as the Y-axis ceiling so outlier sessions don't flatten
+            // everything else. Values above P95 simply clip at the card top.
+            const p95 = allValues.length > 0
+              ? allValues[Math.floor(allValues.length * 0.95)]
+              : 1;
+            const globalMax = Math.max(1, p95);
+            return sessions.map((s) => (
             <div
               key={s.fullSessionId || s.sessionId}
               onClick={() => onSelect(s.fullSessionId || s.sessionId)}
-              class="p-4 bg-bg-secondary border border-border rounded-lg cursor-pointer hover:border-accent/50 transition-colors"
+              class="relative p-4 bg-bg-secondary border border-border rounded-lg cursor-pointer hover:border-accent/50 transition-colors overflow-hidden"
             >
-              <div class="flex items-center justify-between mb-1.5">
-                <div class="flex items-center gap-2 min-w-0">
-                  <span class="text-sm font-medium text-text truncate">{s.project}</span>
-                  {s.branch && <span class="text-xs px-1.5 py-0.5 bg-bg-tertiary rounded text-text-muted shrink-0">{s.branch}</span>}
+              {settings.showSparkline && s.activity.length > 0 && (
+                <Sparkline data={s.activity} globalMax={globalMax} />
+              )}
+              <div class="relative">
+                <div class="flex items-center justify-between mb-1.5">
+                  <div class="flex items-center gap-2 min-w-0">
+                    <span class="text-sm font-medium text-text truncate">{s.project}</span>
+                    {s.branch && <span class="text-xs px-1.5 py-0.5 bg-bg-tertiary rounded text-text-muted shrink-0">{s.branch}</span>}
+                  </div>
+                  <span class="text-xs text-text-muted shrink-0 ml-3">{s.date}</span>
                 </div>
-                <span class="text-xs text-text-muted shrink-0 ml-3">{s.date}</span>
-              </div>
-              <p class="text-sm truncate mb-2">
-                {s.firstPrompt
-                  ? <span class="text-text-secondary">{s.firstPrompt}</span>
-                  : <span class="text-text-muted italic">Started with slash command</span>
-                }
-              </p>
-              <div class="flex items-center gap-2 text-xs text-text-muted">
-                <span class="font-mono">{s.sessionId.slice(0, 8)}</span>
-                <span>{s.messages} msgs</span>
+                <p class="text-sm truncate mb-2">
+                  {(() => {
+                    const prompt = settings.startAtBottom ? (s.lastPrompt || s.firstPrompt) : s.firstPrompt;
+                    return prompt
+                      ? <span class="text-text-secondary">{prompt}</span>
+                      : <span class="text-text-muted italic">Started with slash command</span>;
+                  })()}
+                </p>
+                <div class="flex items-center gap-2 text-xs text-text-muted">
+                  <span class="font-mono">{s.sessionId.slice(0, 8)}</span>
+                  <span>{s.messages} msgs</span>
+                </div>
               </div>
             </div>
-          ))}
+          ));
+          })()}
           {/* Sentinel for infinite scroll */}
           {hasMore && <div ref={sentinelRef} class="h-4" />}
           {loading && sessions.length > 0 && (
@@ -277,6 +279,39 @@ export function SessionList({ onSelect }: { onSelect: (id: string) => void }) {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Recharts sparkline rendered as a card background. */
+function Sparkline({ data, globalMax }: { data: number[]; globalMax: number }) {
+  if (data.length < 2 || globalMax === 0) return null;
+
+  const chartData = data.map((v) => ({ v }));
+
+  return (
+    <div class="absolute inset-0 pointer-events-none">
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={chartData} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+          <defs>
+            <linearGradient id="spark-fill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="var(--color-accent)" stopOpacity={0.08} />
+              <stop offset="100%" stopColor="var(--color-accent)" stopOpacity={0.01} />
+            </linearGradient>
+          </defs>
+          <YAxis domain={[0, globalMax]} hide />
+          <Area
+            type="monotone"
+            dataKey="v"
+            stroke="var(--color-accent)"
+            strokeWidth={1.5}
+            strokeOpacity={0.15}
+            fill="url(#spark-fill)"
+            isAnimationActive={false}
+            dot={false}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
     </div>
   );
 }

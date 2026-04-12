@@ -59,7 +59,9 @@ export interface ParsedJournalLines {
   header?: JournalHeader;
   /** First user-facing text seen (raw, before truncation) — feeds SessionMeta.firstPrompt */
   firstUserText?: string;
-  /** Timestamp of the last processed line — feeds SessionMeta.endedAt */
+  /** Timestamp of the last user message — feeds SessionMeta.endedAt.
+   *  Only user messages are tracked so that assistant activity (which can
+   *  run in parallel across sessions) doesn't churn the sort order. */
   lastTimestamp?: string;
 }
 
@@ -110,8 +112,9 @@ export function parseJournalLines(
       };
     }
 
-    // Track end time
-    if (parsed.timestamp) {
+    // Track last user activity time — only user messages count so that
+    // parallel assistant runs don't constantly reshuffle session order.
+    if (parsed.timestamp && parsed.type === "user") {
       lastTimestamp = parsed.timestamp;
     }
 
@@ -120,6 +123,26 @@ export function parseJournalLines(
     const content = parsed.message.content;
     const role = parsed.message.role;
     const ts = parsed.timestamp ?? "";
+
+    // Synthetic "meta" messages (slash command / skill expansions, injected
+    // ## Context blocks, local-command-caveat wrappers) are collapsed into a
+    // single `blockType: "meta"` entry. The UI then renders them as a
+    // compact folded box rather than a giant user bubble. The raw text is
+    // still preserved so FTS5 search can hit it.
+    if (parsed.isMeta) {
+      const text = extractText(content);
+      if (text) {
+        messages.push({
+          uuid: parsed.uuid,
+          role,
+          blockType: "meta",
+          content: text,
+          timestamp: ts,
+          turnIndex: turnIndex++,
+        });
+      }
+      continue;
+    }
 
     if (typeof content === "string") {
       // Simple string content (user messages)
