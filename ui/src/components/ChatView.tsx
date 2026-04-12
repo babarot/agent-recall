@@ -331,8 +331,14 @@ function CommandBubble({ name, args, stdout }: { name: string; args: string; std
   );
 }
 
+/** Character threshold above which assistant messages are collapsed. */
+const CLAMP_THRESHOLD = 1000;
+
 function ChatBubble({ sessionId, uuid, role, content }: { sessionId: string; uuid: string; role: string; content: string }) {
   const isUser = role === "user";
+  const [expanded, setExpanded] = useState(false);
+  const needsClamp = !isUser && content.length > CLAMP_THRESHOLD;
+
   const html = useMemo(() => {
     const withImages = renderImages(content, sessionId, uuid);
     return renderMarkdown(withImages);
@@ -352,7 +358,18 @@ function ChatBubble({ sessionId, uuid, role, content }: { sessionId: string; uui
             {isUser ? "You" : "Assistant"}
           </span>
         </div>
-        <div class="markdown-content break-words" dangerouslySetInnerHTML={{ __html: html }} />
+        <div
+          class={`markdown-content break-words ${needsClamp && !expanded ? "line-clamp-4" : ""}`}
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+        {needsClamp && (
+          <button
+            onClick={() => setExpanded((prev) => !prev)}
+            class="text-xs text-accent hover:underline mt-2 select-none cursor-pointer"
+          >
+            {expanded ? "Show less" : "Read more"}
+          </button>
+        )}
       </div>
     </div>
   );
