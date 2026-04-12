@@ -200,6 +200,8 @@ p code {
   object-fit: contain;
   border-radius: 6px;
   cursor: zoom-in;
+  margin-top: 8px;
+  margin-bottom: 8px;
 }
 
 /* Fullscreen image overlay */

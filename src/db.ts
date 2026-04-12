@@ -211,11 +211,11 @@ export class VaultDB {
     return row?.content?.slice(0, 500) ?? null;
   }
 
-  /** Check if images exist for a message */
-  hasImages(sessionId: string, messageUuid: string): boolean {
+  /** Check if a specific image (by index) exists for a message */
+  hasImage(sessionId: string, messageUuid: string, imageIndex: number): boolean {
     const row = this.db
-      .prepare("SELECT 1 FROM images WHERE session_id = ? AND message_uuid = ? LIMIT 1")
-      .get(sessionId, messageUuid);
+      .prepare("SELECT 1 FROM images WHERE session_id = ? AND message_uuid = ? AND image_index = ? LIMIT 1")
+      .get(sessionId, messageUuid, imageIndex);
     return !!row;
   }
 

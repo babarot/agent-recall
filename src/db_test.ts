@@ -351,12 +351,12 @@ Deno.test("getImage returns null for nonexistent image", () => {
   });
 });
 
-Deno.test("hasImages returns correct boolean", () => {
+Deno.test("hasImage returns correct boolean per index", () => {
   withDB((db) => {
     seedSession(db, "s1");
     seedMessage(db, "s1", "m1", "user", "hello", 0);
 
-    assertEquals(db.hasImages("s1", "m1"), false);
+    assertEquals(db.hasImage("s1", "m1", 0), false);
 
     db.insertImage({
       sessionId: "s1",
@@ -366,7 +366,8 @@ Deno.test("hasImages returns correct boolean", () => {
       data: new Uint8Array([1, 2, 3]),
     });
 
-    assertEquals(db.hasImages("s1", "m1"), true);
+    assertEquals(db.hasImage("s1", "m1", 0), true);
+    assertEquals(db.hasImage("s1", "m1", 1), false);
   });
 });
 
