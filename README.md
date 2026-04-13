@@ -250,13 +250,14 @@ agent-recall is a single binary (`~/.claude/agent-recall`) with three interfaces
 | **CLI** | Manually by the user (`agent-recall search ...`) | Search, list, export, stats from the terminal |
 | **Web UI** | Manually by the user (`agent-recall ui`) | Browse sessions and chat history in the browser, with live updates |
 
-When the Web UI is running, an in-process FS watcher tails `~/.claude/projects` for JSONL writes, runs an incremental byte-offset import into SQLite, and pushes `session_updated` events to browsers over Server-Sent Events. The `SessionEnd` hook still works as a fallback for when the UI isn't up.
+The DB is kept in sync through three paths: the `SessionEnd` hook imports on session close, and when the Web UI or MCP server starts it first runs a full import and then keeps an FS watcher running for real-time ingestion.
 
 ```mermaid
 flowchart TD
     JSONL["~/.claude/projects/*/*.jsonl"]
-    JSONL -->|SessionEnd hook<br/>(bulk, on exit)| Import["import.ts<br/>tail-read by imported_bytes"]
-    JSONL -->|Deno.watchFs<br/>(live, while UI runs)| Watcher["watcher.ts<br/>debounced per file"]
+    JSONL -->|"SessionEnd hook (per session)"| Import["import.ts<br/>tail-read by imported_bytes"]
+    JSONL -->|"Deno.watchFs (live, while UI/MCP runs)"| Watcher["watcher.ts<br/>debounced per file"]
+    JSONL -->|"startup full sync (UI/MCP)"| Import
     Watcher --> Import
     Import --> DB["SQLite + FTS5<br/>~/.claude/vault.db"]
     Import --> SSE["SSEBroadcaster"]
