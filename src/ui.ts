@@ -326,6 +326,8 @@ function handleAPI(db: VaultDB, url: URL): Response {
           lastPrompt: lastPrompt,
           messages: s.messageCount,
           date: s.startedAt?.slice(0, 10),
+          createdAt: s.startedAt,
+          updatedAt: s.endedAt || s.startedAt,
           activity: activities.get(s.sessionId) ?? [],
         };
       })

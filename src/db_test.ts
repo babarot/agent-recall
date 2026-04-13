@@ -220,6 +220,27 @@ Deno.test("listSessions returns sessions ordered by started_at desc", () => {
   });
 });
 
+Deno.test("listSessions returns startedAt and endedAt", () => {
+  withDB((db) => {
+    db.insertSession({
+      sessionId: "s1",
+      project: "proj",
+      projectPath: "/proj",
+      gitBranch: "main",
+      firstPrompt: "first",
+      messageCount: 3,
+      startedAt: "2026-03-01T00:00:00Z",
+      endedAt: "2026-03-01T05:30:00Z",
+      claudeVersion: "2.1.87",
+    });
+
+    const sessions = db.listSessions();
+    assertEquals(sessions.length, 1);
+    assertEquals(sessions[0].startedAt, "2026-03-01T00:00:00Z");
+    assertEquals(sessions[0].endedAt, "2026-03-01T05:30:00Z");
+  });
+});
+
 Deno.test("listSessions filters by project", () => {
   withDB((db) => {
     seedSession(db, "s1", "alpha-project");

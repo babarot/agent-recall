@@ -366,6 +366,7 @@ export class VaultDB {
     firstPrompt: string;
     messageCount: number;
     startedAt: string;
+    endedAt: string;
   }> {
     const limit = options.limit ?? 50;
     const conditions: string[] = [];
@@ -383,7 +384,8 @@ export class VaultDB {
     const sql = `
       SELECT session_id as sessionId, project, project_path as projectPath,
              git_branch as gitBranch, first_prompt as firstPrompt,
-             message_count as messageCount, started_at as startedAt
+             message_count as messageCount, started_at as startedAt,
+             ended_at as endedAt
       FROM sessions ${where}
       ORDER BY COALESCE(ended_at, started_at) DESC
       LIMIT ? OFFSET ?`;
@@ -396,6 +398,7 @@ export class VaultDB {
       firstPrompt: string;
       messageCount: number;
       startedAt: string;
+      endedAt: string;
     }>;
   }
 

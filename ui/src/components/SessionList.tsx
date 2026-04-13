@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback } from "preact/hooks";
 import { Search } from "lucide-preact";
 import { AreaChart, Area, YAxis, ResponsiveContainer } from "recharts";
 import type { Settings } from "../lib/settings";
+import { formatDate, formatDateTime } from "../lib/format-date";
 import {
   sessions as sessionsSignal,
   query as querySignal,
@@ -135,7 +136,7 @@ export function SessionList({ onSelect, settings }: { onSelect: (id: string) => 
                     <span class="text-sm font-medium text-text truncate">{s.project}</span>
                     {s.branch && <span class="text-xs px-1.5 py-0.5 bg-bg-tertiary rounded text-text-muted shrink-0">{s.branch}</span>}
                   </div>
-                  <span class="text-xs text-text-muted shrink-0 ml-3">{s.date}</span>
+                  <span class="text-xs text-text-muted shrink-0 ml-3">{s.messages} msgs</span>
                 </div>
                 <p class="text-sm truncate mb-2">
                   {(() => {
@@ -146,8 +147,13 @@ export function SessionList({ onSelect, settings }: { onSelect: (id: string) => 
                   })()}
                 </p>
                 <div class="flex items-center gap-2 text-xs text-text-muted">
-                  <span class="font-mono">{s.sessionId.slice(0, 8)}</span>
-                  <span>{s.messages} msgs</span>
+                  <span>{formatDate(s.createdAt) || s.date}</span>
+                  {formatDateTime(s.updatedAt) && (
+                    <>
+                      <span class="text-text-muted/50">→</span>
+                      <span>{formatDateTime(s.updatedAt)}</span>
+                    </>
+                  )}
                 </div>
               </div>
             </div>

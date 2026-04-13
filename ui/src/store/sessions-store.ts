@@ -25,6 +25,8 @@ export interface Session {
   lastPrompt: string;
   messages: number;
   date: string;
+  createdAt?: string;
+  updatedAt?: string;
   activity: number[];
 }
 

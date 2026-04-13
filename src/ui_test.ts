@@ -66,7 +66,19 @@ function handleTestAPI(db: VaultDB, url: URL, req: Request): Response {
       project: url.searchParams.get("project") ?? undefined,
       limit: Number(url.searchParams.get("limit") ?? 100),
     });
-    return json(sessions);
+    // Mirrors the enrichment done by the real handleAPI in ui.ts so tests
+    // exercise the same response shape the UI consumes.
+    return json(
+      sessions.map((s) => ({
+        sessionId: s.sessionId,
+        project: s.project,
+        branch: s.gitBranch,
+        messages: s.messageCount,
+        date: s.startedAt?.slice(0, 10),
+        createdAt: s.startedAt,
+        updatedAt: s.endedAt || s.startedAt,
+      })),
+    );
   }
 
   const sessionMatch = path.match(/^\/api\/sessions\/(.+)$/);
@@ -127,6 +139,28 @@ Deno.test({
       const data = await fetchJSON("/api/sessions") as Array<{ sessionId: string }>;
       assertEquals(data.length, 1);
       assertEquals(data[0].sessionId, "s1");
+    } finally {
+      teardown();
+    }
+  },
+  sanitizeOps: false,
+  sanitizeResources: false,
+});
+
+Deno.test({
+  name: "API: /api/sessions exposes createdAt and updatedAt",
+  async fn() {
+    setup();
+    await startServer();
+    try {
+      const data = await fetchJSON("/api/sessions") as Array<{
+        createdAt: string;
+        updatedAt: string;
+      }>;
+      // createdAt comes from started_at, updatedAt from ended_at — both
+      // should be the full ISO strings seeded in setup().
+      assertEquals(data[0].createdAt, "2026-01-01T00:00:00Z");
+      assertEquals(data[0].updatedAt, "2026-01-01T00:10:00Z");
     } finally {
       teardown();
     }
