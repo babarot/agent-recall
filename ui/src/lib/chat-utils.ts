@@ -5,10 +5,11 @@ export interface Message {
   content: string;
   toolName?: string;
   toolInput?: string;
+  timestamp?: string;
 }
 
 export type DisplayMessage =
-  | { type: "chat"; uuid: string; role: string; content: string }
+  | { type: "chat"; uuid: string; role: string; content: string; timestamp?: string }
   | { type: "thinking"; content: string }
   | { type: "tool_use"; toolName: string; toolInput: string }
   | { type: "tool_result"; content: string }
@@ -157,7 +158,7 @@ export function groupMessages(messages: Message[]): DisplayMessage[] {
     }
 
     // Regular text message
-    result.push({ type: "chat", uuid: msg.uuid, role: msg.role, content });
+    result.push({ type: "chat", uuid: msg.uuid, role: msg.role, content, timestamp: msg.timestamp });
     i++;
   }
 

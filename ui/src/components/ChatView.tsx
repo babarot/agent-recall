@@ -36,7 +36,7 @@ const MESSAGE_RENDERERS: Record<string, (msg: DisplayMessage, i: number, session
   tool_use: (msg, i) => msg.type === "tool_use" ? <ToolUseBubble key={i} toolName={msg.toolName} toolInput={msg.toolInput} /> : null,
   tool_result: (msg, i) => msg.type === "tool_result" ? <ToolResultBubble key={i} content={msg.content} /> : null,
   meta: (msg, i) => msg.type === "meta" ? <MetaBubble key={i} label={msg.label} content={msg.content} /> : null,
-  chat: (msg, i, sessionId) => msg.type === "chat" ? <ChatBubble key={i} sessionId={sessionId} uuid={msg.uuid} role={msg.role} content={msg.content} /> : null,
+  chat: (msg, i, sessionId) => msg.type === "chat" ? <ChatBubble key={i} sessionId={sessionId} uuid={msg.uuid} role={msg.role} content={msg.content} timestamp={msg.timestamp} /> : null,
 };
 
 export function ChatView({ sessionId, onBack, settings }: { sessionId: string; onBack: () => void; settings: Settings }) {
@@ -334,10 +334,20 @@ function CommandBubble({ name, args, stdout }: { name: string; args: string; std
 /** Character threshold above which assistant messages are collapsed. */
 const CLAMP_THRESHOLD = 1000;
 
-function ChatBubble({ sessionId, uuid, role, content }: { sessionId: string; uuid: string; role: string; content: string }) {
+function formatTime(iso?: string): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const h = String(d.getHours()).padStart(2, "0");
+  const m = String(d.getMinutes()).padStart(2, "0");
+  return `${h}:${m}`;
+}
+
+function ChatBubble({ sessionId, uuid, role, content, timestamp }: { sessionId: string; uuid: string; role: string; content: string; timestamp?: string }) {
   const isUser = role === "user";
   const [expanded, setExpanded] = useState(false);
   const needsClamp = !isUser && content.length > CLAMP_THRESHOLD;
+  const time = formatTime(timestamp);
 
   const html = useMemo(() => {
     const withImages = renderImages(content, sessionId, uuid);
@@ -345,7 +355,11 @@ function ChatBubble({ sessionId, uuid, role, content }: { sessionId: string; uui
   }, [content, sessionId, uuid]);
 
   return (
-    <div class={`flex ${isUser ? "justify-end" : "justify-start"}`}>
+    <div class={`flex items-end gap-2 ${isUser ? "justify-end" : "justify-start"}`}>
+      {/* Timestamp on the opposite side of the bubble: left of user (right-aligned) bubbles, right of assistant (left-aligned) bubbles */}
+      {isUser && time && (
+        <span class="text-[10px] text-text-muted font-mono shrink-0 pb-1" title={timestamp}>{time}</span>
+      )}
       <div
         class={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
           isUser
@@ -371,6 +385,9 @@ function ChatBubble({ sessionId, uuid, role, content }: { sessionId: string; uui
           </button>
         )}
       </div>
+      {!isUser && time && (
+        <span class="text-[10px] text-text-muted font-mono shrink-0 pb-1" title={timestamp}>{time}</span>
+      )}
     </div>
   );
 }

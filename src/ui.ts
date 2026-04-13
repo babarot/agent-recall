@@ -354,6 +354,7 @@ function handleAPI(db: VaultDB, url: URL): Response {
         content: m.content,
         toolName: m.toolName,
         toolInput: m.toolInput,
+        timestamp: m.timestamp,
       })),
     });
   }
