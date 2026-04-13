@@ -68,6 +68,13 @@ export interface JournalLine {
    * compact folded box instead of a giant "You" bubble.
    */
   isMeta?: boolean;
+  /**
+   * System-injected lines that arrive as `type: "user"` but weren't typed by
+   * the human. Currently the only observed kind is `"task-notification"`
+   * (background command completion/failure), which we collapse into a meta
+   * bubble just like `isMeta` expansions.
+   */
+  origin?: { kind?: string };
   message?: {
     role: "user" | "assistant";
     content: string | ContentBlock[];

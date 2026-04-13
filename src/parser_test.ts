@@ -528,3 +528,76 @@ Deno.test("parseSession skips meta messages when computing firstPrompt", () => {
   assertNotEquals(session, null);
   assertEquals(session!.meta.firstPrompt, "actual user question");
 });
+
+// --- task-notification handling (background command completion) ---
+
+const TASK_NOTIFICATION_MSG = (xml: string, uuid: string, ts: string) =>
+  line({
+    type: "user",
+    uuid,
+    sessionId: "sess-001",
+    timestamp: ts,
+    cwd: "/home/user/project",
+    version: "2.1.87",
+    gitBranch: "main",
+    isSidechain: false,
+    origin: { kind: "task-notification" },
+    message: { role: "user", content: xml },
+  });
+
+const SAMPLE_TASK_NOTIFICATION =
+  '<task-notification>\n<task-id>bqpkn062u</task-id>\n<tool-use-id>toolu_016DjeBz85bhq7vnfqTCEaRB</tool-use-id>\n<output-file>/tmp/x.output</output-file>\n<status>failed</status>\n<summary>Background command "Ask codex for architecture opinion" failed with exit code 144</summary>\n</task-notification>';
+
+Deno.test("parseJournalLines collapses task-notification origin into blockType=meta", () => {
+  const jsonl = [
+    USER_MSG("hi", "u1", "2026-01-01T00:00:00Z"),
+    TASK_NOTIFICATION_MSG(SAMPLE_TASK_NOTIFICATION, "t1", "2026-01-01T00:00:01Z"),
+    ASSISTANT_MSG([{ type: "text", text: "done" }], "a1", "2026-01-01T00:00:02Z"),
+  ].join("\n");
+
+  const result = parseJournalLines(jsonl);
+  assertEquals(result.messages.length, 3);
+  assertEquals(result.messages[1].blockType, "meta");
+  assertEquals(result.messages[1].content, SAMPLE_TASK_NOTIFICATION);
+});
+
+Deno.test("parseJournalLines task-notification does not pollute firstUserText", () => {
+  const jsonl = [
+    USER_MSG("real human text", "u1", "2026-01-01T00:00:00Z"),
+    TASK_NOTIFICATION_MSG(SAMPLE_TASK_NOTIFICATION, "t1", "2026-01-01T00:00:01Z"),
+  ].join("\n");
+
+  const result = parseJournalLines(jsonl);
+  assertEquals(result.firstUserText, "real human text");
+});
+
+Deno.test("parseSession firstPrompt is not a task-notification", () => {
+  const jsonl = [
+    TASK_NOTIFICATION_MSG(SAMPLE_TASK_NOTIFICATION, "t1", "2026-01-01T00:00:00Z"),
+    USER_MSG("actual user question", "u1", "2026-01-01T00:00:01Z"),
+  ].join("\n");
+
+  const session = parseSession(jsonl, "test");
+  assertNotEquals(session, null);
+  assertEquals(session!.meta.firstPrompt, "actual user question");
+});
+
+Deno.test("parseJournalLines task-notification does not advance lastTimestamp", () => {
+  const jsonl = [
+    USER_MSG("first", "u1", "2026-01-01T00:00:00Z"),
+    TASK_NOTIFICATION_MSG(SAMPLE_TASK_NOTIFICATION, "t1", "2026-01-01T00:10:00Z"),
+  ].join("\n");
+
+  const result = parseJournalLines(jsonl);
+  assertEquals(result.lastTimestamp, "2026-01-01T00:00:00Z");
+});
+
+Deno.test("parseJournalLines isMeta does not advance lastTimestamp", () => {
+  const jsonl = [
+    USER_MSG("first", "u1", "2026-01-01T00:00:00Z"),
+    META_MSG("## Context\n- git diff:\n...", "m1", "2026-01-01T00:10:00Z"),
+  ].join("\n");
+
+  const result = parseJournalLines(jsonl);
+  assertEquals(result.lastTimestamp, "2026-01-01T00:00:00Z");
+});

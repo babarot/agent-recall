@@ -299,6 +299,21 @@ describe("summarizeMeta", () => {
   it("returns 'Meta message' for empty input", () => {
     expect(summarizeMeta("")).toBe("Meta message");
   });
+
+  it("labels task-notification by its <summary> tag", () => {
+    const content =
+      '<task-notification>\n<task-id>bqpkn062u</task-id>\n<status>failed</status>\n<summary>Background command "Ask codex for architecture opinion" failed with exit code 144</summary>\n</task-notification>';
+    expect(summarizeMeta(content)).toBe(
+      'Background command "Ask codex for architecture opinion" failed with exit code 144'
+    );
+  });
+
+  it("falls back to 'Background task <status>' when summary is missing", () => {
+    const content =
+      "<task-notification>\n<task-id>x</task-id>\n<status>completed</status>\n</task-notification>";
+    expect(summarizeMeta(content)).toBe("Background task completed");
+  });
+
 });
 
 // --- groupMessages meta handling ---

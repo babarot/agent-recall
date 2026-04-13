@@ -112,24 +112,29 @@ export function parseJournalLines(
       };
     }
 
-    // Track last user activity time — only user messages count so that
-    // parallel assistant runs don't constantly reshuffle session order.
-    if (parsed.timestamp && parsed.type === "user") {
-      lastTimestamp = parsed.timestamp;
-    }
-
     if (!parsed.uuid || !parsed.message?.content) continue;
 
     const content = parsed.message.content;
     const role = parsed.message.role;
     const ts = parsed.timestamp ?? "";
 
-    // Synthetic "meta" messages (slash command / skill expansions, injected
-    // ## Context blocks, local-command-caveat wrappers) are collapsed into a
-    // single `blockType: "meta"` entry. The UI then renders them as a
-    // compact folded box rather than a giant user bubble. The raw text is
-    // still preserved so FTS5 search can hit it.
-    if (parsed.isMeta) {
+    // Synthetic "meta" / system-injected messages are collapsed into a single
+    // `blockType: "meta"` entry. Two sources qualify:
+    //   - `isMeta: true` — slash command / skill expansions, injected
+    //     ## Context blocks, local-command-caveat wrappers.
+    //   - `origin.kind === "task-notification"` — background command
+    //     completion/failure notifications that arrive as a `type: "user"`
+    //     line but aren't human-typed input.
+    // The UI renders these as a compact folded box rather than a giant user
+    // bubble. The raw text is preserved so FTS5 search can hit it.
+    //
+    // NOTE: `lastTimestamp` is intentionally updated AFTER this branch, so
+    // these system-injected lines don't advance `endedAt` and don't reshuffle
+    // sidebar session order.
+    const isSystemInjected =
+      parsed.isMeta === true || parsed.origin?.kind === "task-notification";
+
+    if (isSystemInjected) {
       const text = extractText(content);
       if (text) {
         messages.push({
@@ -142,6 +147,14 @@ export function parseJournalLines(
         });
       }
       continue;
+    }
+
+    // Track last user activity time — only real user messages (not
+    // system-injected meta/notifications) count so that parallel assistant
+    // runs and background notifications don't constantly reshuffle session
+    // order.
+    if (parsed.timestamp && parsed.type === "user") {
+      lastTimestamp = parsed.timestamp;
     }
 
     if (typeof content === "string") {

@@ -183,6 +183,16 @@ export function summarizeMeta(content: string): string {
   // Bash caveats
   if (trimmed.startsWith("<local-command-caveat>")) return "Command caveat";
 
+  // Background task notifications (origin.kind === "task-notification").
+  // The label is rendered inside a `truncate` span, so CSS already clips
+  // overflow — we don't need an extra JS length cap here.
+  if (trimmed.startsWith("<task-notification>")) {
+    const summary = extractTag(content, "summary") ?? "";
+    if (summary) return summary;
+    const status = extractTag(content, "status") ?? "";
+    return status ? `Background task ${status}` : "Background task";
+  }
+
   // Fallback: first non-empty line, truncated
   const firstLine = trimmed.split("\n", 1)[0] ?? "";
   const stripped = firstLine.replace(/^#+\s*/, "").trim();
