@@ -56,9 +56,9 @@ See [`docs/comparison-claude-mem.md`](docs/comparison-claude-mem.md) for a deepe
 - **Auto-sync** -- FS watcher keeps the DB up-to-date while the UI or MCP server is running
 - **Real-time Web UI** -- Sessions appear and update live as Claude Code writes to disk, without reload
 - **Full-text search** -- Fast search powered by SQLite FTS5 with Porter stemmer
-- **Noise filtering** -- Strips tool_use / tool_result / thinking, keeping only conversation text (~7% of raw data)
-- **Incremental imports** -- Tail-read by byte offset; re-importing already-archived sessions is effectively free
-- **Idempotent** -- UUID-based deduplication; safe to import repeatedly
+- **Noise filtering** -- Drops filesystem snapshots, system turn-duration events, and sidechain branches; keeps the real conversation (text, thinking, tool calls, results, slash-command meta)
+- **JSONL mirror** -- SQLite tracks the session file exactly; every import is a full re-parse, idempotent via `(session_id, uuid, block_index)` uniqueness
+- **Idempotent** -- safe to import repeatedly; concurrent watcher + CLI runs converge on the same state
 - **MCP server** -- Agents can autonomously search past sessions via `recall_search`, `recall_list`, `recall_export`, `recall_stats` tools
 - **Zero dependencies** -- Single binary via `deno compile`; no external services
 
@@ -283,6 +283,8 @@ messages_fts (content)  -- FTS5, porter unicode61 tokenizer
 The DB is a derived cache of the JSONL master — on schema changes, delete
 `~/.claude/vault.db` (plus `-shm`, `-wal`) and let the next UI/MCP start
 rebuild it. No migrations.
+
+SQLite mirrors the current JSONL rather than accumulating its own history. This works because Claude Code's JSONL files are append-only in practice (`/compact` adds a summary boundary rather than shrinking the file). See [docs/adr/003-mirror-jsonl-not-independent-archive.md](docs/adr/003-mirror-jsonl-not-independent-archive.md) for why the mirror design was chosen over an explicit append-only archive layer.
 
 ### Filtering
 
