@@ -28,31 +28,15 @@ main() {
     claude mcp add agent-recall -s user -- "${INSTALL_DIR}/agent-recall" mcp 2>/dev/null && echo "  OK" || echo "  Failed (register manually)"
   fi
 
-  setup_hook
-
   echo ""
   echo "Installed to:"
   echo "  ${INSTALL_DIR}/agent-recall"
 
-  local needs_manual=""
   if ! command -v claude &>/dev/null; then
-    needs_manual="${needs_manual}mcp,"
-  fi
-  if ! command -v jq &>/dev/null; then
-    needs_manual="${needs_manual}hook,"
-  fi
-
-  if [[ -n "${needs_manual}" ]]; then
     echo ""
     echo "Manual setup needed:"
-    if [[ "${needs_manual}" == *"hook"* ]]; then
-      echo "  Add auto-archive hook to ~/.claude/settings.json:"
-      echo '  "hooks": { "SessionEnd": [{ "hooks": [{ "type": "command", "command": "$HOME/.claude/agent-recall import 2>/dev/null", "async": true }] }] }'
-    fi
-    if [[ "${needs_manual}" == *"mcp"* ]]; then
-      echo "  Register MCP server:"
-      echo "  claude mcp add agent-recall -s user -- ${INSTALL_DIR}/agent-recall mcp"
-    fi
+    echo "  Register MCP server:"
+    echo "  claude mcp add agent-recall -s user -- ${INSTALL_DIR}/agent-recall mcp"
   fi
 }
 
@@ -109,33 +93,6 @@ download_and_verify() {
     rm -f "${INSTALL_DIR}/${name}"
     exit 1
   fi
-  echo "  OK"
-}
-
-setup_hook() {
-  local settings="${INSTALL_DIR}/settings.json"
-  local hook_command="\$HOME/.claude/agent-recall import 2>/dev/null"
-
-  if ! command -v jq &>/dev/null; then
-    return
-  fi
-
-  # Create settings.json if it doesn't exist
-  if [[ ! -f "${settings}" ]]; then
-    echo '{}' > "${settings}"
-  fi
-
-  # Check if SessionEnd hook already exists
-  if jq -e '.hooks.SessionEnd' "${settings}" &>/dev/null; then
-    if jq -e '.hooks.SessionEnd[] | .hooks[] | select(.command | contains("agent-recall"))' "${settings}" &>/dev/null; then
-      echo "Hook already configured."
-      return
-    fi
-  fi
-
-  echo "Setting up auto-archive hook..."
-  local tmp="${settings}.tmp"
-  jq '.hooks.SessionEnd = ((.hooks.SessionEnd // []) + [{"hooks": [{"type": "command", "command": "'"${hook_command}"'", "async": true}]}])' "${settings}" > "${tmp}" && mv "${tmp}" "${settings}"
   echo "  OK"
 }
 

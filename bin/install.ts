@@ -46,8 +46,6 @@ async function main(): Promise<void> {
     }
   }
 
-  await setupHook();
-
   console.log(`\nInstalled to:\n  ${INSTALL_DIR}/agent-recall`);
 
   if (!claudeFound) {
@@ -134,41 +132,6 @@ async function downloadAndVerify(
       `Checksum mismatch for ${name}!\n  Expected: ${expected}\n  Actual:   ${actual}`
     );
   }
-  console.log("  OK");
-}
-
-async function setupHook(): Promise<void> {
-  const settingsPath = `${INSTALL_DIR}/settings.json`;
-  const hookCommand = "$HOME/.claude/agent-recall import 2>/dev/null";
-
-  let settings: Record<string, unknown> = {};
-  try {
-    settings = JSON.parse(await Deno.readTextFile(settingsPath));
-  } catch {
-    // settings.json doesn't exist yet
-  }
-
-  // deno-lint-ignore no-explicit-any
-  const hooks = (settings.hooks ?? {}) as Record<string, any[]>;
-  const sessionEnd = (hooks.SessionEnd ?? []) as Array<{ hooks?: Array<{ command?: string }> }>;
-
-  // Check if hook already exists
-  const alreadyConfigured = sessionEnd.some((entry) =>
-    entry.hooks?.some((h) => h.command?.includes("agent-recall"))
-  );
-  if (alreadyConfigured) {
-    console.log("Hook already configured.");
-    return;
-  }
-
-  console.log("Setting up auto-archive hook...");
-  sessionEnd.push({
-    hooks: [{ type: "command", command: hookCommand, async: true }],
-  });
-  hooks.SessionEnd = sessionEnd;
-  settings.hooks = hooks;
-
-  await Deno.writeTextFile(settingsPath, JSON.stringify(settings, null, 2) + "\n");
   console.log("  OK");
 }
 

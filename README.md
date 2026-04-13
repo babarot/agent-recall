@@ -24,7 +24,7 @@ Fair question. [claude-mem](https://github.com/thedotmack/claude-mem) is an exce
 | **Layer** | Memory layer (intervenes) | Filesystem layer (doesn't touch memory) |
 | **Metaphor** | RAG + auto-memory | A better `grep` for JSONLs |
 | **Injection** | Push (auto-injected at `SessionStart`) | Pull (agent looks it up when needed) |
-| **When it writes** | Every `PostToolUse` (real-time) | Once at `SessionEnd` |
+| **When it writes** | Every `PostToolUse` (real-time) | FS watcher while UI/MCP runs (real-time) |
 | **What's stored** | LLM-summarized observations (title / facts / concepts) | Raw user/assistant text, noise-stripped |
 | **Search** | FTS5 + Chroma vector hybrid | FTS5 only (deterministic) |
 | **LLM calls during indexing** | Yes (Anthropic / Gemini / OpenRouter) | **Zero** |
@@ -53,7 +53,7 @@ See [`docs/comparison-claude-mem.md`](docs/comparison-claude-mem.md) for a deepe
 
 ## Features
 
-- **Auto-archive** -- SessionEnd hook saves sessions automatically on exit
+- **Auto-sync** -- FS watcher keeps the DB up-to-date while the UI or MCP server is running
 - **Real-time Web UI** -- Sessions appear and update live as Claude Code writes to disk, without reload
 - **Full-text search** -- Fast search powered by SQLite FTS5 with Porter stemmer
 - **Noise filtering** -- Strips tool_use / tool_result / thinking, keeping only conversation text (~7% of raw data)
@@ -82,28 +82,6 @@ Requires [Deno](https://deno.com/) 2.x.
 git clone https://github.com/babarot/agent-recall.git
 cd agent-recall
 deno task compile && cp agent-recall ~/.claude/agent-recall
-```
-
-### Hook Setup (auto-archive on session exit)
-
-Add to `~/.claude/settings.json`:
-
-```json
-{
-  "hooks": {
-    "SessionEnd": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "$HOME/.claude/agent-recall import 2>/dev/null",
-            "async": true
-          }
-        ]
-      }
-    ]
-  }
-}
 ```
 
 ### MCP Server Setup (agent-autonomous search)
@@ -230,7 +208,7 @@ Subcommands:
 
 Opens `http://localhost:6276` with session browser, chat viewer, and search.
 
-**Live updates**: while the UI is running, a filesystem watcher observes `~/.claude/projects` and pushes new/changed sessions to the browser over Server-Sent Events. The session list reflects new activity at the top without reload, and the chat view auto-refreshes (and follows the tail if you were already scrolled to the bottom) while a session is still running in Claude Code. No Claude Code hook configuration is required; the watcher runs inside the UI process itself. See [docs/adr/002-fs-watch-for-realtime-updates.md](docs/adr/002-fs-watch-for-realtime-updates.md) for the rationale.
+**Live updates**: while the UI (or MCP server) is running, a filesystem watcher observes `~/.claude/projects` and imports new/changed sessions into SQLite. The UI additionally pushes `session_updated` events to browsers over Server-Sent Events — the session list reflects new activity at the top without reload, and the chat view auto-refreshes (and follows the tail if you were already scrolled to the bottom) while a session is still running in Claude Code. No Claude Code hook configuration is required; the watcher runs inside the UI/MCP process itself. See [docs/adr/002-fs-watch-for-realtime-updates.md](docs/adr/002-fs-watch-for-realtime-updates.md) for the rationale.
 
 Live update rules for the session list:
 
@@ -245,19 +223,17 @@ agent-recall is a single binary (`~/.claude/agent-recall`) with three interfaces
 
 | Interface | How it starts | Purpose |
 |-----------|--------------|---------|
-| **Hook** | Automatically on every Claude Code session exit (`SessionEnd` hook) | Bulk archive on exit (fallback when the UI server isn't running) |
 | **MCP** | Automatically when Claude Code starts (registered via `claude mcp add`) | Lets agents search past sessions autonomously |
 | **CLI** | Manually by the user (`agent-recall search ...`) | Search, list, export, stats from the terminal |
 | **Web UI** | Manually by the user (`agent-recall ui`) | Browse sessions and chat history in the browser, with live updates |
 
-The DB is kept in sync through three paths: the `SessionEnd` hook imports on session close, and when the Web UI or MCP server starts it first runs a full import and then keeps an FS watcher running for real-time ingestion.
+The DB is kept in sync by the Web UI and MCP server: both run a full import on startup and keep an FS watcher running for real-time ingestion while they're up. The CLI reads the DB as-is — run `agent-recall import` manually when needed.
 
 ```mermaid
 flowchart TD
     JSONL["~/.claude/projects/*/*.jsonl"]
-    JSONL -->|"SessionEnd hook (per session)"| Import["import.ts<br/>tail-read by imported_bytes"]
     JSONL -->|"Deno.watchFs (live, while UI/MCP runs)"| Watcher["watcher.ts<br/>debounced per file"]
-    JSONL -->|"startup full sync (UI/MCP)"| Import
+    JSONL -->|"startup full sync (UI/MCP)"| Import["import.ts<br/>tail-read by imported_bytes"]
     Watcher --> Import
     Import --> DB["SQLite + FTS5<br/>~/.claude/vault.db"]
     Import --> SSE["SSEBroadcaster"]
@@ -275,6 +251,16 @@ flowchart TD
     style MCP fill:#21262d,stroke:#30363d,color:#e6edf3
     style UI fill:#21262d,stroke:#30363d,color:#e6edf3
 ```
+
+### Sync Timing
+
+| State | What happens |
+|---|---|
+| UI or MCP running | JSONL writes land in SQLite after a ~300 ms debounce (one import per burst, not per keystroke) |
+| Both UI and MCP stopped | Nothing is imported. Claude Code keeps writing JSONL files normally — no data is lost, just not indexed yet |
+| UI or MCP starts | Runs a full import first, catching up on everything written while both were stopped |
+
+In practice, if you use Claude Code's MCP integration, the MCP server is always up during sessions and the DB tracks Claude Code in near real-time.
 
 ### DB Schema
 
