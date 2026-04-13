@@ -125,9 +125,7 @@ export async function startProjectWatcher(
         // reach subscribed clients. Only "unchanged" is suppressed.
         if (
           broadcaster &&
-          (result.status === "new" ||
-           result.status === "updated" ||
-           result.status === "resynced")
+          (result.status === "new" || result.status === "resynced")
         ) {
           broadcaster.broadcast({
             type: "session_updated",

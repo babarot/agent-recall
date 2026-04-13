@@ -601,3 +601,59 @@ Deno.test("parseJournalLines isMeta does not advance lastTimestamp", () => {
   const result = parseJournalLines(jsonl);
   assertEquals(result.lastTimestamp, "2026-01-01T00:00:00Z");
 });
+
+// --- blockIndex: the natural key the DB uniqueness relies on ---
+
+Deno.test("parseJournalLines assigns blockIndex=0 to string-content user messages", () => {
+  const jsonl = USER_MSG("hello", "u1", "2026-01-01T00:00:00Z");
+  const result = parseJournalLines(jsonl);
+  assertEquals(result.messages.length, 1);
+  assertEquals(result.messages[0].blockIndex, 0);
+});
+
+Deno.test("parseJournalLines assigns blockIndex=0 to meta lines", () => {
+  const jsonl = META_MSG("## Context\n...", "m1", "2026-01-01T00:00:00Z");
+  const result = parseJournalLines(jsonl);
+  assertEquals(result.messages.length, 1);
+  assertEquals(result.messages[0].blockType, "meta");
+  assertEquals(result.messages[0].blockIndex, 0);
+});
+
+Deno.test("parseJournalLines uses the block's array position as blockIndex", () => {
+  const jsonl = ASSISTANT_MSG(
+    [
+      { type: "thinking", thinking: "reasoning" },
+      { type: "tool_use", id: "t1", name: "Bash", input: { command: "ls" } },
+      { type: "text", text: "Done!" },
+    ],
+    "a1",
+    "2026-01-01T00:00:01Z",
+  );
+  const result = parseJournalLines(jsonl);
+  assertEquals(result.messages.length, 3);
+  assertEquals(result.messages[0].blockType, "thinking");
+  assertEquals(result.messages[0].blockIndex, 0);
+  assertEquals(result.messages[1].blockType, "tool_use");
+  assertEquals(result.messages[1].blockIndex, 1);
+  assertEquals(result.messages[2].blockType, "text");
+  assertEquals(result.messages[2].blockIndex, 2);
+});
+
+Deno.test("parseJournalLines keeps blockIndex tied to source position even when earlier blocks are skipped", () => {
+  // Empty thinking is skipped entirely — the tool_use that follows must
+  // still report its *original* array position (blockIndex=1), so that
+  // a future parse of the same line assigns the same blockIndex and the
+  // uuid-based uniqueness index dedupes correctly.
+  const jsonl = ASSISTANT_MSG(
+    [
+      { type: "thinking", thinking: "" },
+      { type: "tool_use", id: "t1", name: "Read", input: {} },
+    ],
+    "a1",
+    "2026-01-01T00:00:00Z",
+  );
+  const result = parseJournalLines(jsonl);
+  assertEquals(result.messages.length, 1);
+  assertEquals(result.messages[0].blockType, "tool_use");
+  assertEquals(result.messages[0].blockIndex, 1);
+});

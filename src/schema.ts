@@ -10,8 +10,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     started_at     TEXT,
     ended_at       TEXT,
     claude_version TEXT,
-    imported_at    TEXT DEFAULT (datetime('now')),
-    imported_bytes INTEGER NOT NULL DEFAULT 0
+    imported_at    TEXT DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project);
@@ -19,20 +18,29 @@ CREATE INDEX IF NOT EXISTS idx_sessions_started_at ON sessions(started_at);
 CREATE INDEX IF NOT EXISTS idx_sessions_ended_at ON sessions(ended_at);
 
 CREATE TABLE IF NOT EXISTS messages (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id TEXT NOT NULL REFERENCES sessions(session_id),
-    uuid       TEXT,
-    role       TEXT NOT NULL,
-    block_type TEXT NOT NULL DEFAULT 'text',
-    content    TEXT NOT NULL,
-    tool_name  TEXT,
-    tool_input TEXT,
-    timestamp  TEXT,
-    turn_index INTEGER
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id  TEXT NOT NULL REFERENCES sessions(session_id),
+    uuid        TEXT NOT NULL,
+    role        TEXT NOT NULL,
+    block_type  TEXT NOT NULL DEFAULT 'text',
+    block_index INTEGER NOT NULL DEFAULT 0,
+    content     TEXT NOT NULL,
+    tool_name   TEXT,
+    tool_input  TEXT,
+    timestamp   TEXT,
+    turn_index  INTEGER
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_turn ON messages(session_id, turn_index);
+-- Natural-key uniqueness: each (session, JSONL line uuid, block position
+-- within the line) is unique. This makes re-imports idempotent — any time
+-- the watcher triggers a full re-parse of a session's JSONL (e.g. after a
+-- /compact rewrite), duplicate inserts are silently ignored by SQLite.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_ident
+    ON messages(session_id, uuid, block_index);
+
 CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id);
+-- Backs chat-view ORDER BY turn_index reads.
+CREATE INDEX IF NOT EXISTS idx_messages_session_turn ON messages(session_id, turn_index);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
     content,

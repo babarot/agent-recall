@@ -42,12 +42,11 @@ export class VaultDB {
     startedAt: string;
     endedAt: string;
     claudeVersion: string;
-    importedBytes?: number;
   }): void {
     this.db
       .prepare(
-        `INSERT INTO sessions (session_id, project, project_path, git_branch, first_prompt, summary, message_count, started_at, ended_at, claude_version, imported_bytes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO sessions (session_id, project, project_path, git_branch, first_prompt, summary, message_count, started_at, ended_at, claude_version)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         params.sessionId,
@@ -59,8 +58,7 @@ export class VaultDB {
         params.messageCount,
         params.startedAt,
         params.endedAt,
-        params.claudeVersion,
-        params.importedBytes ?? 0
+        params.claudeVersion
       );
   }
 
@@ -84,45 +82,17 @@ export class VaultDB {
     }
   }
 
-  /** Get the byte offset up to which this session's JSONL has been imported */
-  getSessionImportedBytes(sessionId: string): number | null {
-    const row = this.db
-      .prepare("SELECT imported_bytes FROM sessions WHERE session_id = ?")
-      .get(sessionId) as { imported_bytes: number } | undefined;
-    return row?.imported_bytes ?? null;
-  }
-
-  /** Update a session's imported_bytes (and optionally ended_at) after a tail read */
-  updateSessionImportedBytes(
-    sessionId: string,
-    importedBytes: number,
-    endedAt?: string
-  ): void {
-    if (endedAt !== undefined) {
-      this.db
-        .prepare(
-          "UPDATE sessions SET imported_bytes = ?, ended_at = ? WHERE session_id = ?"
-        )
-        .run(importedBytes, endedAt, sessionId);
-    } else {
-      this.db
-        .prepare("UPDATE sessions SET imported_bytes = ? WHERE session_id = ?")
-        .run(importedBytes, sessionId);
-    }
-  }
-
   /**
-   * Insert a message, ignoring duplicates (by uuid or by
-   * (session_id, turn_index) uniqueness). Returns `{ changes: 1 }` when a row
-   * was actually inserted and `{ changes: 0 }` when it was ignored as a
-   * duplicate. Callers that need to count real inserts (e.g. the incremental
-   * importer) must use this return value rather than the parse count.
+   * Insert a message. Duplicates on `(session_id, uuid, block_index)` are
+   * silently ignored, making re-imports of the same JSONL line idempotent.
+   * Returns `{ changes: 1 }` on a real insert, `{ changes: 0 }` when ignored.
    */
   insertMessage(params: {
     sessionId: string;
     uuid: string;
     role: string;
     blockType?: string;
+    blockIndex?: number;
     content: string;
     toolName?: string;
     toolInput?: string;
@@ -131,14 +101,15 @@ export class VaultDB {
   }): { changes: number } {
     const result = this.db
       .prepare(
-        `INSERT OR IGNORE INTO messages (session_id, uuid, role, block_type, content, tool_name, tool_input, timestamp, turn_index)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT OR IGNORE INTO messages (session_id, uuid, role, block_type, block_index, content, tool_name, tool_input, timestamp, turn_index)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         params.sessionId,
         params.uuid,
         params.role,
         params.blockType ?? "text",
+        params.blockIndex ?? 0,
         params.content,
         params.toolName ?? null,
         params.toolInput ?? null,

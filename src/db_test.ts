@@ -642,56 +642,48 @@ Deno.test("insertMessage stores block_type and tool fields", () => {
 
 // --- listSessions with offset ---
 
-// --- imported_bytes ---
+// --- (session_id, uuid, block_index) uniqueness ---
 
-Deno.test("getSessionImportedBytes returns null for unknown session", () => {
-  withDB((db) => {
-    assertEquals(db.getSessionImportedBytes("missing"), null);
-  });
-});
-
-Deno.test("getSessionImportedBytes returns 0 by default on fresh insert", () => {
+Deno.test("insertMessage ignores duplicate (uuid, block_index)", () => {
   withDB((db) => {
     seedSession(db, "s1");
-    assertEquals(db.getSessionImportedBytes("s1"), 0);
-  });
-});
-
-Deno.test("insertSession accepts explicit importedBytes", () => {
-  withDB((db) => {
-    db.insertSession({
-      sessionId: "s1",
-      project: "proj",
-      projectPath: "/proj",
-      gitBranch: "main",
-      firstPrompt: "hi",
-      messageCount: 0,
-      startedAt: "2026-01-01T00:00:00Z",
-      endedAt: "2026-01-01T00:10:00Z",
-      claudeVersion: "2.1.87",
-      importedBytes: 4096,
+    const first = db.insertMessage({
+      sessionId: "s1", uuid: "m1", role: "assistant",
+      blockType: "text", blockIndex: 0,
+      content: "hello", timestamp: "2026-01-01T00:00:00Z", turnIndex: 0,
     });
-    assertEquals(db.getSessionImportedBytes("s1"), 4096);
+    const dup = db.insertMessage({
+      sessionId: "s1", uuid: "m1", role: "assistant",
+      blockType: "text", blockIndex: 0,
+      content: "different content", timestamp: "2026-01-01T00:00:00Z", turnIndex: 5,
+    });
+    assertEquals(first.changes, 1);
+    assertEquals(dup.changes, 0);
+    const { messages } = db.exportSession("s1");
+    assertEquals(messages.length, 1);
+    assertEquals(messages[0].content, "hello");
   });
 });
 
-Deno.test("updateSessionImportedBytes updates byte offset only", () => {
+Deno.test("insertMessage allows same uuid with different block_index", () => {
   withDB((db) => {
     seedSession(db, "s1");
-    db.updateSessionImportedBytes("s1", 1024);
-    assertEquals(db.getSessionImportedBytes("s1"), 1024);
-
-    // ended_at should be unchanged
-    const { session } = db.exportSession("s1");
-    assertEquals(session!.sessionId, "s1");
-  });
-});
-
-Deno.test("updateSessionImportedBytes updates byte offset and ended_at", () => {
-  withDB((db) => {
-    seedSession(db, "s1");
-    db.updateSessionImportedBytes("s1", 2048, "2026-06-01T00:00:00Z");
-    assertEquals(db.getSessionImportedBytes("s1"), 2048);
+    // Single assistant line producing text + tool_use — same uuid, different blockIndex.
+    const a = db.insertMessage({
+      sessionId: "s1", uuid: "m1", role: "assistant",
+      blockType: "text", blockIndex: 0,
+      content: "before tool", timestamp: "2026-01-01T00:00:00Z", turnIndex: 0,
+    });
+    const b = db.insertMessage({
+      sessionId: "s1", uuid: "m1", role: "assistant",
+      blockType: "tool_use", blockIndex: 1,
+      content: "Bash", toolName: "Bash", toolInput: "{}",
+      timestamp: "2026-01-01T00:00:00Z", turnIndex: 1,
+    });
+    assertEquals(a.changes, 1);
+    assertEquals(b.changes, 1);
+    const { messages } = db.exportSession("s1");
+    assertEquals(messages.length, 2);
   });
 });
 

@@ -233,7 +233,7 @@ The DB is kept in sync by the Web UI and MCP server: both run a full import on s
 flowchart TD
     JSONL["~/.claude/projects/*/*.jsonl"]
     JSONL -->|"Deno.watchFs (live, while UI/MCP runs)"| Watcher["watcher.ts<br/>debounced per file"]
-    JSONL -->|"startup full sync (UI/MCP)"| Import["import.ts<br/>tail-read by imported_bytes"]
+    JSONL -->|"startup full sync (UI/MCP)"| Import["import.ts<br/>full-parse + mirror to SQLite"]
     Watcher --> Import
     Import --> DB["SQLite + FTS5<br/>~/.claude/vault.db"]
     Import --> SSE["SSEBroadcaster"]
@@ -267,29 +267,31 @@ In practice, if you use Claude Code's MCP integration, the MCP server is always 
 ```sql
 sessions (session_id, project, project_path, git_branch, first_prompt,
           summary, message_count, started_at, ended_at, claude_version,
-          imported_at, imported_bytes)
-          -- imported_bytes = byte offset up to which the JSONL has been
-          -- parsed; lets subsequent imports tail-read only the new suffix
-          -- instead of re-parsing the entire file.
+          imported_at)
 
-messages (id, session_id, uuid, role, block_type, content,
+messages (id, session_id, uuid, role, block_type, block_index, content,
           tool_name, tool_input, timestamp, turn_index)
-          -- UNIQUE(session_id, turn_index) is the real dedup key; together
-          -- with INSERT OR IGNORE it makes concurrent tail reads safe.
+          -- UNIQUE(session_id, uuid, block_index) is the dedup key. It's a
+          -- natural key (uuid + block position within the JSONL line), so
+          -- every import can safely re-parse the whole file and rely on
+          -- INSERT OR IGNORE to no-op duplicates — immune to /compact
+          -- in-place rewrites, interrupted prior runs, etc.
 
 messages_fts (content)  -- FTS5, porter unicode61 tokenizer
 ```
 
+The DB is a derived cache of the JSONL master — on schema changes, delete
+`~/.claude/vault.db` (plus `-shm`, `-wal`) and let the next UI/MCP start
+rebuild it. No migrations.
+
 ### Filtering
 
-| Stored | Excluded |
+| Stored (as `block_type`) | Excluded |
 |--------|----------|
-| User text | tool_use |
-| Assistant text | tool_result |
-| | thinking |
-| | system (turn_duration, etc.) |
-| | file-history-snapshot |
-| | isSidechain = true |
+| `text` (user + assistant) | system (turn_duration, etc.) |
+| `thinking` | file-history-snapshot |
+| `tool_use` / `tool_result` | isSidechain = true |
+| `meta` (slash-command expansions, task notifications) | progress / queue-operation / last-prompt / pr-link |
 
 ## Global Options
 

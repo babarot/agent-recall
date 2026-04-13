@@ -89,6 +89,13 @@ export interface ExtractedMessage {
   uuid: string;
   role: "user" | "assistant";
   blockType: BlockType;
+  /**
+   * Position of the source block within the JSONL line's `content` array.
+   * `0` for string-body user messages and for meta-collapsed lines.
+   * Uniqueness in the DB is `(session_id, uuid, blockIndex)` — this is the
+   * natural key that makes re-imports idempotent.
+   */
+  blockIndex: number;
   content: string;
   toolName?: string;
   toolInput?: string;
