@@ -137,7 +137,9 @@ Deno.test({
       assertEquals(gotNew, true, "expected 'new' broadcast for initial import");
       assertEquals(db.sessionExists("sess-w2"), 1);
 
-      // Step 2: append a second line → expect a follow-up "updated" broadcast.
+      // Step 2: append a second line → expect a follow-up "resynced" broadcast.
+      // The importer rebuilds the session every time, so existing sessions
+      // that gained content come back as "resynced" (not "updated").
       const newCountBefore = spy.events.length;
       Deno.writeTextFileSync(
         filePath,
@@ -149,10 +151,10 @@ Deno.test({
         () =>
           spy.events
             .slice(newCountBefore)
-            .some((e) => e.sessionId === "sess-w2" && e.status === "updated"),
+            .some((e) => e.sessionId === "sess-w2" && e.status === "resynced"),
         3000
       );
-      assertEquals(gotUpdate, true, "expected 'updated' broadcast after append");
+      assertEquals(gotUpdate, true, "expected 'resynced' broadcast after append");
       assertGreaterOrEqual(db.sessionExists("sess-w2") ?? 0, 2);
     } finally {
       ac.abort();

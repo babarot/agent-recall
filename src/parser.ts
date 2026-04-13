@@ -141,6 +141,7 @@ export function parseJournalLines(
           uuid: parsed.uuid,
           role,
           blockType: "meta",
+          blockIndex: 0,
           content: text,
           timestamp: ts,
           turnIndex: turnIndex++,
@@ -164,31 +165,37 @@ export function parseJournalLines(
       if (!firstUserText && parsed.type === "user") {
         firstUserText = text;
       }
-      messages.push({ uuid: parsed.uuid, role, blockType: "text", content: text, timestamp: ts, turnIndex: turnIndex++ });
+      messages.push({ uuid: parsed.uuid, role, blockType: "text", blockIndex: 0, content: text, timestamp: ts, turnIndex: turnIndex++ });
       continue;
     }
 
     if (!Array.isArray(content)) continue;
 
-    // Process content blocks
+    // Process content blocks. `blockIndex` is the block's position within the
+    // JSONL line's content array — stable across re-parses, even when some
+    // blocks are skipped (empty thinking, unknown types). This lets
+    // `(session_id, uuid, blockIndex)` serve as a natural key that makes
+    // re-imports idempotent.
     let imgIdx = 0;
-    for (const block of content) {
+    for (let i = 0; i < content.length; i++) {
+      const block = content[i];
+      const blockIndex = i;
       if (block.type === "text") {
         const text = (block as { text?: string }).text?.trim();
         if (!text) continue;
         if (!firstUserText && parsed.type === "user") {
           firstUserText = text;
         }
-        messages.push({ uuid: parsed.uuid, role, blockType: "text", content: text, timestamp: ts, turnIndex: turnIndex++ });
+        messages.push({ uuid: parsed.uuid, role, blockType: "text", blockIndex, content: text, timestamp: ts, turnIndex: turnIndex++ });
       } else if (block.type === "thinking") {
         const thinking = (block as { thinking?: string }).thinking?.trim();
         if (!thinking) continue;
-        messages.push({ uuid: parsed.uuid, role, blockType: "thinking", content: thinking, timestamp: ts, turnIndex: turnIndex++ });
+        messages.push({ uuid: parsed.uuid, role, blockType: "thinking", blockIndex, content: thinking, timestamp: ts, turnIndex: turnIndex++ });
       } else if (block.type === "tool_use") {
         const toolBlock = block as { name?: string; input?: Record<string, unknown> };
         const name = toolBlock.name ?? "unknown";
         const input = toolBlock.input ? JSON.stringify(toolBlock.input) : "";
-        messages.push({ uuid: parsed.uuid, role, blockType: "tool_use", content: name, toolName: name, toolInput: input, timestamp: ts, turnIndex: turnIndex++ });
+        messages.push({ uuid: parsed.uuid, role, blockType: "tool_use", blockIndex, content: name, toolName: name, toolInput: input, timestamp: ts, turnIndex: turnIndex++ });
       } else if (block.type === "tool_result") {
         const resultBlock = block as { content?: string | unknown[] };
         let text = "";
@@ -201,7 +208,7 @@ export function parseJournalLines(
             .join("\n");
         }
         if (text.length > 10000) text = text.slice(0, 10000) + "\n... (truncated)";
-        messages.push({ uuid: parsed.uuid, role, blockType: "tool_result", content: text, timestamp: ts, turnIndex: turnIndex++ });
+        messages.push({ uuid: parsed.uuid, role, blockType: "tool_result", blockIndex, content: text, timestamp: ts, turnIndex: turnIndex++ });
       } else if (block.type === "image" && (block as ImageBlock).source?.type === "base64") {
         const imgBlock = block as ImageBlock;
         images.push({

@@ -56,9 +56,9 @@ See [`docs/comparison-claude-mem.md`](docs/comparison-claude-mem.md) for a deepe
 - **Auto-sync** -- FS watcher keeps the DB up-to-date while the UI or MCP server is running
 - **Real-time Web UI** -- Sessions appear and update live as Claude Code writes to disk, without reload
 - **Full-text search** -- Fast search powered by SQLite FTS5 with Porter stemmer
-- **Noise filtering** -- Strips tool_use / tool_result / thinking, keeping only conversation text (~7% of raw data)
-- **Incremental imports** -- Tail-read by byte offset; re-importing already-archived sessions is effectively free
-- **Idempotent** -- UUID-based deduplication; safe to import repeatedly
+- **Noise filtering** -- Drops filesystem snapshots, system turn-duration events, and sidechain branches; keeps the real conversation (text, thinking, tool calls, results, slash-command meta)
+- **JSONL mirror** -- SQLite tracks the session file exactly; every import is a full re-parse, idempotent via `(session_id, uuid, block_index)` uniqueness
+- **Idempotent** -- safe to import repeatedly; concurrent watcher + CLI runs converge on the same state
 - **MCP server** -- Agents can autonomously search past sessions via `recall_search`, `recall_list`, `recall_export`, `recall_stats` tools
 - **Zero dependencies** -- Single binary via `deno compile`; no external services
 
@@ -233,7 +233,7 @@ The DB is kept in sync by the Web UI and MCP server: both run a full import on s
 flowchart TD
     JSONL["~/.claude/projects/*/*.jsonl"]
     JSONL -->|"Deno.watchFs (live, while UI/MCP runs)"| Watcher["watcher.ts<br/>debounced per file"]
-    JSONL -->|"startup full sync (UI/MCP)"| Import["import.ts<br/>tail-read by imported_bytes"]
+    JSONL -->|"startup full sync (UI/MCP)"| Import["import.ts<br/>full-parse + mirror to SQLite"]
     Watcher --> Import
     Import --> DB["SQLite + FTS5<br/>~/.claude/vault.db"]
     Import --> SSE["SSEBroadcaster"]
@@ -267,29 +267,33 @@ In practice, if you use Claude Code's MCP integration, the MCP server is always 
 ```sql
 sessions (session_id, project, project_path, git_branch, first_prompt,
           summary, message_count, started_at, ended_at, claude_version,
-          imported_at, imported_bytes)
-          -- imported_bytes = byte offset up to which the JSONL has been
-          -- parsed; lets subsequent imports tail-read only the new suffix
-          -- instead of re-parsing the entire file.
+          imported_at)
 
-messages (id, session_id, uuid, role, block_type, content,
+messages (id, session_id, uuid, role, block_type, block_index, content,
           tool_name, tool_input, timestamp, turn_index)
-          -- UNIQUE(session_id, turn_index) is the real dedup key; together
-          -- with INSERT OR IGNORE it makes concurrent tail reads safe.
+          -- UNIQUE(session_id, uuid, block_index) is the dedup key. It's a
+          -- natural key (uuid + block position within the JSONL line), so
+          -- every import can safely re-parse the whole file and rely on
+          -- INSERT OR IGNORE to no-op duplicates — immune to /compact
+          -- in-place rewrites, interrupted prior runs, etc.
 
 messages_fts (content)  -- FTS5, porter unicode61 tokenizer
 ```
 
+The DB is a derived cache of the JSONL master — on schema changes, delete
+`~/.claude/vault.db` (plus `-shm`, `-wal`) and let the next UI/MCP start
+rebuild it. No migrations.
+
+SQLite mirrors the current JSONL rather than accumulating its own history. This works because Claude Code's JSONL files are append-only in practice (`/compact` adds a summary boundary rather than shrinking the file). See [docs/adr/003-mirror-jsonl-not-independent-archive.md](docs/adr/003-mirror-jsonl-not-independent-archive.md) for why the mirror design was chosen over an explicit append-only archive layer.
+
 ### Filtering
 
-| Stored | Excluded |
+| Stored (as `block_type`) | Excluded |
 |--------|----------|
-| User text | tool_use |
-| Assistant text | tool_result |
-| | thinking |
-| | system (turn_duration, etc.) |
-| | file-history-snapshot |
-| | isSidechain = true |
+| `text` (user + assistant) | system (turn_duration, etc.) |
+| `thinking` | file-history-snapshot |
+| `tool_use` / `tool_result` | isSidechain = true |
+| `meta` (slash-command expansions, task notifications) | progress / queue-operation / last-prompt / pr-link |
 
 ## Global Options
 

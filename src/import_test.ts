@@ -11,7 +11,7 @@ function userLine(
   text: string,
   uuid: string,
   ts: string,
-  sessionId = "sess-001"
+  sessionId = "sess-001",
 ): string {
   return JSON.stringify({
     type: "user",
@@ -31,7 +31,7 @@ function assistantLine(
   text: string,
   uuid: string,
   ts: string,
-  sessionId = "sess-001"
+  sessionId = "sess-001",
 ): string {
   return JSON.stringify({
     type: "assistant",
@@ -49,7 +49,7 @@ function assistantLine(
 /** Create a temporary projects-layout directory with a single JSONL file */
 function withTempSession(
   lines: string[],
-  fn: (filePath: string, db: VaultDB) => void
+  fn: (filePath: string, db: VaultDB) => void,
 ): void {
   const tempDir = Deno.makeTempDirSync();
   try {
@@ -84,11 +84,7 @@ Deno.test("importSingleSessionIncremental imports a new session fully", () => {
       assertEquals(result!.addedMessages, 2);
       assertEquals(result!.totalMessages, 2);
       assertEquals(db.sessionExists("sess-001"), 2);
-
-      // imported_bytes should now match the file size
-      const size = Deno.statSync(filePath).size;
-      assertEquals(db.getSessionImportedBytes("sess-001"), size);
-    }
+    },
   );
 });
 
@@ -105,27 +101,32 @@ Deno.test("importSingleSessionIncremental is idempotent on unchanged file", () =
       assertEquals(first!.status, "new");
 
       const second = importSingleSessionIncremental(db, filePath);
-      assertEquals(second!.status, "unchanged");
-      assertEquals(second!.addedMessages, 0);
-      assertEquals(db.sessionExists("sess-001"), 2); // unchanged
-    }
+      // Second import mirrors the same file — status is "resynced" since
+      // a session row already existed. Row count must not change.
+      assertEquals(second!.status, "resynced");
+      assertEquals(db.sessionExists("sess-001"), 2);
+
+      // turn_index sequence is preserved (same parser → same values).
+      const { messages } = db.exportSession("sess-001");
+      assertEquals(messages.length, 2);
+      assertEquals(messages[0].turnIndex, 0);
+      assertEquals(messages[1].turnIndex, 1);
+    },
   );
 });
 
 // --- Append path ---
 
-Deno.test("importSingleSessionIncremental imports appended messages via tail read", () => {
+Deno.test("importSingleSessionIncremental imports appended messages", () => {
   withTempSession(
     [
       userLine("hello", "u1", "2026-01-01T00:00:00Z"),
       assistantLine("hi", "a1", "2026-01-01T00:00:01Z"),
     ],
     (filePath, db) => {
-      const first = importSingleSessionIncremental(db, filePath);
-      assertEquals(first!.status, "new");
-      assertEquals(first!.totalMessages, 2);
+      importSingleSessionIncremental(db, filePath);
+      assertEquals(db.sessionExists("sess-001"), 2);
 
-      // Append two more messages
       const appendLines = [
         userLine("how are you?", "u2", "2026-01-01T00:00:02Z"),
         assistantLine("good!", "a2", "2026-01-01T00:00:03Z"),
@@ -133,142 +134,104 @@ Deno.test("importSingleSessionIncremental imports appended messages via tail rea
       Deno.writeTextFileSync(filePath, appendLines, { append: true });
 
       const second = importSingleSessionIncremental(db, filePath);
-      assertEquals(second!.status, "updated");
-      assertEquals(second!.addedMessages, 2);
+      assertEquals(second!.status, "resynced");
       assertEquals(second!.totalMessages, 4);
       assertEquals(db.sessionExists("sess-001"), 4);
 
-      // Verify turn_index continued from 2
       const { messages } = db.exportSession("sess-001");
       assertEquals(messages.length, 4);
-      assertEquals(messages[2].turnIndex, 2);
-      assertEquals(messages[3].turnIndex, 3);
       assertEquals(messages[2].content, "how are you?");
       assertEquals(messages[3].content, "good!");
-    }
+    },
   );
 });
 
-Deno.test("importSingleSessionIncremental resyncs when the file shrinks", () => {
+// --- /compact-style in-place rewrite: file shrinks ---
+
+Deno.test("importSingleSessionIncremental mirrors the file when it shrinks", () => {
   withTempSession(
     [
       userLine("hello", "u1", "2026-01-01T00:00:00Z"),
       assistantLine("hi", "a1", "2026-01-01T00:00:01Z"),
     ],
     (filePath, db) => {
-      const first = importSingleSessionIncremental(db, filePath);
-      assertEquals(first!.status, "new");
+      importSingleSessionIncremental(db, filePath);
       assertEquals(db.sessionExists("sess-001"), 2);
 
+      // Rewrite the file from scratch — simulates /compact output.
       Deno.writeTextFileSync(
         filePath,
-        userLine("rewritten", "u9", "2026-01-01T00:00:05Z") + "\n"
+        userLine("rewritten", "u9", "2026-01-01T00:00:05Z") + "\n",
       );
 
       const second = importSingleSessionIncremental(db, filePath);
       assertEquals(second!.status, "resynced");
-      assertEquals(second!.addedMessages, 1);
-      assertEquals(second!.totalMessages, 1);
       assertEquals(db.sessionExists("sess-001"), 1);
 
       const { messages } = db.exportSession("sess-001");
       assertEquals(messages.length, 1);
       assertEquals(messages[0].content, "rewritten");
-    }
+      // Old uuids must be gone — DB is a mirror, not an append log.
+      assertEquals(messages[0].uuid, "u9");
+    },
   );
 });
 
-// --- Duplicate protection (critical: message_count must not inflate) ---
-//
-// The dedup mechanism is UNIQUE(session_id, turn_index). A race where two
-// concurrent imports both read the same tail (same startTurnIndex, same
-// parsed rows) must collide on that index and produce changes=0 on the
-// loser, so addedMessages is counted via `.changes` rather than parse count.
+// --- /compact-style in-place rewrite: file keeps some uuids, drops others ---
 
-Deno.test("concurrent tail reads do not double-count messages", () => {
+Deno.test("importSingleSessionIncremental drops rows whose uuid disappeared from the file", () => {
   withTempSession(
     [
-      userLine("hello", "u1", "2026-01-01T00:00:00Z"),
-      assistantLine("hi", "a1", "2026-01-01T00:00:01Z"),
+      userLine("one", "u1", "2026-01-01T00:00:00Z"),
+      userLine("two", "u2", "2026-01-01T00:00:01Z"),
+      userLine("three", "u3", "2026-01-01T00:00:02Z"),
     ],
     (filePath, db) => {
       importSingleSessionIncremental(db, filePath);
-      assertEquals(db.sessionExists("sess-001"), 2);
+      assertEquals(db.sessionExists("sess-001"), 3);
 
-      // Simulate process A and process B both reading the same tail before
-      // either has committed: rewind imported_bytes so the second call
-      // re-parses the tail while message_count is still at its pre-commit
-      // value.
-      db.updateSessionImportedBytes("sess-001", 0);
-      db.updateSessionCounts("sess-001", 0, "2026-01-01T00:00:01Z");
+      // Rewrite keeping only u1 and a brand-new u4 (u2, u3 removed).
+      Deno.writeTextFileSync(
+        filePath,
+        userLine("one", "u1", "2026-01-01T00:00:00Z") + "\n" +
+          userLine("four", "u4", "2026-01-01T00:00:10Z") + "\n",
+      );
 
-      const result = importSingleSessionIncremental(db, filePath);
-      assertNotEquals(result, null);
-      // Parse produces 2 messages, but (session_id, turn_index) already
-      // exists, so INSERT OR IGNORE returns changes=0 on every row.
-      assertEquals(result!.addedMessages, 0);
-      // The physical row count hasn't changed.
+      importSingleSessionIncremental(db, filePath);
+
       const { messages } = db.exportSession("sess-001");
       assertEquals(messages.length, 2);
-    }
+      const uuids = messages.map((m) => m.uuid).sort();
+      assertEquals(uuids, ["u1", "u4"]);
+    },
   );
 });
 
-// --- Incomplete trailing line ---
+// --- Regression: message_count corruption recovery ---
 
-Deno.test("importSingleSessionIncremental defers incomplete trailing line", () => {
-  const tempDir = Deno.makeTempDirSync();
-  try {
-    const projectDir = join(tempDir, "my-project");
-    Deno.mkdirSync(projectDir);
-    const filePath = join(projectDir, "sess-001.jsonl");
-
-    // Complete first line
-    Deno.writeTextFileSync(
-      filePath,
-      userLine("hello", "u1", "2026-01-01T00:00:00Z") + "\n"
-    );
-
-    const db = new VaultDB(":memory:");
-    try {
+Deno.test("importSingleSessionIncremental recovers after message_count is corrupted", () => {
+  withTempSession(
+    [
+      userLine("one", "u1", "2026-01-01T00:00:00Z"),
+      userLine("two", "u2", "2026-01-01T00:00:01Z"),
+      userLine("three", "u3", "2026-01-01T00:00:02Z"),
+    ],
+    (filePath, db) => {
       importSingleSessionIncremental(db, filePath);
-      assertEquals(db.sessionExists("sess-001"), 1);
-      const sizeAfterFirst = db.getSessionImportedBytes("sess-001");
+      assertEquals(db.sessionExists("sess-001"), 3);
 
-      // Append an *incomplete* second line (no trailing newline)
-      const halfLine = assistantLine("hi", "a1", "2026-01-01T00:00:01Z").slice(
-        0,
-        20
-      );
-      Deno.writeTextFileSync(filePath, halfLine, { append: true });
+      // Simulate the stale-message_count state that previously caused
+      // silent turn_index collisions on the next import.
+      db.updateSessionCounts("sess-001", 0, "2026-01-01T00:00:02Z");
+      assertEquals(db.sessionExists("sess-001"), 0);
 
-      const result = importSingleSessionIncremental(db, filePath);
-      assertEquals(result!.status, "unchanged");
-      assertEquals(result!.addedMessages, 0);
-      // Offset must not advance past the last complete newline
-      assertEquals(db.getSessionImportedBytes("sess-001"), sizeAfterFirst);
-
-      // Now complete the line — next call should pick it up
-      Deno.writeTextFileSync(filePath, "\n", { append: true });
-      // Wait: the "half line" was truncated JSON. Replace with a real line.
-      Deno.writeTextFileSync(
-        filePath,
-        userLine("hello", "u1", "2026-01-01T00:00:00Z") +
-          "\n" +
-          assistantLine("hi", "a1", "2026-01-01T00:00:01Z") +
-          "\n"
-      );
-
-      const complete = importSingleSessionIncremental(db, filePath);
-      assertEquals(complete!.status, "updated");
-      assertEquals(complete!.addedMessages, 1);
-      assertEquals(db.sessionExists("sess-001"), 2);
-    } finally {
-      db.close();
-    }
-  } finally {
-    Deno.removeSync(tempDir, { recursive: true });
-  }
+      // Next import must rebuild the DB from the file and heal the counter.
+      importSingleSessionIncremental(db, filePath);
+      assertEquals(db.sessionExists("sess-001"), 3);
+      const { messages } = db.exportSession("sess-001");
+      assertEquals(messages.length, 3);
+    },
+  );
 });
 
 // --- Project / sessionId derivation from filepath ---
@@ -281,7 +244,7 @@ Deno.test("importSingleSessionIncremental derives sessionId and project from pat
     const filePath = join(projectDir, "abc-123-def.jsonl");
     Deno.writeTextFileSync(
       filePath,
-      userLine("test", "u1", "2026-01-01T00:00:00Z", "abc-123-def") + "\n"
+      userLine("test", "u1", "2026-01-01T00:00:00Z", "abc-123-def") + "\n",
     );
 
     const db = new VaultDB(":memory:");
@@ -305,7 +268,7 @@ Deno.test("importSingleSessionIncremental returns null for missing file", () => 
   try {
     const result = importSingleSessionIncremental(
       db,
-      "/nonexistent/path/fake.jsonl"
+      "/nonexistent/path/fake.jsonl",
     );
     assertEquals(result, null);
   } finally {

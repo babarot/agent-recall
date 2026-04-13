@@ -73,7 +73,7 @@ The "works when UI server is off" limitation is identical for both mechanisms, a
         │  debounce 300ms per session
         ▼
   importSingleSessionIncremental
-  (tail-read from sessions.imported_bytes)
+  (parse whole file → resetSession + re-insert)
         │
         ▼
   SQLite (INSERT OR IGNORE, count via .changes)
@@ -99,7 +99,7 @@ Supporting hook-based notification *and* FS watch as a belt-and-suspenders desig
 - **Real-time updates** work without any user configuration beyond starting `agent-recall ui`
 - **Ctrl-C data loss is eliminated** for the common case — whatever Claude Code wrote to JSONL before dying is picked up by the watcher as long as the UI server is running
 - **MCP gets live data for free** — `recall_search` / `recall_list` now see sessions the moment the watcher writes them, since SQLite WAL makes committed writes visible to other readers immediately
-- **CLI `import` becomes faster** — the new `imported_bytes`-based tail read replaces the "re-parse the entire JSONL" path used by the old incremental import, reducing cost from O(session length) to O(appended bytes) per invocation
+- **CLI `import` stays simple** — every import re-parses the full JSONL and mirrors it into SQLite via `(session_id, uuid, block_index)` dedup. Slightly more CPU than tail-reads, but immune to in-place rewrites (`/compact`) and impossible to desync from the source file.
 - **Not tied to Claude Code specifics** — the watcher logic can be pointed at other agents' transcript directories without touching notification plumbing
 - **The existing `SessionEnd` hook remains functional** as a fallback when the UI server is not running, with no changes
 
