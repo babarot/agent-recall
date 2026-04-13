@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "preact/hooks";
-import { Settings as SettingsIcon } from "lucide-preact";
+import { Settings as SettingsIcon, Brain } from "lucide-preact";
 import { SessionList } from "./components/SessionList";
 import { ChatView } from "./components/ChatView";
 import { StatsView } from "./components/StatsView";
@@ -73,12 +73,17 @@ export function App() {
 
   return (
     <>
-      <header class="h-12 shrink-0 flex items-center justify-between px-5 border-b border-border bg-bg-secondary">
+      <header class="h-14 shrink-0 flex items-center justify-between px-6 border-b border-border/60 bg-bg-secondary/80 backdrop-blur-sm">
         <button
           onClick={handleBack}
-          class="text-base font-semibold text-text hover:text-accent transition-colors cursor-pointer"
+          class="flex items-center gap-2 group cursor-pointer"
         >
-          agent-recall
+          <div class="w-7 h-7 rounded-lg bg-accent/15 flex items-center justify-center group-hover:bg-accent/25 transition-colors">
+            <Brain size={14} class="text-accent" />
+          </div>
+          <span class="text-sm font-semibold text-text tracking-tight group-hover:text-accent transition-colors">
+            Agent Recall
+          </span>
         </button>
         <nav class="flex gap-1 items-center">
           <NavButton active={view === "list" || view === "chat"} onClick={handleBack}>
@@ -87,12 +92,13 @@ export function App() {
           <NavButton active={view === "stats"} onClick={handleStats}>
             Stats
           </NavButton>
+          <div class="w-px h-5 bg-border/50 mx-1.5" />
           <button
             onClick={() => setShowSettings(true)}
-            class="ml-2 p-1.5 text-text-secondary hover:text-text hover:bg-bg-tertiary rounded-md transition-colors cursor-pointer"
+            class="p-2 text-text-muted hover:text-text hover:bg-bg-tertiary rounded-lg transition-colors cursor-pointer"
             title="Settings"
           >
-            <SettingsIcon size={16} />
+            <SettingsIcon size={15} />
           </button>
         </nav>
       </header>
@@ -128,10 +134,10 @@ function NavButton({ active, onClick, children }: {
   return (
     <button
       onClick={onClick}
-      class={`px-3 py-1.5 text-sm rounded-md transition-colors cursor-pointer ${
+      class={`px-3 py-1.5 text-sm font-medium rounded-lg transition-all cursor-pointer ${
         active
-          ? "bg-bg-tertiary text-text"
-          : "text-text-secondary hover:text-text hover:bg-bg-tertiary"
+          ? "bg-accent/10 text-accent"
+          : "text-text-muted hover:text-text hover:bg-bg-tertiary"
       }`}
     >
       {children}

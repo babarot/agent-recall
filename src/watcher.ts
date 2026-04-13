@@ -44,7 +44,7 @@ export interface WatcherStatus {
 
 export async function startProjectWatcher(
   db: VaultDB,
-  broadcaster: SSEBroadcaster,
+  broadcaster: SSEBroadcaster | null,
   projectsDir: string,
   opts: WatcherOptions = {}
 ): Promise<void> {
@@ -124,9 +124,10 @@ export async function startProjectWatcher(
         // Any status that represents an actual change to DB state should
         // reach subscribed clients. Only "unchanged" is suppressed.
         if (
-          result.status === "new" ||
-          result.status === "updated" ||
-          result.status === "resynced"
+          broadcaster &&
+          (result.status === "new" ||
+           result.status === "updated" ||
+           result.status === "resynced")
         ) {
           broadcaster.broadcast({
             type: "session_updated",

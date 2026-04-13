@@ -1,6 +1,8 @@
 import { VaultDB } from "./db.ts";
-import { DEFAULT_DB_PATH } from "./config.ts";
+import { DEFAULT_DB_PATH, PROJECTS_DIR } from "./config.ts";
 import { displayProject } from "./display.ts";
+import { runImport } from "./import.ts";
+import { startProjectWatcher } from "./watcher.ts";
 
 // --- MCP Tool Definitions ---
 
@@ -269,6 +271,18 @@ function handleRequest(
 
 export async function runMcp(dbPath: string): Promise<void> {
   const db = new VaultDB(dbPath);
+
+  // Import all sessions so the DB is up to date before serving requests.
+  runImport({ dbPath, dryRun: false });
+
+  // Start the FS watcher so new sessions are imported in real-time while
+  // the MCP server is running. No broadcaster needed — there are no SSE
+  // clients to notify.
+  const ac = new AbortController();
+  startProjectWatcher(db, null, PROJECTS_DIR, { signal: ac.signal }).catch(
+    (e) => console.error("[mcp] watcher crashed:", e)
+  );
+
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -310,6 +324,7 @@ export async function runMcp(dbPath: string): Promise<void> {
       }
     }
   } finally {
+    ac.abort();
     reader.releaseLock();
     db.close();
   }

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "preact/hooks";
+import { Search } from "lucide-preact";
 import { AreaChart, Area, YAxis, ResponsiveContainer } from "recharts";
 import { useSSE } from "../hooks/use-sse";
 import type { Settings } from "../lib/settings";
@@ -189,36 +190,32 @@ export function SessionList({ onSelect, settings }: { onSelect: (id: string) => 
 
   return (
     <div class="h-full flex flex-col">
-      {/* Search bar */}
-      <div class="p-4 border-b border-border bg-bg-secondary">
-        <div class="flex gap-3 max-w-4xl mx-auto">
+      {/* Search & filter — visually continues the header */}
+      <div class="px-4 py-2.5 bg-bg-secondary/40">
+        <div class="flex gap-2 max-w-4xl mx-auto items-center">
           <div class="flex-1 relative">
+            <Search size={14} class="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
             <input
               ref={searchRef}
               type="text"
               value={query}
               onInput={(e) => handleQueryInput((e.target as HTMLInputElement).value)}
               onKeyDown={handleKeyDown}
-              placeholder='Search sessions... (press "/" to focus)'
-              class="w-full px-4 py-2 bg-bg border border-border rounded-lg text-text placeholder-text-muted focus:outline-none focus:border-accent text-sm"
+              placeholder="Search sessions..."
+              class="w-full pl-9 pr-8 py-1.5 bg-bg-tertiary/50 border border-transparent rounded-md text-text placeholder-text-muted focus:outline-none focus:border-accent/40 focus:bg-bg text-sm transition-all"
             />
+            <kbd class="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-text-muted/60 font-mono pointer-events-none">/</kbd>
           </div>
           <select
             value={project}
             onChange={(e) => setProject((e.target as HTMLSelectElement).value)}
-            class="px-3 py-2 bg-bg border border-border rounded-lg text-text text-sm focus:outline-none focus:border-accent"
+            class="px-2.5 py-1.5 bg-bg-tertiary/50 border border-transparent rounded-md text-text-secondary text-sm focus:outline-none focus:border-accent/40 transition-colors cursor-pointer"
           >
             <option value="">All projects</option>
             {projects.map((p) => (
               <option key={p.value} value={p.value}>{p.display}</option>
             ))}
           </select>
-          <button
-            onClick={handleSearch}
-            class="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent-hover transition-colors cursor-pointer"
-          >
-            Search
-          </button>
         </div>
       </div>
 

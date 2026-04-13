@@ -3,6 +3,7 @@ import { displayProject } from "./display.ts";
 import { getAsset } from "./ui_assets.ts";
 import { SSEBroadcaster } from "./sse.ts";
 import { startProjectWatcher, type WatcherStatus } from "./watcher.ts";
+import { runImport } from "./import.ts";
 import { PROJECTS_DIR } from "./config.ts";
 
 const SSE_KEEPALIVE_MS = 15_000;
@@ -75,6 +76,11 @@ export interface UIHandle {
 
 export function runUI(options: UIOptions): UIHandle {
   const db = new VaultDB(options.dbPath);
+
+  // Sync all sessions so the DB is up to date before serving requests.
+  // Catches up on any changes that happened while the UI was not running.
+  runImport({ dbPath: options.dbPath, dryRun: false });
+
   const ac = new AbortController();
   const broadcaster = new SSEBroadcaster();
   const watcherStatus: WatcherStatus = {
