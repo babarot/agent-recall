@@ -1,50 +1,43 @@
-import { useState, useEffect, useRef, useCallback } from "preact/hooks";
+import { useEffect, useRef, useCallback } from "preact/hooks";
 import { Search } from "lucide-preact";
 import { AreaChart, Area, YAxis, ResponsiveContainer } from "recharts";
-import { useSSE } from "../hooks/use-sse";
 import type { Settings } from "../lib/settings";
-
-interface Session {
-  sessionId: string;
-  fullSessionId: string;
-  project: string;
-  branch: string;
-  firstPrompt: string;
-  lastPrompt: string;
-  messages: number;
-  date: string;
-  activity: number[];
-}
-
-const PAGE_SIZE = 50;
+import {
+  sessions as sessionsSignal,
+  query as querySignal,
+  project as projectSignal,
+  projects as projectsComputed,
+  loading as loadingSignal,
+  hasMore as hasMoreSignal,
+  init,
+  fetchSessions,
+  runSearch,
+  setProject,
+  setQuery,
+} from "../store/sessions-store";
 
 export function SessionList({ onSelect, settings }: { onSelect: (id: string) => void; settings: Settings }) {
-  const [sessions, setSessions] = useState<Session[]>([]);
-  // `query` is the raw text in the search box (updates on every keystroke).
-  // `committedQuery` is the value that was last actually submitted via the
-  // Search button / Enter key — this is what gates live updates. Separating
-  // them ensures that *typing* into the search box does not freeze live
-  // updates; only *committing* a non-empty search does.
-  const [query, setQuery] = useState("");
-  const [committedQuery, setCommittedQuery] = useState("");
-  const [project, setProject] = useState("");
-  const [projects, setProjects] = useState<Array<{ display: string; value: string }>>([]);
-  const [loading, setLoading] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
   const searchRef = useRef<HTMLInputElement>(null);
   const loadingRef = useRef(false);
 
+  // Reactive reads from the store. Components just render what the store
+  // holds; the store persists across navigation so returning here no
+  // longer triggers a refetch or resets scroll/filter state.
+  const sessions = sessionsSignal.value;
+  const query = querySignal.value;
+  const project = projectSignal.value;
+  const projects = projectsComputed.value;
+  const loading = loadingSignal.value;
+  const hasMore = hasMoreSignal.value;
+
+  // Kick the store on every mount. init() is idempotent and retries any
+  // transient fetch failure from a previous mount — see sessions-store.ts.
   useEffect(() => {
-    fetchSessions(true);
-    fetch("/api/stats")
-      .then((r) => r.json())
-      .then((data) => {
-        setProjects(data.byProject?.map((p: { project: string; projectPath: string }) => ({
-          display: p.project,
-          value: p.projectPath,
-        })) ?? []);
-      });
+    init();
   }, []);
+
+  // Keep loadingRef synced for the IntersectionObserver closure below.
+  loadingRef.current = loading;
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -57,117 +50,8 @@ export function SessionList({ onSelect, settings }: { onSelect: (id: string) => 
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  const fetchSessions = async (reset: boolean) => {
-    if (loadingRef.current) return;
-    loadingRef.current = true;
-    setLoading(true);
-
-    const offset = reset ? 0 : sessions.length;
-    const params = new URLSearchParams();
-    if (project) params.set("project", project);
-    params.set("limit", String(PAGE_SIZE));
-    params.set("offset", String(offset));
-
-    const res = await fetch(`/api/sessions?${params}`);
-    const data: Session[] = await res.json();
-
-    if (reset) {
-      setSessions(data);
-    } else {
-      setSessions((prev) => [...prev, ...data]);
-    }
-    setHasMore(data.length >= PAGE_SIZE);
-    setLoading(false);
-    loadingRef.current = false;
-  };
-
-  const handleSearch = async () => {
-    if (!query.trim()) {
-      // Submitting an empty search behaves like clearing: drop back to the
-      // normal live list and un-freeze SSE updates.
-      setCommittedQuery("");
-      fetchSessions(true);
-      return;
-    }
-    setLoading(true);
-    setCommittedQuery(query);
-    const params = new URLSearchParams({ q: query, limit: "100" });
-    if (project) params.set("project", project);
-    const res = await fetch(`/api/search?${params}`);
-    const results = await res.json();
-    const sessionMap = new Map<string, Session>();
-    for (const r of results) {
-      if (!sessionMap.has(r.sessionId)) {
-        sessionMap.set(r.sessionId, {
-          sessionId: r.sessionId,
-          fullSessionId: r.sessionId,
-          project: r.project,
-          branch: r.branch,
-          firstPrompt: r.content?.slice(0, 200) ?? "",
-          lastPrompt: "",
-          messages: 0,
-          date: r.date,
-          activity: [],
-        });
-      }
-    }
-    setSessions(Array.from(sessionMap.values()));
-    setHasMore(false);
-    setLoading(false);
-  };
-
-  // Called on every keystroke in the search input. If the user clears the
-  // box completely, immediately drop the frozen search result and re-fetch
-  // the live list so they don't stare at stale rows waiting for Enter.
-  const handleQueryInput = (val: string) => {
-    setQuery(val);
-    if (val === "" && committedQuery !== "") {
-      setCommittedQuery("");
-      fetchSessions(true);
-    }
-  };
-
-  useEffect(() => {
-    fetchSessions(true);
-  }, [project]);
-
-  // Real-time updates via SSE.
-  // - While a search has been committed (Enter / Search button), ignore
-  //   events so we don't disrupt the frozen result set. Typing without
-  //   committing still allows live updates — otherwise the list would
-  //   mysteriously freeze the moment the user touches the search box.
-  // - For both known and new sessions we re-fetch the single session from
-  //   the API so that firstPrompt, lastPrompt, and message count are all
-  //   up to date. The fresh row is placed at the top of the list.
-  useSSE((event) => {
-    if (committedQuery !== "") return;
-    if (event.type !== "session_updated") return;
-
-    const sessionId = event.sessionId as string | undefined;
-    if (!sessionId) return;
-
-    (async () => {
-      try {
-        const params = new URLSearchParams();
-        if (project) params.set("project", project);
-        params.set("limit", "1");
-        params.set("offset", "0");
-        const res = await fetch(`/api/sessions?${params}`);
-        const data: Session[] = await res.json();
-        const fresh = data[0];
-        if (!fresh || fresh.fullSessionId !== sessionId) return;
-        setSessions((prev) => {
-          const without = prev.filter((s) => s.fullSessionId !== sessionId);
-          return [fresh, ...without];
-        });
-      } catch {
-        // Swallow — the next manual refresh will pick it up.
-      }
-    })();
-  });
-
   const handleKeyDown = (e: KeyboardEvent) => {
-    if (e.key === "Enter") handleSearch();
+    if (e.key === "Enter") void runSearch(query);
   };
 
   // Infinite scroll sentinel
@@ -177,7 +61,7 @@ export function SessionList({ onSelect, settings }: { onSelect: (id: string) => 
       const observer = new IntersectionObserver(
         (entries) => {
           if (entries[0].isIntersecting && hasMore && !loadingRef.current) {
-            fetchSessions(false);
+            void fetchSessions(false);
           }
         },
         { rootMargin: "200px" }
@@ -199,7 +83,7 @@ export function SessionList({ onSelect, settings }: { onSelect: (id: string) => 
               ref={searchRef}
               type="text"
               value={query}
-              onInput={(e) => handleQueryInput((e.target as HTMLInputElement).value)}
+              onInput={(e) => setQuery((e.target as HTMLInputElement).value)}
               onKeyDown={handleKeyDown}
               placeholder="Search sessions..."
               class="w-full pl-9 pr-8 py-1.5 bg-bg-tertiary/50 border border-transparent rounded-md text-text placeholder-text-muted focus:outline-none focus:border-accent/40 focus:bg-bg text-sm transition-all"

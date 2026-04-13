@@ -21,19 +21,12 @@ function parseRoute(): { view: View; sessionId: string | null } {
 export function App() {
   const [view, setView] = useState<View>(() => parseRoute().view);
   const [selectedSession, setSelectedSession] = useState<string | null>(() => parseRoute().sessionId);
-  const [stats, setStats] = useState<unknown>(null);
   const [settings, setSettings] = useState<Settings>(loadSettings);
   const [showSettings, setShowSettings] = useState(false);
 
   useEffect(() => {
     applyAllSettings(settings);
   }, [settings.theme, settings.colorScheme]);
-
-  useEffect(() => {
-    fetch("/api/stats")
-      .then((r) => r.json())
-      .then(setStats);
-  }, []);
 
   useEffect(() => {
     const onPopState = () => {
@@ -111,7 +104,7 @@ export function App() {
           <ChatView sessionId={selectedSession} onBack={handleBack} settings={settings} />
         )}
         {view === "stats" && (
-          <StatsView data={stats} />
+          <StatsView />
         )}
       </main>
 
