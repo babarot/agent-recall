@@ -1,10 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useSSE } from "./use-sse";
-import {
-  installSyncHookScheduler,
-  renderHook,
-  restoreHookScheduler,
-} from "./test-utils";
+import { subscribeSSE, __resetSSEBusForTests } from "./sse-bus";
 
 /**
  * Mock EventSource implementation. Tests trigger `onopen` / `onmessage` /
@@ -40,55 +35,63 @@ class MockEventSource {
 }
 
 beforeEach(() => {
-  installSyncHookScheduler();
   MockEventSource.instances = [];
   // @ts-expect-error — overriding the global for tests
   globalThis.EventSource = MockEventSource;
   vi.useFakeTimers();
+  __resetSSEBusForTests();
 });
 
 afterEach(() => {
   vi.useRealTimers();
-  restoreHookScheduler();
+  __resetSSEBusForTests();
 });
 
-describe("useSSE", () => {
-  it("opens a single EventSource on mount", () => {
+describe("subscribeSSE", () => {
+  it("opens a single EventSource on first subscribe", () => {
     const handler = vi.fn();
-    const { unmount } = renderHook(() => useSSE(handler), undefined);
+    subscribeSSE(handler);
     expect(MockEventSource.instances.length).toBe(1);
     expect(MockEventSource.instances[0].url).toBe("/api/stream");
-    unmount();
   });
 
-  it("forwards parsed JSON frames to the handler", () => {
+  it("shares one EventSource across multiple subscribers", () => {
+    const a = vi.fn();
+    const b = vi.fn();
+    subscribeSSE(a);
+    subscribeSSE(b);
+    expect(MockEventSource.instances.length).toBe(1);
+
+    MockEventSource.instances[0].emit({ type: "session_updated", sessionId: "s1" });
+    expect(a).toHaveBeenCalledWith({ type: "session_updated", sessionId: "s1" });
+    expect(b).toHaveBeenCalledWith({ type: "session_updated", sessionId: "s1" });
+  });
+
+  it("forwards parsed JSON frames to all subscribers", () => {
     const handler = vi.fn();
-    const { unmount } = renderHook(() => useSSE(handler), undefined);
-    const es = MockEventSource.instances[0];
-    es.emit({ type: "session_updated", sessionId: "abc", status: "new" });
+    subscribeSSE(handler);
+    MockEventSource.instances[0].emit({ type: "session_updated", sessionId: "abc" });
     expect(handler).toHaveBeenCalledWith({
       type: "session_updated",
       sessionId: "abc",
-      status: "new",
     });
-    unmount();
   });
 
-  it("swallows malformed JSON frames without crashing", () => {
+  it("swallows malformed JSON frames without crashing other subscribers", () => {
     const handler = vi.fn();
-    const { unmount } = renderHook(() => useSSE(handler), undefined);
-    const es = MockEventSource.instances[0];
-    // Manually deliver a non-JSON frame.
-    es.onmessage?.(
-      new MessageEvent("message", { data: "not-json-{{{" }) as MessageEvent
+    subscribeSSE(handler);
+    MockEventSource.instances[0].onmessage?.(
+      new MessageEvent("message", { data: "not-json-{{{" })
     );
     expect(handler).not.toHaveBeenCalled();
-    unmount();
+    // Subsequent valid frames still get delivered
+    MockEventSource.instances[0].emit({ type: "ok" });
+    expect(handler).toHaveBeenCalledWith({ type: "ok" });
   });
 
-  it("reconnects with exponential backoff on error", async () => {
+  it("reconnects with exponential backoff on error", () => {
     const handler = vi.fn();
-    const { unmount } = renderHook(() => useSSE(handler), undefined);
+    subscribeSSE(handler);
     expect(MockEventSource.instances.length).toBe(1);
 
     // First failure → wait 1s → reconnect
@@ -103,28 +106,11 @@ describe("useSSE", () => {
     expect(MockEventSource.instances.length).toBe(2); // not yet
     vi.advanceTimersByTime(500);
     expect(MockEventSource.instances.length).toBe(3);
-
-    unmount();
-  });
-
-  it("closes the EventSource and cancels reconnect on unmount", () => {
-    const handler = vi.fn();
-    const { unmount } = renderHook(() => useSSE(handler), undefined);
-    const es = MockEventSource.instances[0];
-
-    // Schedule a reconnect, then unmount before it fires.
-    es.fail();
-    expect(es.closed).toBe(true);
-
-    unmount();
-    vi.advanceTimersByTime(10_000);
-    // No new EventSource was created after unmount.
-    expect(MockEventSource.instances.length).toBe(1);
   });
 
   it("resets backoff on successful reopen", () => {
     const handler = vi.fn();
-    const { unmount } = renderHook(() => useSSE(handler), undefined);
+    subscribeSSE(handler);
 
     // Fail twice to bump the backoff.
     MockEventSource.instances[0].fail();
@@ -138,7 +124,19 @@ describe("useSSE", () => {
     MockEventSource.instances[2].fail();
     vi.advanceTimersByTime(1_000);
     expect(MockEventSource.instances.length).toBe(4);
+  });
 
-    unmount();
+  it("unsubscribing stops delivery to that handler but keeps the connection", () => {
+    const a = vi.fn();
+    const b = vi.fn();
+    const offA = subscribeSSE(a);
+    subscribeSSE(b);
+
+    offA();
+    MockEventSource.instances[0].emit({ type: "ok" });
+    expect(a).not.toHaveBeenCalled();
+    expect(b).toHaveBeenCalled();
+    // The EventSource stays open — the bus is process-wide.
+    expect(MockEventSource.instances[0].closed).toBe(false);
   });
 });

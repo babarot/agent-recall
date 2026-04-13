@@ -1,31 +1,33 @@
-interface StatsData {
-  totalSessions: number;
-  totalMessages: number;
-  byProject: Array<{ project: string; sessions: number; messages: number }>;
-  byMonth: Array<{ month: string; sessions: number; messages: number }>;
-}
+import { useEffect } from "preact/hooks";
+import { stats as statsSignal, init } from "../store/sessions-store";
 
-export function StatsView({ data }: { data: unknown }) {
+export function StatsView() {
+  // Stats lives in the shared store so it survives navigation and
+  // retries fetch on remount if the first attempt failed.
+  useEffect(() => {
+    init();
+  }, []);
+
+  const data = statsSignal.value;
+
   if (!data) {
     return <div class="flex items-center justify-center h-full text-text-secondary">Loading...</div>;
   }
-
-  const stats = data as StatsData;
 
   return (
     <div class="h-full overflow-y-auto p-6">
       <div class="max-w-4xl mx-auto space-y-8">
         {/* Overview */}
         <div class="grid grid-cols-2 gap-4">
-          <StatCard label="Total Sessions" value={stats.totalSessions} />
-          <StatCard label="Total Messages" value={stats.totalMessages} />
+          <StatCard label="Total Sessions" value={data.totalSessions} />
+          <StatCard label="Total Messages" value={data.totalMessages} />
         </div>
 
         {/* By Project */}
         <section>
           <h2 class="text-base font-semibold text-text mb-3">By Project</h2>
           <div class="space-y-1">
-            {stats.byProject?.map((p) => (
+            {data.byProject?.map((p) => (
               <div key={p.project} class="flex items-center justify-between py-2 px-3 rounded-md hover:bg-bg-secondary">
                 <span class="text-sm text-text truncate mr-4">{p.project}</span>
                 <div class="flex gap-6 text-xs text-text-muted shrink-0">
@@ -41,7 +43,7 @@ export function StatsView({ data }: { data: unknown }) {
         <section>
           <h2 class="text-base font-semibold text-text mb-3">By Month</h2>
           <div class="space-y-1">
-            {stats.byMonth?.map((m) => (
+            {data.byMonth?.map((m) => (
               <div key={m.month} class="flex items-center justify-between py-2 px-3 rounded-md hover:bg-bg-secondary">
                 <span class="text-sm text-text font-mono">{m.month}</span>
                 <div class="flex gap-6 text-xs text-text-muted shrink-0">

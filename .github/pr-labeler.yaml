@@ -3,5 +3,6 @@ changelog/skip:
     - changed-files:
       - all-globs-to-all-files:
         - '!src/**'
+        - '!ui/**'
         - '!deno.json'
         - '!CHANGELOG.md'

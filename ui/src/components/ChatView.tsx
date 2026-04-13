@@ -5,7 +5,7 @@ import type { Settings } from "../lib/settings";
 import { renderMarkdown } from "../lib/markdown";
 import { ansiToHtml, hasAnsi } from "../lib/ansi";
 import { useKeyboardShortcut } from "../hooks/use-keyboard-shortcut";
-import { useSSE } from "../hooks/use-sse";
+import { subscribeSSE } from "../lib/sse-bus";
 import { useTailFollow } from "../hooks/use-tail-follow";
 
 interface SessionData {
@@ -87,21 +87,24 @@ export function ChatView({ sessionId, onBack, settings }: { sessionId: string; o
   // "was at bottom" state *before* firing the fetch so the post-render
   // effect in useTailFollow knows whether to scroll back down, and we
   // drop the response if a newer fetch has been issued in the meantime.
-  useSSE((event) => {
-    if (event.type !== "session_updated") return;
-    if (event.sessionId !== sessionId) return;
+  useEffect(() => {
+    const unsubscribe = subscribeSSE((event) => {
+      if (event.type !== "session_updated") return;
+      if (event.sessionId !== sessionId) return;
 
-    const seq = markIfAtBottom();
-    fetch(`/api/sessions/${sessionId}`)
-      .then((r) => r.json())
-      .then((d) => {
-        if (!isCurrentSeq(seq)) return;
-        setData(d);
-      })
-      .catch(() => {
-        // Transient fetch failure — next event will retry.
-      });
-  });
+      const seq = markIfAtBottom();
+      fetch(`/api/sessions/${sessionId}`)
+        .then((r) => r.json())
+        .then((d) => {
+          if (!isCurrentSeq(seq)) return;
+          setData(d);
+        })
+        .catch(() => {
+          // Transient fetch failure — next event will retry.
+        });
+    });
+    return unsubscribe;
+  }, [sessionId, markIfAtBottom, isCurrentSeq]);
 
   const copyId = () => {
     navigator.clipboard.writeText(sessionId);
