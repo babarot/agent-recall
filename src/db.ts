@@ -30,6 +30,23 @@ export class VaultDB {
     return row?.message_count ?? null;
   }
 
+  /** Return stored file metadata for change detection. */
+  getFileInfo(sessionId: string): {
+    messageCount: number;
+    fileMtime: number | null;
+    fileSize: number | null;
+  } | null {
+    const row = this.db
+      .prepare("SELECT message_count, file_mtime, file_size FROM sessions WHERE session_id = ?")
+      .get(sessionId) as { message_count: number; file_mtime: number | null; file_size: number | null } | undefined;
+    if (!row) return null;
+    return {
+      messageCount: row.message_count,
+      fileMtime: row.file_mtime,
+      fileSize: row.file_size,
+    };
+  }
+
   /** Insert a session record */
   insertSession(params: {
     sessionId: string;
@@ -42,11 +59,13 @@ export class VaultDB {
     startedAt: string;
     endedAt: string;
     claudeVersion: string;
+    fileMtime?: number | null;
+    fileSize?: number | null;
   }): void {
     this.db
       .prepare(
-        `INSERT INTO sessions (session_id, project, project_path, git_branch, first_prompt, summary, message_count, started_at, ended_at, claude_version)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO sessions (session_id, project, project_path, git_branch, first_prompt, summary, message_count, started_at, ended_at, claude_version, file_mtime, file_size)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         params.sessionId,
@@ -58,7 +77,9 @@ export class VaultDB {
         params.messageCount,
         params.startedAt,
         params.endedAt,
-        params.claudeVersion
+        params.claudeVersion,
+        params.fileMtime ?? null,
+        params.fileSize ?? null
       );
   }
 

@@ -10,6 +10,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     started_at     TEXT,
     ended_at       TEXT,
     claude_version TEXT,
+    file_mtime     REAL,
+    file_size      INTEGER,
     imported_at    TEXT DEFAULT (datetime('now'))
 );
 

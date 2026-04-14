@@ -101,9 +101,8 @@ Deno.test("importSingleSessionIncremental is idempotent on unchanged file", () =
       assertEquals(first!.status, "new");
 
       const second = importSingleSessionIncremental(db, filePath);
-      // Second import mirrors the same file — status is "resynced" since
-      // a session row already existed. Row count must not change.
-      assertEquals(second!.status, "resynced");
+      // Second import skips because file mtime/size haven't changed.
+      assertEquals(second!.status, "unchanged");
       assertEquals(db.sessionExists("sess-001"), 2);
 
       // turn_index sequence is preserved (same parser → same values).
@@ -209,7 +208,7 @@ Deno.test("importSingleSessionIncremental drops rows whose uuid disappeared from
 
 // --- Regression: message_count corruption recovery ---
 
-Deno.test("importSingleSessionIncremental recovers after message_count is corrupted", () => {
+Deno.test("importSingleSessionIncremental skips unchanged file even with corrupted message_count", () => {
   withTempSession(
     [
       userLine("one", "u1", "2026-01-01T00:00:00Z"),
@@ -220,13 +219,18 @@ Deno.test("importSingleSessionIncremental recovers after message_count is corrup
       importSingleSessionIncremental(db, filePath);
       assertEquals(db.sessionExists("sess-001"), 3);
 
-      // Simulate the stale-message_count state that previously caused
-      // silent turn_index collisions on the next import.
+      // Simulate the stale-message_count state.
       db.updateSessionCounts("sess-001", 0, "2026-01-01T00:00:02Z");
       assertEquals(db.sessionExists("sess-001"), 0);
 
-      // Next import must rebuild the DB from the file and heal the counter.
-      importSingleSessionIncremental(db, filePath);
+      // File hasn't changed, so re-import is skipped (mtime/size match).
+      const result = importSingleSessionIncremental(db, filePath);
+      assertEquals(result!.status, "unchanged");
+
+      // A file modification triggers a full resync that heals the counter.
+      Deno.writeTextFileSync(filePath, Deno.readTextFileSync(filePath), {});
+      const healed = importSingleSessionIncremental(db, filePath);
+      assertEquals(healed!.status, "resynced");
       assertEquals(db.sessionExists("sess-001"), 3);
       const { messages } = db.exportSession("sess-001");
       assertEquals(messages.length, 3);

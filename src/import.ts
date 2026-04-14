@@ -46,6 +46,33 @@ export function importSingleSessionIncremental(
   const project = basename(dirname(filePath));
   if (!sessionId || !project) return null;
 
+  // Stat the file for change detection before reading content.
+  let fileStat: Deno.FileInfo;
+  try {
+    fileStat = Deno.statSync(filePath);
+  } catch {
+    return null;
+  }
+  const fileMtime = fileStat.mtime?.getTime() ?? null;
+  const fileSize = fileStat.size;
+
+  // Skip re-import when the file hasn't changed since the last import.
+  const existing = db.getFileInfo(sessionId);
+  if (
+    existing &&
+    existing.fileMtime !== null &&
+    existing.fileMtime === fileMtime &&
+    existing.fileSize === fileSize
+  ) {
+    return {
+      status: "unchanged",
+      sessionId,
+      project,
+      addedMessages: 0,
+      totalMessages: existing.messageCount,
+    };
+  }
+
   let jsonlContent: string;
   try {
     jsonlContent = Deno.readTextFileSync(filePath);
@@ -56,14 +83,14 @@ export function importSingleSessionIncremental(
   const parsed = parseSession(jsonlContent, project, opts.indexEntry);
   if (!parsed) return null;
 
-  const hadExisting = db.sessionExists(sessionId) !== null;
+  const hadExisting = existing !== null;
 
   // Mirror the file: drop any existing state for this session, then insert
   // the freshly-parsed rows. resetSession runs in its own transaction; the
   // re-insert block is small enough that we don't bother adding another.
   db.resetSession(sessionId);
   db.insertSession({
-    sessionId: parsed.meta.sessionId,
+    sessionId,
     project: parsed.meta.project,
     projectPath: parsed.meta.projectPath,
     gitBranch: parsed.meta.gitBranch,
@@ -73,6 +100,8 @@ export function importSingleSessionIncremental(
     startedAt: parsed.meta.startedAt,
     endedAt: parsed.meta.endedAt,
     claudeVersion: parsed.meta.claudeVersion,
+    fileMtime,
+    fileSize,
   });
 
   for (const msg of parsed.messages) {
@@ -140,6 +169,8 @@ export function runImport(options: ImportOptions): void {
     return;
   }
 
+  console.log(`Syncing ${targets.length} sessions...`);
+
   const db = new VaultDB(options.dbPath);
 
   // Group by project so we load sessions-index.json at most once per project
@@ -152,6 +183,7 @@ export function runImport(options: ImportOptions): void {
 
   let importedSessions = 0;
   let importedMessages = 0;
+  let unchangedSessions = 0;
   let skippedSessions = 0;
 
   for (const [project, sessions] of byProject) {
@@ -167,6 +199,11 @@ export function runImport(options: ImportOptions): void {
         continue;
       }
 
+      if (result.status === "unchanged") {
+        unchangedSessions++;
+        continue;
+      }
+
       importedSessions++;
       importedMessages += result.addedMessages;
     }
@@ -174,9 +211,8 @@ export function runImport(options: ImportOptions): void {
 
   db.close();
 
-  console.log(
-    `Imported ${importedSessions} sessions (${importedMessages} messages).${
-      skippedSessions > 0 ? ` Skipped ${skippedSessions} unreadable files.` : ""
-    }`,
-  );
+  const parts = [`Imported ${importedSessions} sessions (${importedMessages} messages).`];
+  if (unchangedSessions > 0) parts.push(`${unchangedSessions} unchanged.`);
+  if (skippedSessions > 0) parts.push(`Skipped ${skippedSessions} unreadable files.`);
+  console.log(parts.join(" "));
 }
