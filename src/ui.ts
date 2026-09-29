@@ -194,7 +194,7 @@ export function runUI(options: UIOptions): UIHandle {
  * connection alive through HTTP/proxy idle timeouts.
  */
 function handleSSEStream(broadcaster: SSEBroadcaster): Response {
-  let keepAliveId: number | undefined;
+  let keepAliveId: ReturnType<typeof setInterval> | undefined;
   let ctl: ReadableStreamDefaultController<Uint8Array> | undefined;
 
   const body = new ReadableStream<Uint8Array>({

@@ -105,7 +105,7 @@ export async function startProjectWatcher(
   };
   opts.signal?.addEventListener("abort", onAbort, { once: true });
 
-  const pending = new Map<string, number>();
+  const pending = new Map<string, ReturnType<typeof setTimeout>>();
 
   const scheduleImport = (filePath: string): void => {
     const existing = pending.get(filePath);
