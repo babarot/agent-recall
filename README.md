@@ -76,13 +76,13 @@ deno run -A https://raw.githubusercontent.com/babarot/agent-recall/main/bin/inst
 
 ### Nix
 
-Each release publishes a package to [babarot/nur-packages](https://github.com/babarot/nur-packages). It installs the binary as `bin/agent-recall` and the Agent Skills under `share/skills/agent-recall/<name>`:
+Each release is published to [babarot/nur-packages](https://github.com/babarot/nur-packages).
 
-```nix
-inputs.babarot.url = "github:babarot/nur-packages";
-# then
-inputs.babarot.packages.${system}.agent-recall
+```bash
+nix profile install github:babarot/nur-packages#agent-recall
 ```
+
+The package also carries the [Agent Skills](#agent-skills) under `share/skills/agent-recall/<name>`.
 
 ### Build from source
 
