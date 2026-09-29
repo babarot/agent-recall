@@ -13,7 +13,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: denoland/setup-deno@e95548e56dfa95d4e1a28d6f422fafe75c4c26fb # v2.0.3
         with:
-          deno-version: v2.x
+          deno-version-file: .tool-versions
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
           node-version: 22
@@ -21,6 +21,10 @@ jobs:
       # Build UI assets (required by src/ui.ts import)
       - run: cd ui && npm ci && npm run build
       - run: deno task ui:embed
+
+      # Tests run with --no-check, so type errors only surface here (and
+      # in deno compile at release time)
+      - run: deno check src/
 
       # Backend tests
       - run: deno task test
