@@ -74,6 +74,16 @@ curl -fsSL https://raw.githubusercontent.com/babarot/agent-recall/main/bin/insta
 deno run -A https://raw.githubusercontent.com/babarot/agent-recall/main/bin/install.ts
 ```
 
+### Nix
+
+Each release is published to [babarot/nur-packages](https://github.com/babarot/nur-packages).
+
+```bash
+nix profile install github:babarot/nur-packages#agent-recall
+```
+
+The package also carries the [Agent Skills](#agent-skills) under `share/skills/agent-recall/<name>`.
+
 ### Build from source
 
 Requires [Deno](https://deno.com/) 2.x.
@@ -102,6 +112,16 @@ This exposes 4 tools to the agent:
 | `recall_stats` | Show archive statistics |
 
 Agents will call these tools on their own when they need context from past conversations.
+
+### Agent Skills
+
+[`skills/`](skills) holds Agent Skills that ship with each release (`agent-recall-skills.tar.gz`):
+
+| Skill | Description |
+|-------|-------------|
+| `recall` | `/recall` opens the web UI on the current session; `/recall list`, `/recall stats`, `/recall <session-id>` and `/recall stop` too |
+
+Link a skill directory into `~/.claude/skills` (Claude Code) or `~/.agents/skills` (Codex and others) to use it.
 
 ## Usage
 
