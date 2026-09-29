@@ -64,6 +64,9 @@ jobs:
           deno task compile:linux-arm
           deno task compile:linux-x86
 
+      - name: Package skills
+        run: tar -czf dist/agent-recall-skills.tar.gz skills
+
       - name: Generate checksums
         run: |
           cd dist
@@ -75,3 +78,42 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload "${{ needs.tagpr.outputs.tag }}" dist/* --clobber
+
+  publish-nix:
+    if: needs.tagpr.outputs.tag != ''
+    needs: [tagpr, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Publish Nix package to babarot/nur-packages
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NUR_GITHUB_TOKEN: ${{ secrets.NUR_GITHUB_TOKEN }}
+          TAG: ${{ needs.tagpr.outputs.tag }}
+        run: |
+          gh release download "$TAG" -p checksums.txt -D "$RUNNER_TEMP"
+          nur="$RUNNER_TEMP/nur-packages"
+          git clone --depth 1 "https://x-access-token:${NUR_GITHUB_TOKEN}@github.com/babarot/nur-packages.git" "$nur"
+
+          file="$nur/pkgs/agent-recall/default.nix"
+          prev=$(sed -n 's/^  version = "\(.*\)";$/\1/p' "$file" 2>/dev/null || true)
+          mkdir -p "$(dirname "$file")"
+          .github/scripts/nix-derivation.sh "$TAG" "$RUNNER_TEMP/checksums.txt" > "$file"
+
+          cd "$nur"
+          git add pkgs/agent-recall
+          if git diff --cached --quiet; then
+            echo "nothing to publish"
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -m "agent-recall: ${prev:+$prev -> }$TAG"
+          git push
