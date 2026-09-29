@@ -64,8 +64,8 @@ jobs:
           deno task compile:linux-arm
           deno task compile:linux-x86
 
-      - name: Package skills
-        run: tar -czf dist/agent-recall-skills.tar.gz skills
+      - name: Package the Claude Code plugin
+        run: tar -czf dist/agent-recall-plugin.tar.gz -C plugin .
 
       - name: Generate checksums
         run: |

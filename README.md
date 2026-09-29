@@ -82,7 +82,7 @@ Each release is published to [babarot/nur-packages](https://github.com/babarot/n
 nix profile install github:babarot/nur-packages#agent-recall
 ```
 
-The package also carries the [Agent Skills](#agent-skills) under `share/skills/agent-recall/<name>`.
+The package also carries the [Claude Code plugin](#claude-code-plugin) under `share/claude-plugin/agent-recall`.
 
 ### Build from source
 
@@ -113,15 +113,23 @@ This exposes 4 tools to the agent:
 
 Agents will call these tools on their own when they need context from past conversations.
 
-### Agent Skills
+### Claude Code plugin
 
-[`skills/`](skills) holds Agent Skills that ship with each release (`agent-recall-skills.tar.gz`):
+[`plugin/`](plugin) is a Claude Code plugin that wires agent-recall into Claude Code, with `agent-recall` on PATH:
 
-| Skill | Description |
-|-------|-------------|
-| `recall` | `/recall` opens the web UI on the current session; `/recall list`, `/recall stats`, `/recall <session-id>` and `/recall stop` too |
+| Component | What it does |
+|-----------|--------------|
+| MCP server | Runs `agent-recall mcp`, so there is no need for the `claude mcp add` above |
+| `SessionEnd` hook | Runs `agent-recall import` when a session ends |
+| `recall` skill | `/recall` opens the web UI on the current session; `/recall list`, `/recall stats`, `/recall <session-id>` and `/recall stop` too |
 
-Link a skill directory into `~/.claude/skills` (Claude Code) or `~/.agents/skills` (Codex and others) to use it.
+Each release ships it as `agent-recall-plugin.tar.gz`. A plugin directory saved under `~/.claude/skills/` loads as `agent-recall@skills-dir`, so with Nix:
+
+```bash
+ln -s ~/.nix-profile/share/claude-plugin/agent-recall ~/.claude/skills/agent-recall
+```
+
+For Codex and other agents, link just the skill: `plugin/skills/recall` into `~/.agents/skills/recall`.
 
 ## Usage
 

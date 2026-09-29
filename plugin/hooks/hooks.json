@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "agent-recall import 2>/dev/null",
+            "async": true
+          }
+        ]
+      }
+    ]
+  }
+}
