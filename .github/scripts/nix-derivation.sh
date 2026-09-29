@@ -46,9 +46,9 @@ let
     };
   };
   asset = assets.\${system} or (throw "agent-recall: unsupported system \${system}");
-  skills = fetchurl {
-    url = "\${base}/agent-recall-skills.tar.gz";
-    sha256 = "$(sha agent-recall-skills.tar.gz)";
+  plugin = fetchurl {
+    url = "\${base}/agent-recall-plugin.tar.gz";
+    sha256 = "$(sha agent-recall-plugin.tar.gz)";
   };
 in
 stdenvNoCC.mkDerivation {
@@ -65,11 +65,12 @@ stdenvNoCC.mkDerivation {
   # other fixups would break it
   dontFixup = true;
 
-  # Agent Skills land in share/skills/agent-recall/<name>/SKILL.md
+  # The Claude Code plugin (MCP server, SessionEnd hook, skills) lands in
+  # share/claude-plugin/agent-recall; its skills are under skills/<name>
   installPhase = ''
     install -Dm755 \$src \$out/bin/agent-recall
-    mkdir -p \$out/share/skills/agent-recall
-    tar -xzf \${skills} -C \$out/share/skills/agent-recall --strip-components=1
+    mkdir -p \$out/share/claude-plugin/agent-recall
+    tar -xzf \${plugin} -C \$out/share/claude-plugin/agent-recall
   '';
 
   meta = {

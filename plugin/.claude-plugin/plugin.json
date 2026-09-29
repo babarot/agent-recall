@@ -1,0 +1,9 @@
+{
+  "name": "agent-recall",
+  "description": "Search past coding agent sessions over MCP, archive each session when it ends, and open the web UI with /recall",
+  "version": "0.1.1",
+  "author": {
+    "name": "babarot"
+  },
+  "homepage": "https://github.com/babarot/agent-recall"
+}
