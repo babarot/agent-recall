@@ -228,7 +228,11 @@ Deno.test("importSingleSessionIncremental skips unchanged file even with corrupt
       assertEquals(result!.status, "unchanged");
 
       // A file modification triggers a full resync that heals the counter.
+      // Rewriting the same bytes keeps the size, and on a fast machine the
+      // mtime too, so move the mtime forward explicitly.
       Deno.writeTextFileSync(filePath, Deno.readTextFileSync(filePath), {});
+      const { mtime } = Deno.statSync(filePath);
+      Deno.utimeSync(filePath, new Date(), new Date(mtime!.getTime() + 1000));
       const healed = importSingleSessionIncremental(db, filePath);
       assertEquals(healed!.status, "resynced");
       assertEquals(db.sessionExists("sess-001"), 3);
