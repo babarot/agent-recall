@@ -438,8 +438,6 @@ func (m Model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case ".":
 		return m, m.toggleScope()
-	case "f":
-		return m, m.toggleSidebar()
 	}
 	if m.focus == focusFolders {
 		page := max(1, m.sidebarRows()-1)

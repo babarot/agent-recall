@@ -138,9 +138,9 @@ func TestDotTogglesThisFolder(t *testing.T) {
 func TestSidebarPicksAFolder(t *testing.T) {
 	f := newFolderFixture(t)
 	m := folderModel(t, config.Default().TUI, f, 140, 40).StartIn(f.repo)
-	m = press(t, m, "f")
+	m = update(t, update(t, m, tea.KeyPressMsg{Code: tea.KeyLeft}), tea.KeyPressMsg{Code: tea.KeyLeft})
 	if m.focus != focusFolders || !m.sidebarShown() {
-		t.Fatal("f should open the folder list and focus it")
+		t.Fatal("← ← should open the folder list and focus it")
 	}
 	s := screen(m)
 	for _, want := range []string{"Folders 2", "All", "notes"} {
@@ -183,20 +183,20 @@ func TestSidebarPicksAFolder(t *testing.T) {
 	if m.cursor != 1 || m.focus != focusList {
 		t.Fatalf("row click: cursor %d focus %v", m.cursor, m.focus)
 	}
-	if m = press(t, m, "f"); m.sidebarShown() || m.listLeft() != 0 {
-		t.Fatal("f should close the folder list")
+	if m = update(t, m, tea.KeyPressMsg{Code: tea.KeyRight}); m.sidebarShown() || m.listLeft() != 0 {
+		t.Fatal("→ should close the folder list")
 	}
 }
 
 func TestSidebarNeedsRoom(t *testing.T) {
 	f := newFolderFixture(t)
-	m := press(t, folderModel(t, config.Default().TUI, f, 90, 30), "f")
+	m := update(t, folderModel(t, config.Default().TUI, f, 90, 30), tea.KeyPressMsg{Code: tea.KeyLeft})
 	if m.sidebarShown() || !strings.Contains(screen(m), "needs 100 columns") {
 		t.Fatalf("a narrow terminal should not open the folder list:\n%s", screen(m))
 	}
 	cfg := config.Default().TUI
 	cfg.DetailPosition = config.DetailRight
-	if m := press(t, folderModel(t, cfg, f, 160, 30), "f"); m.sidebarShown() {
+	if m := update(t, folderModel(t, cfg, f, 160, 30), tea.KeyPressMsg{Code: tea.KeyLeft}); m.sidebarShown() {
 		t.Fatal("the folder list should not open beside a detail pane on the right")
 	}
 }
@@ -205,7 +205,7 @@ func TestSidebarIsRemembered(t *testing.T) {
 	f := newFolderFixture(t)
 	path := filepath.Join(t.TempDir(), "state.json")
 	m := folderModel(t, config.Default().TUI, f, 140, 40).RememberIn(path)
-	next, cmd := m.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
+	next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
 	m = next.(Model)
 	if cmd != nil {
 		cmd()
@@ -222,7 +222,7 @@ func TestSidebarIsRemembered(t *testing.T) {
 func TestSidebarFitsTheTerminal(t *testing.T) {
 	f := newFolderFixture(t)
 	for _, w := range []int{100, 120, 200} {
-		m := press(t, folderModel(t, config.Default().TUI, f, w, 24).StartIn(f.repo), "f")
+		m := update(t, folderModel(t, config.Default().TUI, f, w, 24).StartIn(f.repo), tea.KeyPressMsg{Code: tea.KeyLeft})
 		lines := strings.Split(m.render(), "\n")
 		if len(lines) > 24 {
 			t.Errorf("%d: %d lines", w, len(lines))
@@ -260,5 +260,31 @@ func TestArrowsOpenEnterLeaveAndCloseTheSidebar(t *testing.T) {
 	m = update(t, folderModel(t, config.Default().TUI, f, 90, 30), left)
 	if m.sidebarShown() || !strings.Contains(screen(m), "needs 100 columns") {
 		t.Fatalf("narrow:\n%s", screen(m))
+	}
+}
+
+func TestFocusedSideStandsOut(t *testing.T) {
+	f := newFolderFixture(t)
+	left := tea.KeyPressMsg{Code: tea.KeyLeft}
+	m := update(t, update(t, folderModel(t, config.Default().TUI, f, 140, 40), left), left)
+	line := func(m Model, i int) string { return strings.Split(m.render(), "\n")[i] }
+	accent := func(m Model, w int) string { return m.st.id.Render(strings.Repeat("╌", w)) }
+	selBar := func(m Model) bool { return strings.Contains(ansi.Strip(line(m, m.listTop())), "│▎") }
+
+	// The folder list focused: its rule takes the accent, the sessions' does
+	// not, and only it shows the selection bar.
+	if r := line(m, 1); !strings.Contains(r, accent(m, sidebarWidth)) || strings.Contains(r, accent(m, m.listWidth())) {
+		t.Errorf("folder list focused, rule line %q", r)
+	}
+	if selBar(m) {
+		t.Error("the sessions should not show the selection bar")
+	}
+	// The sessions focused: the other way round.
+	m = update(t, m, tea.KeyPressMsg{Code: tea.KeyRight})
+	if r := line(m, 1); strings.Contains(r, accent(m, sidebarWidth)) || !strings.Contains(r, accent(m, m.listWidth())) {
+		t.Errorf("sessions focused, rule line %q", r)
+	}
+	if !selBar(m) {
+		t.Error("the sessions should show the selection bar")
 	}
 }

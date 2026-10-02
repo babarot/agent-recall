@@ -139,7 +139,7 @@ recall version
 | `/` | Filter by title, folder, branch or ID; `in:<folder>` keeps the sessions of folders whose name contains it, over the folder the list is narrowed to (while the folder suggestions show, `↑` `↓` and `Enter` pick one, `Tab` completes the highlighted one, `Esc` closes them; the mouse clicks and scrolls them too); `Esc` clears the filter |
 | `s` | Sort by ended, started, message count or size |
 | `.` | Switch between the folder `recall` was started in and all folders |
-| `f` / `←` `→` | Show or hide the folder list. `←` opens it and, pressed again, moves into it; `↑` `↓` there pick a folder; `→` (or `Enter`) returns to the sessions, and `→` again closes it |
+| `←` `→` | Show or hide the folder list. `←` opens it and, pressed again, moves into it; `↑` `↓` there pick a folder; `→` (or `Enter`) returns to the sessions, and `→` again closes it. The focused side has accent rules and the selection bar |
 | `Tab` | Show or hide the detail pane |
 | `+` `-` | Make the detail pane taller or shorter |
 | `]` `[` | Move focus to the next or previous frame of the detail pane (and the folder list when it is shown); `↑` `↓`, `j` `k`, PgUp, PgDn, `g` and `G` then scroll it, `Esc` returns to the list |
@@ -147,7 +147,7 @@ recall version
 
 The title is the session's `/rename` name, or else the title Claude Code generated, or else its first prompt.
 
-Started inside a repository (or one of its worktrees, or a subdirectory), `recall` lists only that repository's sessions, with a Worktree column in place of Folder; `.` shows every folder again. A folder with no sessions starts with all of them. The folder list on the left (`f`) narrows the list to any folder: a repository together with its worktrees, or a directory outside git. It needs a terminal at least 100 columns wide with the detail pane below, and whether it is open is remembered.
+Started inside a repository (or one of its worktrees, or a subdirectory), `recall` lists only that repository's sessions, with a Worktree column in place of Folder; `.` shows every folder again. A folder with no sessions starts with all of them. The folder list on the left (`←`) narrows the list to any folder: a repository together with its worktrees, or a directory outside git. It needs a terminal at least 100 columns wide with the detail pane below, and whether it is open is remembered.
 
 The detail pane has three frames: Conversation (the first request, a `⋮ N messages` marker for what lies between, and the latest messages, always including the last thing you said), What was done (activity over the session, then bars for the tools used most and the commands run most, and the edited files grouped by repository) and Details (when, how much, where: times, counts, size, branch, ID, version, and the folder's full path). Below the list, Details sits under Conversation in a few wide lines and What was done runs down the right. A taller pane shows more of the conversation and of What was done. The height you pick is remembered in `~/.local/state/claude-recall/state.json`.
 

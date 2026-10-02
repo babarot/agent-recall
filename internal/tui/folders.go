@@ -16,7 +16,7 @@ import (
 // The list can be narrowed to one folder: a repository with its worktrees,
 // or a directory outside git. It starts narrowed to the folder the TUI was
 // started in (tui.scope), `.` switches between that folder and all of them,
-// and the sidebar (`f`) picks any other.
+// and the sidebar (← to open, → to close) picks any other.
 
 const (
 	// herdrGroup marks the group of a removed herdr worktree, whose path
@@ -151,14 +151,6 @@ func (m Model) listLeft() int {
 	return 0
 }
 
-// toggleSidebar opens the sidebar, focused, or closes it.
-func (m *Model) toggleSidebar() tea.Cmd {
-	if m.sidebarShown() {
-		return m.closeSidebar()
-	}
-	return m.openSidebar(true)
-}
-
 // openSidebar shows the sidebar, moving the focus to it when focus is set.
 func (m *Model) openSidebar(focus bool) tea.Cmd {
 	was := m.sidebar
@@ -252,8 +244,14 @@ func (m *Model) pickFolder(i int) {
 func (m Model) renderSidebar(n int) []string {
 	w := sidebarWidth
 	focused := m.focus == focusFolders
-	title := m.st.colHdr.Render("  Folders") + m.st.muted.Render(fmt.Sprintf(" %d", len(m.folders)))
-	lines := []string{m.rule(w), title, m.rule(w)}
+	// Focused, its rules and title take the accent, as a focused frame's
+	// border does.
+	rule, name := m.st.rule, m.st.colHdr
+	if focused {
+		rule, name = m.st.id, m.st.key
+	}
+	title := name.Render("  Folders") + m.st.muted.Render(fmt.Sprintf(" %d", len(m.folders)))
+	lines := []string{rule.Render(strings.Repeat("╌", w)), title, rule.Render(strings.Repeat("╌", w))}
 	sel := m.sidebarIndex()
 	for i := m.sideOffset; i <= len(m.folders) && len(lines) < n; i++ {
 		name, count := "All", len(m.rows)

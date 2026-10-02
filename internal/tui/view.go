@@ -166,7 +166,18 @@ func (m Model) renderTable() []string {
 		}
 		return m.st.colHdr.Render(p.col.header)
 	}, plain)
-	lines := []string{m.rule(lw), head, m.rule(lw)}
+	// Beside the folder list, the focused side's rules take the accent and
+	// only it marks its selection with the bar.
+	rule := m.rule(lw)
+	if m.sidebarShown() && m.focus == focusList {
+		rule = m.st.id.Render(strings.Repeat("╌", lw))
+		head = m.st.key.Render(ansi.Strip(head))
+	}
+	lines := []string{rule, head, rule}
+	bar := m.st.bar.Render("▎")
+	if m.focus == focusFolders {
+		bar = m.st.selected.Render(" ")
+	}
 
 	h := m.listHeight()
 	now := m.now()
@@ -178,7 +189,7 @@ func (m Model) renderTable() []string {
 		pad, indent := plain, "  "
 		if sel {
 			pad = m.st.selected
-			indent = m.st.bar.Render("▎") + m.st.selected.Render(" ")
+			indent = bar + m.st.selected.Render(" ")
 		}
 		lines = append(lines, renderRow(cols, lw, indent, func(p placed) string { return p.col.cell(ctx, r, p.width) }, pad))
 	}
@@ -282,7 +293,7 @@ func (m Model) renderHelp() string {
 		pairs = [][2]string{{"space", "back"}, {"↑↓", "scroll"}, {"enter", "resume"}, {"y", "copy id"}, {"Y", "copy cmd"}}
 	case modeList:
 		if m.focus == focusFolders {
-			pairs = [][2]string{{"↑↓", "folder"}, {"enter", "list"}, {"[ ]", "next frame"}, {"f", "close"}, {".", "this folder"}, {"q", "quit"}}
+			pairs = [][2]string{{"↑↓", "folder"}, {"→", "sessions"}, {"[ ]", "next frame"}, {".", "this folder"}, {"q", "quit"}}
 			break
 		}
 		if m.focus != focusList {
@@ -297,7 +308,10 @@ func (m Model) renderHelp() string {
 			here = "all folders"
 		}
 		pairs = [][2]string{{"enter", "resume"}, {"space", "preview"}, {"y", "copy id"}, {"Y", "copy cmd"},
-			{"tab", "detail"}, {"+/-", "resize"}, {"/", "filter"}, {".", here}, {"f", "folders"}, {"s", "sort"}, {"q", "quit"}}
+			{"tab", "detail"}, {"+/-", "resize"}, {"/", "filter"}, {".", here}, {"←", "folders"}, {"s", "sort"}, {"q", "quit"}}
+		if m.sidebarShown() {
+			pairs[len(pairs)-3] = [2]string{"→", "close folders"}
+		}
 	}
 	parts := make([]string, len(pairs))
 	for i, p := range pairs {
