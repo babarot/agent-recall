@@ -226,3 +226,46 @@ func TestMigrationAddsTitleToAnExistingArchive(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestSessionDetail(t *testing.T) {
+	d := newTestDB(t)
+	seedSession(t, d, "s1", "p", "/p")
+	seedMessage(t, d, "s1", "u1", "user", "fix the login bug", "2026-01-01T00:00:00Z", 0)
+	seedMessage(t, d, "s1", "a1", "assistant", "looking", "2026-01-01T00:01:00Z", 1)
+	tool := func(uuid, name, input string, turn int) {
+		t.Helper()
+		if _, err := d.sql.Exec(`INSERT INTO messages (session_id, uuid, role, block_type, block_index, content, tool_name, tool_input, timestamp, turn_index)
+			VALUES ('s1', ?, 'assistant', 'tool_use', 0, ?, ?, ?, '2026-01-01T00:02:00Z', ?)`, uuid, name, name, input, turn); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tool("t1", "Edit", `{"file_path":"/p/a.go"}`, 2)
+	tool("t2", "Edit", `{"file_path":"/p/a.go"}`, 3)
+	tool("t3", "Write", `{"file_path":"/p/b.go"}`, 4)
+	tool("t4", "Bash", `{"command":"go test ./..."}`, 5)
+	tool("t5", "Bash", `{"command":"git status"}`, 6)
+	seedMessage(t, d, "s1", "u2", "user", "thanks", "2026-01-01T00:10:00Z", 7)
+
+	got, err := d.SessionDetail("s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.You != 2 || got.Claude != 1 || got.Tools != 5 {
+		t.Errorf("counts %+v", got)
+	}
+	if len(got.TopTools) == 0 || got.TopTools[0] != (Count{"Bash", 2}) && got.TopTools[0] != (Count{"Edit", 2}) {
+		t.Errorf("top tools %+v", got.TopTools)
+	}
+	if got.FileCount != 2 || got.Files[0] != (Count{"/p/a.go", 2}) {
+		t.Errorf("files %+v", got.Files)
+	}
+	if len(got.Commands) != 2 || got.Commands[0] != "git status" {
+		t.Errorf("commands newest first: %+v", got.Commands)
+	}
+	if got.First == nil || got.First.Content != "fix the login bug" || got.Tail[len(got.Tail)-1].Content != "thanks" {
+		t.Errorf("conversation %+v %+v", got.First, got.Tail)
+	}
+	if len(got.Activity) != 24 {
+		t.Errorf("activity %v", got.Activity)
+	}
+}

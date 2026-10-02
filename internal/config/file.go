@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/babarot/claude-recall/internal/theme"
 )
 
 // Detail pane positions in the TUI.
@@ -16,6 +18,10 @@ const (
 	DetailRight  = "right"
 	DetailAuto   = "auto" // right when the terminal is at least DetailAutoWidth wide
 )
+
+// MinDetailHeight is the smallest detail pane, in lines, that still shows
+// each of its three frames.
+const MinDetailHeight = 10
 
 // File is the user's config file, ~/.config/claude-recall/config.toml.
 type File struct {
@@ -29,11 +35,18 @@ type TUI struct {
 	// DetailAutoWidth is the terminal width, in columns, at which "auto"
 	// moves the detail pane to the right.
 	DetailAutoWidth int `toml:"detail_auto_width"`
+	// Theme is a color scheme name from theme.Names, or "auto" to follow
+	// the terminal background.
+	Theme string `toml:"theme"`
+	// DetailHeight is the detail pane's height in lines when it sits below
+	// the list, until it is resized with + / - or the mouse; the TUI then
+	// remembers that height instead.
+	DetailHeight int `toml:"detail_height"`
 }
 
 // Default returns the settings used when the config file is absent.
 func Default() File {
-	return File{TUI: TUI{DetailPosition: DetailBottom, DetailAutoWidth: 160}}
+	return File{TUI: TUI{DetailPosition: DetailBottom, DetailAutoWidth: 160, Theme: theme.Auto, DetailHeight: 16}}
 }
 
 // FilePath returns the config file location, honoring XDG_CONFIG_HOME.
@@ -60,6 +73,12 @@ func Load(path string) (File, error) {
 	default:
 		return File{}, fmt.Errorf("%s: tui.detail_position must be %q, %q or %q, got %q",
 			path, DetailBottom, DetailRight, DetailAuto, cfg.TUI.DetailPosition)
+	}
+	if !theme.Valid(cfg.TUI.Theme) {
+		return File{}, fmt.Errorf("%s: tui.theme must be one of %s, got %q", path, theme.NamesString(), cfg.TUI.Theme)
+	}
+	if cfg.TUI.DetailHeight < MinDetailHeight {
+		return File{}, fmt.Errorf("%s: tui.detail_height must be at least %d", path, MinDetailHeight)
 	}
 	if cfg.TUI.DetailAutoWidth <= 0 {
 		return File{}, fmt.Errorf("%s: tui.detail_auto_width must be positive", path)

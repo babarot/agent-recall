@@ -139,9 +139,15 @@ recall version
 | `/` | Filter by title, folder, branch or ID; `Esc` clears it |
 | `s` | Sort by ended, started, message count or size |
 | `Tab` | Show or hide the detail pane |
+| `+` `-` | Make the detail pane taller or shorter |
+| `]` `[` | Move focus to the next or previous frame of the detail pane; `↑` `↓`, `j` `k`, PgUp, PgDn, `g` and `G` then scroll it, `Esc` returns to the list |
 | `q` | Quit |
 
 The title is the session's `/rename` name, or else the title Claude Code generated, or else its first prompt.
+
+The detail pane has three frames: Conversation (the first request, a `⋮ N messages` marker for what lies between, and the latest messages, always including the last thing you said), What was done (activity over the session, then bars for the tools used most and the commands run most, and the edited files grouped by repository) and Details (when, how much, where: times, counts, size, branch, ID, version, and the folder's full path). Below the list, Details sits under Conversation in a few wide lines and What was done runs down the right. A taller pane shows more of the conversation and of What was done. The height you pick is remembered in `~/.local/state/claude-recall/state.json`.
+
+With the mouse: click a session to select it, click a frame to focus it, scroll the wheel over the list or over a frame, and drag the pane's top edge (or the row count line just above it) to resize the pane. While the TUI has the mouse, most terminals still select text when you hold Shift (Option in iTerm2) while dragging.
 
 `~/.config/claude-recall/config.toml` (or `$XDG_CONFIG_HOME/claude-recall/config.toml`):
 
@@ -151,7 +157,15 @@ The title is the session's `/rename` name, or else the title Claude Code generat
 # on the right when the terminal is at least detail_auto_width columns wide.
 detail_position = "bottom"
 detail_auto_width = 160
+# Initial height of the detail pane below the list, in lines (at least 10).
+detail_height = 16
+# Color scheme: "auto" (default) picks catppuccin-mocha on a dark terminal and
+# catppuccin-latte on a light one. Also: tokyo-night, dracula, nord,
+# gruvbox-dark, and ansi (the terminal's own 16 colors).
+theme = "auto"
 ```
+
+The look follows [cc360](https://github.com/achton/cc360). A worktree that has since been removed is shown struck through, with its repository and name guessed from where herdr (`~/.herdr/worktrees/<repo>/worktree-<name>`) or Claude Code (`<repo>/.claude/worktrees/<name>`) put it.
 
 ### Import
 

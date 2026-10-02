@@ -17,6 +17,7 @@ import (
 
 	"github.com/babarot/claude-recall/internal/config"
 	"github.com/babarot/claude-recall/internal/db"
+	"github.com/babarot/claude-recall/internal/theme"
 	"github.com/babarot/claude-recall/internal/worktree"
 )
 
@@ -27,9 +28,10 @@ type Resume struct {
 	SessionID string
 }
 
-// PreviewSource loads the conversation shown by the preview.
-type PreviewSource interface {
+// Source loads what the preview and the detail pane show about a session.
+type Source interface {
 	SessionPreview(sessionID string, head, tail int) (db.Preview, error)
+	SessionDetail(sessionID string) (*db.Detail, error)
 }
 
 type mode int
@@ -60,10 +62,18 @@ const (
 
 type toastExpired struct{ id int }
 
+type toastKind int
+
+const (
+	toastInfo toastKind = iota
+	toastOK
+	toastWarn
+)
+
 // Model is the Bubble Tea model of the session list.
 type Model struct {
 	cfg     config.TUI
-	source  PreviewSource
+	source  Source
 	home    string
 	now     func() time.Time
 	st      styles
@@ -81,15 +91,30 @@ type Model struct {
 	preview    viewport.Model
 	previewFor string // session ID the preview shows
 
-	toast   string
-	toastID int
+	// details caches the detail pane's data per session ID.
+	details map[string]*db.Detail
+	// detailH is the height of the detail pane below the list; statePath
+	// is where a changed height is remembered.
+	detailH   int
+	statePath string
+	dragging  bool
+
+	// focus is the session list or a frame of the detail pane; scroll is
+	// each frame's offset, reset when another session is selected.
+	focus     focus
+	scroll    [numFocus]int
+	scrollFor string
+
+	toast     string
+	toastKind toastKind
+	toastID   int
 
 	// Result is set when the user picks a session to resume.
 	Result *Resume
 }
 
 // New builds the model from the archived sessions.
-func New(sessions []db.Session, source PreviewSource, cfg config.TUI) Model {
+func New(sessions []db.Session, source Source, cfg config.TUI) Model {
 	home, _ := os.UserHomeDir()
 	resolver := worktree.NewResolver()
 	rows := make([]row, len(sessions))
@@ -106,14 +131,76 @@ func New(sessions []db.Session, source PreviewSource, cfg config.TUI) Model {
 		source:     source,
 		home:       home,
 		now:        time.Now,
-		st:         newStyles(true),
+		st:         newStyles(theme.Get(cfg.Theme, true)),
 		rows:       rows,
 		detailOpen: true,
 		filter:     fi,
 		preview:    viewport.New(),
+		details:    map[string]*db.Detail{},
+		detailH:    max(config.MinDetailHeight, cfg.DetailHeight),
 	}
 	m.refresh()
 	return m
+}
+
+// RememberIn makes the model keep its state (the detail pane height) in the
+// state file at path, starting from what is saved there.
+func (m Model) RememberIn(path string) Model {
+	m.statePath = path
+	if st := config.LoadState(path); st.DetailHeight >= config.MinDetailHeight {
+		m.detailH = st.DetailHeight
+	}
+	return m
+}
+
+func (m *Model) saveState() tea.Cmd {
+	if m.statePath == "" {
+		return nil
+	}
+	path, st := m.statePath, config.State{DetailHeight: m.detailH}
+	return func() tea.Msg {
+		_ = config.SaveState(path, st)
+		return nil
+	}
+}
+
+// maxDetailH is the tallest pane that leaves the list a few rows.
+func (m Model) maxDetailH() int {
+	return max(config.MinDetailHeight, m.height-m.chromeLines()-minListRows)
+}
+
+func (m *Model) resizeDetail(h int) {
+	m.detailH = max(config.MinDetailHeight, min(h, m.maxDetailH()))
+	m.clamp()
+}
+
+// paneTop is the screen row of the detail pane's top edge, or -1.
+func (m Model) paneTop() int {
+	if m.paneHeight() == 0 {
+		return -1
+	}
+	return m.height - footerLines - m.paneHeight()
+}
+
+// loadDetail fetches the detail pane's data for the selected session the
+// first time it is shown.
+func (m *Model) loadDetail() {
+	r := m.current()
+	if !m.detailOpen || r == nil {
+		m.focus = focusList
+		return
+	}
+	if r.s.ID != m.scrollFor {
+		m.scroll, m.scrollFor = [numFocus]int{}, r.s.ID
+	}
+	if _, ok := m.details[r.s.ID]; ok {
+		return
+	}
+	d, err := m.source.SessionDetail(r.s.ID)
+	if err != nil {
+		d = nil
+	}
+	m.details[r.s.ID] = d
 }
 
 func (m Model) Init() tea.Cmd { return tea.RequestBackgroundColor }
@@ -183,8 +270,8 @@ func (m *Model) clamp() {
 	m.offset = max(0, min(m.offset, max(0, len(m.visible)-h)))
 }
 
-func (m *Model) showToast(text string) tea.Cmd {
-	m.toast = text
+func (m *Model) showToast(kind toastKind, text string) tea.Cmd {
+	m.toast, m.toastKind = text, kind
 	m.toastID++
 	id := m.toastID
 	return tea.Tick(toastFor, func(time.Time) tea.Msg { return toastExpired{id} })
@@ -231,23 +318,64 @@ func (m *Model) action(key string) (tea.Cmd, bool) {
 	switch key {
 	case "enter":
 		if r.gone {
-			return m.showToast("Folder no longer exists: " + tildePath(r.s.ProjectPath, m.home)), true
+			return m.showToast(toastWarn, "Folder no longer exists: "+tildePath(r.s.ProjectPath, m.home)), true
 		}
 		m.Result = &Resume{Dir: r.s.ProjectPath, SessionID: r.s.ID}
 		return tea.Quit, true
 	case "y":
-		return tea.Batch(copyCmd(r.s.ID), m.showToast("Copied session ID "+r.s.ID)), true
+		return tea.Batch(copyCmd(r.s.ID), m.showToast(toastOK, "Copied session ID "+r.s.ID)), true
 	case "Y":
 		cmd := resumeCommand(r)
-		return tea.Batch(copyCmd(cmd), m.showToast("Copied "+cmd)), true
+		return tea.Batch(copyCmd(cmd), m.showToast(toastOK, "Copied "+cmd)), true
 	}
 	return nil, false
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.update(msg)
+	if nm, ok := next.(Model); ok {
+		nm.loadDetail()
+		return nm, cmd
+	}
+	return next, cmd
+}
+
+func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.MouseClickMsg:
+		if msg.Button == tea.MouseLeft && m.mode == modeList {
+			m.click(msg.X, msg.Y)
+		}
+		return m, nil
+	case tea.MouseMotionMsg:
+		if m.dragging {
+			m.resizeDetail(m.height - footerLines - msg.Y)
+		}
+		return m, nil
+	case tea.MouseReleaseMsg:
+		if m.dragging {
+			m.dragging = false
+			return m, m.saveState()
+		}
+		return m, nil
+	case tea.MouseWheelMsg:
+		if m.mode == modePreview {
+			var cmd tea.Cmd
+			m.preview, cmd = m.preview.Update(msg)
+			return m, cmd
+		}
+		step := 1
+		if msg.Button == tea.MouseWheelUp {
+			step = -1
+		}
+		if f := m.frameAt(msg.X, msg.Y); f != focusList {
+			m.scrollFrame(f, 3*step)
+		} else {
+			m.move(step)
+		}
+		return m, nil
 	case tea.BackgroundColorMsg:
-		m.st = newStyles(msg.IsDark())
+		m.st = newStyles(theme.Get(m.cfg.Theme, msg.IsDark()))
 		return m, nil
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -279,6 +407,46 @@ func (m Model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	switch key {
+	case "]":
+		m.focus = (m.focus + 1) % numFocus
+		if !m.detailOpen {
+			m.focus = focusList
+		}
+		return m, nil
+	case "[":
+		m.focus = (m.focus + numFocus - 1) % numFocus
+		if !m.detailOpen {
+			m.focus = focusList
+		}
+		return m, nil
+	}
+	if m.focus != focusList {
+		if rects, ok := m.paneRects(); ok {
+			page := max(1, rects[m.focus].h-4)
+			switch key {
+			case "esc":
+				m.focus = focusList
+			case "down", "j", "ctrl+n":
+				m.scrollFrame(m.focus, 1)
+			case "up", "k", "ctrl+p":
+				m.scrollFrame(m.focus, -1)
+			case "pgdown", "ctrl+f", "ctrl+d":
+				m.scrollFrame(m.focus, page)
+			case "pgup", "ctrl+b", "ctrl+u":
+				m.scrollFrame(m.focus, -page)
+			case "home", "g":
+				m.scrollFrame(m.focus, -1<<20)
+			case "end", "G":
+				m.scrollFrame(m.focus, 1<<20)
+			default:
+				goto list
+			}
+			return m, nil
+		}
+		m.focus = focusList
+	}
+list:
+	switch key {
 	case "q", "ctrl+c":
 		return m, tea.Quit
 	case "down", "j", "ctrl+n":
@@ -295,7 +463,14 @@ func (m Model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.move(len(m.visible))
 	case "tab":
 		m.detailOpen = !m.detailOpen
+		m.focus = focusList
 		m.clamp()
+	case "+", "=":
+		m.resizeDetail(m.detailH + 2)
+		return m, m.saveState()
+	case "-":
+		m.resizeDetail(m.detailH - 2)
+		return m, m.saveState()
 	case "s":
 		m.sortIdx = (m.sortIdx + 1) % len(sorts)
 		m.refresh()
@@ -374,7 +549,7 @@ func (m *Model) openPreview() tea.Cmd {
 	}
 	p, err := m.source.SessionPreview(r.s.ID, previewHead, previewTail)
 	if err != nil {
-		return m.showToast("Could not load the conversation: " + err.Error())
+		return m.showToast(toastWarn, "Could not load the conversation: "+err.Error())
 	}
 	m.mode = modePreview
 	m.previewFor = r.s.ID
@@ -387,4 +562,44 @@ func (m *Model) openPreview() tea.Cmd {
 func (m *Model) sizePreview() {
 	m.preview.SetWidth(m.width)
 	m.preview.SetHeight(max(1, m.height-previewChrome))
+}
+
+// listTop is the screen row of the first session row.
+func (m Model) listTop() int {
+	top := 1 + 3 // header bar, rule, column headers, rule
+	if m.filterShown() {
+		top++
+	}
+	return top
+}
+
+// frameAt returns the frame under a screen cell, or focusList.
+func (m Model) frameAt(x, y int) focus {
+	if rects, ok := m.paneRects(); ok {
+		for f := focusConv; f < numFocus; f++ {
+			if rects[f].contains(x, y) {
+				return f
+			}
+		}
+	}
+	return focusList
+}
+
+// click handles a left click in the list: the pane's top edge (or the row
+// count line just above it) starts a resize, a frame takes focus, a session
+// row is selected.
+func (m *Model) click(x, y int) {
+	if top := m.paneTop(); top >= 0 && (y == top || y == top-1) {
+		m.dragging = true
+		return
+	}
+	if f := m.frameAt(x, y); f != focusList {
+		m.focus = f
+		return
+	}
+	if i := y - m.listTop(); x < m.listWidth() && i >= 0 && i < m.listHeight() && m.offset+i < len(m.visible) {
+		m.cursor = m.offset + i
+		m.focus = focusList
+		m.clamp()
+	}
 }
