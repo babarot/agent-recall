@@ -131,11 +131,46 @@ func TestListIsSortedByEndedFirst(t *testing.T) {
 	}
 }
 
-func TestSortCycles(t *testing.T) {
+func TestSortMenu(t *testing.T) {
 	m, _ := newTestModel(t, config.Default().TUI, 140, 30)
-	m = press(t, m, "s", "s") // Ended -> Started -> Msgs
-	if sorts[m.sortIdx].name != "Msgs" || m.current().s.MessageCount != 50 {
-		t.Fatalf("sort %s, first %+v", sorts[m.sortIdx].name, m.current().s)
+	m = press(t, m, "s")
+	s := screen(m)
+	for _, want := range []string{"Sort by", "● Ended", "Started", "Msgs", "most messages first", "Size"} {
+		if !m.sortMenu || !strings.Contains(s, want) {
+			t.Fatalf("menu lacks %q:\n%s", want, s)
+		}
+	}
+	// Moving picks nothing until Enter.
+	m = press(t, m, "j", "j")
+	if sorts[m.sortIdx].name != "Ended" || m.sortSel != 2 {
+		t.Fatalf("j j: sort %s, highlight %d", sorts[m.sortIdx].name, m.sortSel)
+	}
+	m = press(t, m, "enter")
+	if m.sortMenu || sorts[m.sortIdx].name != "Msgs" || m.current().s.MessageCount != 50 {
+		t.Fatalf("enter: menu %v sort %s first %+v", m.sortMenu, sorts[m.sortIdx].name, m.current().s)
+	}
+	// A number applies its order; Esc leaves things as they were.
+	if m = press(t, m, "s", "4"); sorts[m.sortIdx].name != "Size" || m.sortMenu {
+		t.Fatalf("4: sort %s", sorts[m.sortIdx].name)
+	}
+	if m = press(t, m, "s", "j", "esc"); sorts[m.sortIdx].name != "Size" || m.sortMenu {
+		t.Fatalf("esc: sort %s", sorts[m.sortIdx].name)
+	}
+	// A click on an order applies it.
+	m = press(t, m, "s")
+	r := m.sortMenuRect()
+	m = update(t, m, tea.MouseClickMsg{X: r.x + 4, Y: r.y + 2, Button: tea.MouseLeft})
+	if sorts[m.sortIdx].name != "Started" || m.sortMenu {
+		t.Fatalf("click: sort %s", sorts[m.sortIdx].name)
+	}
+	// Reading a frame, s does nothing.
+	m = press(t, m, "space")
+	if m = press(t, m, "s"); m.sortMenu {
+		t.Fatal("s should not open the menu while reading")
+	}
+	m = press(t, m, "tab")
+	if m = press(t, m, "s"); !m.sortMenu {
+		t.Fatal("back on the list, s opens the menu")
 	}
 }
 
@@ -172,23 +207,6 @@ func TestCopyID(t *testing.T) {
 	m = press(t, m, "y")
 	if !strings.Contains(m.toast, "bbbbbbbb-2222") {
 		t.Fatalf("toast %q", m.toast)
-	}
-}
-
-func TestPreviewOpensAndCloses(t *testing.T) {
-	m, src := newTestModel(t, config.Default().TUI, 140, 30)
-	m = press(t, m, "space")
-	if m.mode != modePreview || len(src.calls) != 1 {
-		t.Fatalf("mode %v calls %v", m.mode, src.calls)
-	}
-	s := screen(m)
-	for _, want := range []string{"first question about bbbbbbbb-2222", "7 messages skipped", "last answer"} {
-		if !strings.Contains(s, want) {
-			t.Errorf("preview lacks %q:\n%s", want, s)
-		}
-	}
-	if m = press(t, m, "space"); m.mode != modeList {
-		t.Fatalf("space should close the preview")
 	}
 }
 
@@ -665,7 +683,7 @@ func TestConversationMarksTheGap(t *testing.T) {
 	}
 }
 
-func TestPreviewBoldsTheUser(t *testing.T) {
+func TestReadingBoldsTheUser(t *testing.T) {
 	m, _ := newTestModel(t, config.Default().TUI, 140, 30)
 	m = press(t, m, "space")
 	out := m.render()
@@ -678,18 +696,18 @@ func TestPreviewBoldsTheUser(t *testing.T) {
 				return strings.HasPrefix(esc, "\x1b[1;") || strings.HasPrefix(esc, "\x1b[1m")
 			}
 		}
-		t.Fatalf("%q not in preview", text)
+		t.Fatalf("%q not shown", text)
 		return false
 	}
 	if !bold("first question about") {
 		t.Error("the user's message should be bold")
 	}
-	if bold("last answer") {
+	if bold("older message 00") {
 		t.Error("Claude's message should not be bold")
 	}
 }
 
-func TestPreviewBoxesUserAndRailsClaude(t *testing.T) {
+func TestReadingBoxesUserAndRailsClaude(t *testing.T) {
 	m, _ := newTestModel(t, config.Default().TUI, 100, 30)
 	m = press(t, m, "space")
 	lines := strings.Split(screen(m), "\n")
@@ -700,7 +718,7 @@ func TestPreviewBoxesUserAndRailsClaude(t *testing.T) {
 			boxTop = true
 		case strings.Contains(l, "│ first question about"):
 			boxBody = true
-		case strings.Contains(l, "▎ last answer"):
+		case strings.Contains(l, "▎ older message 00"):
 			rail = true
 		}
 		if w := ansi.StringWidth(l); w > 100 {

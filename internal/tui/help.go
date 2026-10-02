@@ -18,10 +18,10 @@ var helpGroups = []helpGroup{
 	{"Sessions", [][2]string{
 		{"↑ ↓  j k", "move; g G top and bottom, PgUp PgDn by page"},
 		{"enter", "resume the session"},
-		{"space", "preview the conversation"},
+		{"space", "read the conversation over the pane"},
 		{"y  Y", "copy the session ID, the resume command"},
 		{"/", "filter (see below)"},
-		{"s", "sort by ended, started, messages, size"},
+		{"s", "choose the sort order"},
 		{".", "this folder or all folders"},
 		{"← h", "open the folder list, then move into it"},
 		{"→ l", "close the folder list"},
@@ -49,10 +49,11 @@ var helpGroups = []helpGroup{
 		{"↑ ↓  enter", "pick a suggestion"},
 		{"esc", "close suggestions, then clear the filter"},
 	}},
-	{"Preview", [][2]string{
-		{"↑ ↓  g G", "scroll"},
-		{"enter  y  Y", "resume, copy ID, copy command"},
-		{"space esc q", "back"},
+	{"Reading (space)", [][2]string{
+		{"↑ ↓  j k", "scroll; g G, PgUp PgDn too"},
+		{"tab", "to the sessions: j k read the next one"},
+		{"+ -", "more or fewer session rows (or drag)"},
+		{"space esc", "put the pane back"},
 	}},
 }
 

@@ -141,7 +141,7 @@ func (m *Model) toggleScope() tea.Cmd {
 // sidebarShown reports whether the sidebar is drawn: it is open and fits,
 // which needs the detail pane below the list.
 func (m Model) sidebarShown() bool {
-	return m.sidebar && m.mode != modePreview && !m.detailRight() && m.width >= minSidebarWidth
+	return m.sidebar && !m.detailRight() && m.width >= minSidebarWidth
 }
 
 // listLeft is the screen column where the list starts.
