@@ -247,3 +247,60 @@ func TestInMatchesFuzzily(t *testing.T) {
 		t.Fatalf("in:stai suggests %+v", list)
 	}
 }
+
+func TestFieldKeys(t *testing.T) {
+	cases := map[string]string{
+		"title:parser":          "cccccccc-3333",
+		"title:docs title:bug":  "bbbbbbbb-2222,aaaaaaaa-1111", // either title
+		"branch:feat":           "bbbbbbbb-2222",
+		"branch:main title:fix": "aaaaaaaa-1111",
+		"id:cccc":               "cccccccc-3333",
+		"id:3333":               "", // the start of the ID only
+		"http://x":              "", // an unknown key is a plain word
+	}
+	for filter, want := range cases {
+		m, _ := newTestModel(t, config.Default().TUI, 140, 40)
+		m = typeFilter(t, m, filter)
+		if got := visibleIDs(m); got != want {
+			t.Errorf("%s shows %q, want %q", filter, got, want)
+		}
+	}
+	// worktree: looks at the worktree name only.
+	f := newFolderFixture(t)
+	m := typeFilter(t, folderModel(t, config.Default().TUI, f, 140, 40), "worktree:ol")
+	if got := visibleIDs(m); got != "herdr-1" {
+		t.Fatalf("worktree:ol shows %s", got)
+	}
+}
+
+func TestBranchAndWorktreeSuggest(t *testing.T) {
+	m, _ := newTestModel(t, config.Default().TUI, 140, 40)
+	m = typeFilter(t, m, "branch:")
+	list, _ := m.suggestions()
+	if len(list) != 2 || list[0].name != "feature" || list[0].count != 1 || list[1].name != "main" || list[1].count != 2 {
+		t.Fatalf("branch: suggests %+v, want feature then main, most recent first", list)
+	}
+	m = press(t, m, "tab")
+	if m.filter.Value() != "branch:feature" {
+		t.Fatalf("tab gave %q", m.filter.Value())
+	}
+	m, _ = newTestModel(t, config.Default().TUI, 140, 40)
+	m = typeFilter(t, m, "branch:ai")
+	if list, _ := m.suggestions(); len(list) != 1 || list[0].name != "main" || !reflect.DeepEqual(list[0].hits, []int{1, 2}) {
+		t.Fatalf("branch:ai suggests %+v", list)
+	}
+	m = press(t, m, "enter")
+	if m.filter.Value() != "branch:main " || visibleIDs(m) != "aaaaaaaa-1111,cccccccc-3333" {
+		t.Fatalf("enter gave %q showing %s", m.filter.Value(), visibleIDs(m))
+	}
+	f := newFolderFixture(t)
+	m = typeFilter(t, folderModel(t, config.Default().TUI, f, 140, 40), "worktree:")
+	if list, _ := m.suggestions(); len(list) != 2 || list[0].name != "feat" || list[1].name != "old" {
+		t.Fatalf("worktree: suggests %+v", list)
+	}
+	// title: and id: have too many values to list.
+	m, _ = newTestModel(t, config.Default().TUI, 140, 40)
+	if list, _ := typeFilter(t, m, "title:").suggestions(); len(list) != 0 {
+		t.Fatalf("title: should not suggest, got %+v", list)
+	}
+}

@@ -85,11 +85,14 @@ type Model struct {
 	resolver *worktree.Resolver
 	// folders are what the list can be narrowed to; scope is the chosen
 	// one's key ("" for all) and startFolder the one the TUI started in.
-	folders     []folderInfo
-	scope       string
-	startFolder string
-	sidebar     bool // the folder list is open
-	sideOffset  int
+	folders []folderInfo
+	// branches and worktrees are the values the filter suggests for
+	// branch: and worktree:.
+	branches, worktrees []sideEntry
+	scope               string
+	startFolder         string
+	sidebar             bool // the folder list is open
+	sideOffset          int
 	// sideSearch narrows the folder list; sideTyping is set while it has
 	// the keys.
 	sideSearch textinput.Model
@@ -170,6 +173,8 @@ func New(sessions []db.Session, source Source, cfg config.TUI) Model {
 		text:       textSearch{found: map[string]map[string]bool{}, pending: map[string]bool{}, delay: textSearchDelay},
 		detailH:    max(config.MinDetailHeight, cfg.DetailHeight),
 	}
+	m.branches = values(m.rows, func(r *row) string { return r.s.GitBranch })
+	m.worktrees = values(m.rows, func(r *row) string { return r.worktree })
 	m.refresh()
 	return m
 }

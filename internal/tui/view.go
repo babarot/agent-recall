@@ -289,8 +289,8 @@ func (m Model) renderHelp() string {
 		pairs = [][2]string{{"enter", "apply"}, {"esc", "clear"}, {"↑↓", "move"}}
 		if list, _ := m.suggestions(); len(list) > 0 {
 			pairs = [][2]string{{"↑↓", "folder"}, {"enter", "pick"}, {"tab", "complete"}, {"esc", "close"}}
-		} else if _, _, _, ok := m.inTerm(); !ok {
-			pairs = append(pairs, [2]string{"in:", "folder"}, [2]string{"text:", "conversation only"})
+		} else if _, _, _, _, ok := m.keyTerm(); !ok {
+			pairs = append(pairs, [2]string{"in: text: title: branch: worktree: id:", "one field"})
 		}
 	case modePreview:
 		pairs = [][2]string{{"space", "back"}, {"↑↓", "scroll"}, {"enter", "resume"}, {"y", "copy id"}, {"Y", "copy cmd"}}
