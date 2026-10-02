@@ -2,7 +2,10 @@ changelog/skip:
   - all:
     - changed-files:
       - all-globs-to-all-files:
-        - '!src/**'
+        - '!cmd/**'
+        - '!internal/**'
         - '!ui/**'
-        - '!deno.json'
+        - '!plugin/**'
+        - '!go.mod'
+        - '!go.sum'
         - '!CHANGELOG.md'

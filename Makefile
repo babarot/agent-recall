@@ -1,22 +1,24 @@
 .DEFAULT_GOAL := build
 
-.PHONY: build install ui-build ui-embed clean test
+.PHONY: build install ui test clean
 
-build: ui-build ui-embed
-	deno task compile
+# The web UI is built with npm and embedded into the binary (build tag
+# embedui). A plain `go build ./cmd/recall` works too; it leaves the UI out.
+build: ui
+	go build -tags embedui -o recall ./cmd/recall
 
 install: build
-	install -m 755 -v agent-recall ~/.claude/agent-recall
+	install -m 755 -v recall $(or $(RECALL_INSTALL_DIR),$(HOME)/.local/bin)/recall
 
-ui-build:
-	cd ui && npm run build
-
-ui-embed:
-	deno run --allow-read --allow-write scripts/embed_ui.ts
-
-clean:
-	rm -rf agent-recall dist/ ui/dist/ src/ui_assets.ts coverage/
+ui:
+	cd ui && npm ci && npm run build
+	rm -rf internal/webui/dist
+	cp -R ui/dist internal/webui/dist
 
 test:
-	deno task test
+	go vet ./...
+	go test ./...
 	cd ui && npm test
+
+clean:
+	rm -rf recall ui/dist internal/webui/dist

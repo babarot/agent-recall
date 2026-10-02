@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "agent-recall import 2>/dev/null",
+            "command": "recall import 2>/dev/null",
             "async": true
           }
         ]

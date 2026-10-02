@@ -3,7 +3,7 @@
 [tagpr]
 	releaseBranch = main
 	vPrefix = false
-	versionFile = src/version.ts,plugin/.claude-plugin/plugin.json
+	versionFile = internal/version/version.go,plugin/.claude-plugin/plugin.json
 	changelog = true
 	majorLabels = release/major,kind/breaking-change
 	minorLabels = release/minor,kind/feature,kind/deprecation
