@@ -66,11 +66,11 @@ func (m Model) inFolders(q query) []folderInfo {
 	return out
 }
 
-// inFolder reports whether a folder name contains any in: fragment.
+// inFolder reports whether a folder name fuzzy-matches any in: fragment,
+// as the folder list's search does.
 func (q query) inFolder(name string) bool {
-	name = strings.ToLower(name)
 	for _, v := range q.in {
-		if strings.Contains(name, v) {
+		if _, _, ok := fuzzyMatch(v, name); ok {
 			return true
 		}
 	}
@@ -107,7 +107,7 @@ func (m Model) inTerm() (start, end int, frag string, ok bool) {
 
 // suggestions are the folders for the in: term being typed, and which one
 // is highlighted.
-func (m Model) suggestions() ([]folderInfo, int) {
+func (m Model) suggestions() ([]sideEntry, int) {
 	if m.mode != modeFilter || m.sugHidden {
 		return nil, 0
 	}
@@ -189,7 +189,7 @@ func (m *Model) replaceTerm(start, end int, term string) string {
 
 // suggestRect is where the suggestion box is drawn, and the first
 // suggestion it shows; ok is false when there is none.
-func (m Model) suggestRect() (r rect, list []folderInfo, idx, from int, ok bool) {
+func (m Model) suggestRect() (r rect, list []sideEntry, idx, from int, ok bool) {
 	list, idx = m.suggestions()
 	if len(list) == 0 {
 		return rect{}, nil, 0, 0, false
@@ -234,21 +234,12 @@ func (m *Model) scrollSuggestions(delta int) {
 	m.sugOff = max(0, min(m.sugOff+delta, len(list)-maxSuggest))
 }
 
-// foldersMatching lists the folders whose name contains frag, most recent
-// first.
-func (m Model) foldersMatching(frag string) []folderInfo {
-	var out []folderInfo
-	for _, f := range m.folders {
-		if strings.Contains(strings.ToLower(f.name), frag) {
-			out = append(out, f)
-		}
-	}
-	return out
-}
+// foldersMatching lists the folders an in: fragment matches, best first.
+func (m Model) foldersMatching(frag string) []sideEntry { return m.rankFolders(frag) }
 
 // suggestBox draws up to maxSuggest suggestions from from in a rounded box
 // w cells wide, with how many more lie above and below on its edges.
-func (m Model) suggestBox(list []folderInfo, idx, from, w int) []string {
+func (m Model) suggestBox(list []sideEntry, idx, from, w int) []string {
 	to := min(len(list), from+maxSuggest)
 	inner := w - 4
 	b := m.st.rule
@@ -259,11 +250,12 @@ func (m Model) suggestBox(list []folderInfo, idx, from, w int) []string {
 	}
 	for i := from; i < to; i++ {
 		num := fmt.Sprint(list[i].count)
-		name := middleEllipsis(list[i].name, inner-len(num)-3)
+		e := list[i]
+		name := middleEllipsis(e.name, inner-len(num)-3)
 		gap := strings.Repeat(" ", max(1, inner-2-ansi.StringWidth(name)-len(num)))
-		line := "  " + m.st.text.Render(name) + gap + m.st.muted.Render(num)
+		line := "  " + m.highlight(e.name, name, e.hits, m.st.text, m.st.filter.Bold(true)) + gap + m.st.muted.Render(num)
 		if i == idx {
-			line = m.st.bar.Render("▎") + m.st.selected.Render(" ") + m.st.on(m.st.key, true).Render(name) +
+			line = m.st.bar.Render("▎") + m.st.selected.Render(" ") + m.highlight(e.name, name, e.hits, m.st.on(m.st.key, true), m.st.on(m.st.filter.Bold(true), true)) +
 				m.st.selected.Render(gap) + m.st.on(m.st.muted, true).Render(num)
 		}
 		out = append(out, b.Render("│ ")+line+b.Render(" │"))

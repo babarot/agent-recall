@@ -22,7 +22,8 @@ type folderFixture struct {
 
 func newFolderFixture(t *testing.T) folderFixture {
 	t.Helper()
-	base := t.TempDir()
+	base, _ := filepath.EvalSymlinks(t.TempDir())
+	t.Setenv("HOME", base) // folder names read ~/notes, not the temp path
 	f := folderFixture{
 		repo:  filepath.Join(base, "src", "me", "app"),
 		wt:    filepath.Join(base, "wt", "feat"),

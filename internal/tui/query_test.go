@@ -226,3 +226,24 @@ func TestKeysGoToTheSuggestions(t *testing.T) {
 		t.Fatal("a second esc clears the filter")
 	}
 }
+
+func TestInMatchesFuzzily(t *testing.T) {
+	right := tea.KeyPressMsg{Code: tea.KeyRight}
+	m := update(t, update(t, namedFolders(t), right), right) // back on the sessions, folder list closed
+	m = typeFilter(t, m, "in:srv")
+	list, _ := m.suggestions()
+	if len(list) != 1 || list[0].name != "~/stailer-server" {
+		t.Fatalf("in:srv suggests %+v", list)
+	}
+	if got := visibleIDs(m); got != "stailer-server" {
+		t.Fatalf("in:srv shows %s", got)
+	}
+	if !strings.Contains(m.render(), m.st.on(m.st.filter.Bold(true), true).Render("v")) {
+		t.Error("the matched letters should be highlighted in the suggestions")
+	}
+	// Best match first: stai puts stailer before stailer-server.
+	m = typeFilter(t, update(t, update(t, namedFolders(t), right), right), "in:stai")
+	if list, _ := m.suggestions(); len(list) != 2 || list[0].name != "~/stailer" {
+		t.Fatalf("in:stai suggests %+v", list)
+	}
+}

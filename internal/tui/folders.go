@@ -190,12 +190,14 @@ type sideEntry struct {
 func (m Model) sideEntries() []sideEntry {
 	q := strings.TrimSpace(m.sideSearch.Value())
 	if q == "" {
-		out := []sideEntry{{name: "All", count: len(m.rows)}}
-		for _, f := range m.folders {
-			out = append(out, sideEntry{key: f.key, name: f.name, count: f.count})
-		}
-		return out
+		return append([]sideEntry{{name: "All", count: len(m.rows)}}, m.rankFolders("")...)
 	}
+	return m.rankFolders(q)
+}
+
+// rankFolders lists the folders whose name fuzzy-matches q, best first and,
+// among equals, the most recent; every folder, most recent first, for "".
+func (m Model) rankFolders(q string) []sideEntry {
 	type scored struct {
 		sideEntry
 		score, order int
