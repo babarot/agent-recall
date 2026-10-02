@@ -136,7 +136,7 @@ recall version
 | `y` | Copy the session ID, to hand it to another agent ("look this session up with claude-recall") |
 | `Y` | Copy the resume command |
 | `Space` | Preview the start and end of the conversation |
-| `/` | Filter by title, folder, branch or ID; `Esc` clears it |
+| `/` | Filter by title, folder, branch or ID; `in:<folder>` keeps the sessions of folders whose name contains it, over the folder the list is narrowed to (`Tab` completes it); `Esc` clears the filter |
 | `s` | Sort by ended, started, message count or size |
 | `.` | Switch between the folder `recall` was started in and all folders |
 | `f` | Show or hide the folder list; `←` moves to it, `↑` `↓` pick a folder, `Enter` returns to the sessions |

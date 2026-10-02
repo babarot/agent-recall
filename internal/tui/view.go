@@ -104,6 +104,15 @@ func (m Model) render() string {
 		lines = append(lines, table...)
 	}
 	lines = append(lines, m.renderStatus(), m.renderHelp())
+	// Folder suggestions for the in: term open just under the filter line.
+	if list, idx := m.suggestions(); len(list) > 0 {
+		box := m.suggestBox(list, idx, min(48, m.width-4))
+		for i, l := range box {
+			if j := 2 + i; j < len(lines) {
+				lines[j] = overlay(lines[j], l, 3)
+			}
+		}
+	}
 	return strings.Join(lines, "\n")
 }
 
@@ -122,14 +131,26 @@ func (m Model) bar(left, right string) string {
 
 func (m Model) renderHeader() string {
 	left := m.st.app.Render("recall") + m.st.tag.Render(" // claude-recall")
-	right := m.st.tag.Render(fmt.Sprintf("%d / %d sessions · ", len(m.visible), len(m.rows)))
-	if m.scope != "" {
-		// The folder gives way first when the bar is short.
-		room := m.width - 4 - ansi.StringWidth(left) - 1 - ansi.StringWidth(right) - len(" · sort: "+sorts[m.sortIdx].name) - 3
-		right += m.st.filter.Background(m.st.header.GetBackground()).Render("in "+middleEllipsis(m.folderName(m.scope), max(8, room))) + m.st.tag.Render(" · ")
+	count := fmt.Sprintf("%d / %d sessions · ", len(m.visible), len(m.rows))
+	sort := "sort: " + sorts[m.sortIdx].name
+	// Where the list is narrowed to: in: folders, else the folder scope.
+	where := ""
+	if q := parseQuery(m.filter.Value()); len(q.in) > 0 {
+		in := m.inFolders(q)
+		where = fmt.Sprintf("%d folders", len(in))
+		if len(in) == 1 {
+			where = in[0].name
+		}
+	} else if m.scope != "" {
+		where = m.folderName(m.scope)
 	}
-	right += m.st.tag.Render("sort: " + sorts[m.sortIdx].name)
-	return m.bar(left, right)
+	right := m.st.tag.Render(count)
+	if where != "" {
+		// The folder gives way first when the bar is short.
+		room := m.width - 2 - ansi.StringWidth(left) - 1 - len(count) - len("in  · ") - len(sort)
+		right += m.st.filter.Background(m.st.header.GetBackground()).Render("in "+middleEllipsis(where, max(8, room))) + m.st.tag.Render(" · ")
+	}
+	return m.bar(left, right+m.st.tag.Render(sort))
 }
 
 // renderTable returns the rules, column headers, exactly listHeight rows
@@ -139,7 +160,7 @@ func (m Model) renderTable() []string {
 	cols := layoutColumns(lw)
 	plain := lipgloss.NewStyle()
 
-	scoped := m.scope != ""
+	scoped := m.scope != "" && len(parseQuery(m.filter.Value()).in) == 0
 	head := renderRow(cols, lw, "  ", func(p placed) string {
 		if scoped && p.col.header == folderHeader {
 			return m.st.colHdr.Render(worktreeHeader)
@@ -253,6 +274,11 @@ func (m Model) renderHelp() string {
 	switch m.mode {
 	case modeFilter:
 		pairs = [][2]string{{"enter", "apply"}, {"esc", "clear"}, {"↑↓", "move"}}
+		if _, _, _, ok := m.inTerm(); ok {
+			pairs = append([][2]string{{"tab", "complete folder"}}, pairs...)
+		} else {
+			pairs = append(pairs, [2]string{"in:", "folder"})
+		}
 	case modePreview:
 		pairs = [][2]string{{"space", "back"}, {"↑↓", "scroll"}, {"enter", "resume"}, {"y", "copy id"}, {"Y", "copy cmd"}}
 	case modeList:

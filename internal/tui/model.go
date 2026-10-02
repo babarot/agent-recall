@@ -96,6 +96,7 @@ type Model struct {
 	sortIdx        int
 
 	filter textinput.Model
+	comp   completion
 
 	preview    viewport.Model
 	previewFor string // session ID the preview shows
@@ -133,7 +134,7 @@ func New(sessions []db.Session, source Source, cfg config.TUI) Model {
 
 	fi := textinput.New()
 	fi.Prompt = "/ "
-	fi.Placeholder = "filter by title, folder, branch or ID"
+	fi.Placeholder = "filter by title, folder, branch or ID · in:folder"
 
 	m := Model{
 		resolver:   resolver,
@@ -227,13 +228,14 @@ func (m *Model) refresh() {
 	if r := m.current(); r != nil {
 		keep = r.s.ID
 	}
-	q := strings.ToLower(strings.TrimSpace(m.filter.Value()))
+	q := parseQuery(m.filter.Value())
 	m.visible = m.visible[:0]
 	for i := range m.rows {
-		if m.scope != "" && m.rows[i].group != m.scope {
+		// in: picks folders itself, over the one the list is narrowed to.
+		if m.scope != "" && len(q.in) == 0 && m.rows[i].group != m.scope {
 			continue
 		}
-		if q == "" || matches(m.rows[i].search, q) {
+		if q.match(&m.rows[i]) {
 			m.visible = append(m.visible, i)
 		}
 	}
@@ -248,16 +250,6 @@ func (m *Model) refresh() {
 		}
 	}
 	m.clamp()
-}
-
-// matches requires every space-separated word of q to appear in text.
-func matches(text, q string) bool {
-	for w := range strings.FieldsSeq(q) {
-		if !strings.Contains(text, w) {
-			return false
-		}
-	}
-	return true
 }
 
 func (m *Model) current() *row {
@@ -571,6 +563,15 @@ func (m Model) updateFilter(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "ctrl+c":
 		return m, tea.Quit
+	case "tab", "shift+tab":
+		delta := 1
+		if msg.String() == "shift+tab" {
+			delta = -1
+		}
+		if m.complete(delta) {
+			m.refresh()
+		}
+		return m, nil
 	}
 	var cmd tea.Cmd
 	before := m.filter.Value()
