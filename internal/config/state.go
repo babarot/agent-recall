@@ -11,6 +11,8 @@ import (
 type State struct {
 	// DetailHeight is the detail pane height the user last chose, in lines.
 	DetailHeight int `json:"detail_height,omitempty"`
+	// Sidebar is whether the folder list was open.
+	Sidebar bool `json:"sidebar,omitempty"`
 }
 
 // StatePath returns the state file, honoring XDG_STATE_HOME.
@@ -23,7 +25,7 @@ func StatePath() string {
 }
 
 // LoadState reads the state file. A missing or unreadable file is an empty
-// state: losing it only loses a remembered pane height.
+// state: losing it only loses a remembered pane height or layout.
 func LoadState(path string) State {
 	var s State
 	if b, err := os.ReadFile(path); err == nil {

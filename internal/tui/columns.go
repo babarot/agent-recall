@@ -36,7 +36,15 @@ type cellCtx struct {
 	st  styles
 	sel bool
 	now time.Time
+	// scoped is set when the list shows one folder: the Folder column then
+	// names the worktree instead.
+	scoped bool
 }
+
+const (
+	folderHeader   = "Folder"
+	worktreeHeader = "Worktree"
+)
 
 func (c cellCtx) style(s lipgloss.Style) lipgloss.Style { return c.st.on(s, c.sel) }
 
@@ -54,11 +62,17 @@ var columns = []column{
 		},
 	},
 	{
-		header: "Folder", flex: 1,
+		header: folderHeader, flex: 1,
 		cell: func(c cellCtx, r *row, w int) string {
 			name, badge := c.style(c.st.text), c.style(c.st.worktree)
 			if r.gone {
 				name, badge = c.style(c.st.gone), c.style(c.st.gone)
+			}
+			if c.scoped {
+				if r.worktree == "" {
+					return c.style(c.st.dim).Render("main")
+				}
+				return badge.Render(ansi.Truncate(worktreeM+" "+r.worktree, w, ellipsis))
 			}
 			folder := ansi.Truncate(r.folder, w, ellipsis)
 			if r.worktree == "" {

@@ -80,6 +80,15 @@ type Model struct {
 	rows    []row
 	visible []int // indexes into rows, filtered and sorted
 
+	resolver *worktree.Resolver
+	// folders are what the list can be narrowed to; scope is the chosen
+	// one's key ("" for all) and startFolder the one the TUI started in.
+	folders     []folderInfo
+	scope       string
+	startFolder string
+	sidebar     bool // the folder list is open
+	sideOffset  int
+
 	cursor, offset int
 	width, height  int
 	detailOpen     bool
@@ -127,6 +136,8 @@ func New(sessions []db.Session, source Source, cfg config.TUI) Model {
 	fi.Placeholder = "filter by title, folder, branch or ID"
 
 	m := Model{
+		resolver:   resolver,
+		folders:    groupRows(rows),
 		cfg:        cfg,
 		source:     source,
 		home:       home,
@@ -147,9 +158,11 @@ func New(sessions []db.Session, source Source, cfg config.TUI) Model {
 // state file at path, starting from what is saved there.
 func (m Model) RememberIn(path string) Model {
 	m.statePath = path
-	if st := config.LoadState(path); st.DetailHeight >= config.MinDetailHeight {
+	st := config.LoadState(path)
+	if st.DetailHeight >= config.MinDetailHeight {
 		m.detailH = st.DetailHeight
 	}
+	m.sidebar = st.Sidebar
 	return m
 }
 
@@ -157,7 +170,7 @@ func (m *Model) saveState() tea.Cmd {
 	if m.statePath == "" {
 		return nil
 	}
-	path, st := m.statePath, config.State{DetailHeight: m.detailH}
+	path, st := m.statePath, config.State{DetailHeight: m.detailH, Sidebar: m.sidebar}
 	return func() tea.Msg {
 		_ = config.SaveState(path, st)
 		return nil
@@ -187,7 +200,9 @@ func (m Model) paneTop() int {
 func (m *Model) loadDetail() {
 	r := m.current()
 	if !m.detailOpen || r == nil {
-		m.focus = focusList
+		if m.focus != focusFolders {
+			m.focus = focusList
+		}
 		return
 	}
 	if r.s.ID != m.scrollFor {
@@ -215,6 +230,9 @@ func (m *Model) refresh() {
 	q := strings.ToLower(strings.TrimSpace(m.filter.Value()))
 	m.visible = m.visible[:0]
 	for i := range m.rows {
+		if m.scope != "" && m.rows[i].group != m.scope {
+			continue
+		}
 		if q == "" || matches(m.rows[i].search, q) {
 			m.visible = append(m.visible, i)
 		}
@@ -334,6 +352,9 @@ func (m *Model) action(key string) (tea.Cmd, bool) {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	next, cmd := m.update(msg)
 	if nm, ok := next.(Model); ok {
+		if nm.focus == focusFolders && !nm.sidebarShown() {
+			nm.focus = focusList
+		}
 		nm.loadDetail()
 		return nm, cmd
 	}
@@ -368,7 +389,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Button == tea.MouseWheelUp {
 			step = -1
 		}
-		if f := m.frameAt(msg.X, msg.Y); f != focusList {
+		if m.sidebarAt(msg.X, msg.Y) >= 0 {
+			m.scrollSidebar(3 * step)
+		} else if f := m.frameAt(msg.X, msg.Y); f != focusList {
 			m.scrollFrame(f, 3*step)
 		} else {
 			m.move(step)
@@ -403,22 +426,42 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
-	if cmd, ok := m.action(key); ok {
-		return m, cmd
-	}
 	switch key {
 	case "]":
-		m.focus = (m.focus + 1) % numFocus
-		if !m.detailOpen {
-			m.focus = focusList
-		}
+		m.cycleFocus(1)
 		return m, nil
 	case "[":
-		m.focus = (m.focus + numFocus - 1) % numFocus
-		if !m.detailOpen {
+		m.cycleFocus(-1)
+		return m, nil
+	case ".":
+		return m, m.toggleScope()
+	case "f":
+		return m, m.toggleSidebar()
+	}
+	if m.focus == focusFolders {
+		page := max(1, m.sidebarRows()-1)
+		switch key {
+		case "down", "j", "ctrl+n":
+			m.moveFolder(1)
+		case "up", "k", "ctrl+p":
+			m.moveFolder(-1)
+		case "pgdown", "ctrl+f", "ctrl+d":
+			m.moveFolder(page)
+		case "pgup", "ctrl+b", "ctrl+u":
+			m.moveFolder(-page)
+		case "home", "g":
+			m.moveFolder(-len(m.folders) - 1)
+		case "end", "G":
+			m.moveFolder(len(m.folders) + 1)
+		case "enter", "right", "l", "esc":
 			m.focus = focusList
+		case "q", "ctrl+c":
+			return m, tea.Quit
 		}
 		return m, nil
+	}
+	if cmd, ok := m.action(key); ok {
+		return m, cmd
 	}
 	if m.focus != focusList {
 		if rects, ok := m.paneRects(); ok {
@@ -485,8 +528,27 @@ list:
 		}
 	case "space":
 		return m, m.openPreview()
+	case "left":
+		if m.sidebarShown() {
+			m.focus = focusFolders
+		}
 	}
 	return m, nil
+}
+
+// cycleFocus moves the focus along the folder list (when shown), the
+// session list and the detail pane's frames (when open).
+func (m *Model) cycleFocus(delta int) {
+	var order []focus
+	if m.sidebarShown() {
+		order = append(order, focusFolders)
+	}
+	order = append(order, focusList)
+	if m.detailOpen && m.current() != nil {
+		order = append(order, focusConv, focusDone, focusDetails)
+	}
+	i := max(0, slices.Index(order, m.focus))
+	m.focus = order[(i+delta+len(order))%len(order)]
 }
 
 func (m Model) updateFilter(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -593,11 +655,16 @@ func (m *Model) click(x, y int) {
 		m.dragging = true
 		return
 	}
+	if i := m.sidebarAt(x, y); i >= 0 {
+		m.pickFolder(i)
+		m.focus = focusFolders
+		return
+	}
 	if f := m.frameAt(x, y); f != focusList {
 		m.focus = f
 		return
 	}
-	if i := y - m.listTop(); x < m.listWidth() && i >= 0 && i < m.listHeight() && m.offset+i < len(m.visible) {
+	if i := y - m.listTop(); x >= m.listLeft() && x < m.listLeft()+m.listWidth() && i >= 0 && i < m.listHeight() && m.offset+i < len(m.visible) {
 		m.cursor = m.offset + i
 		m.focus = focusList
 		m.clamp()

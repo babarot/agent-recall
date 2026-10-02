@@ -316,12 +316,12 @@ func TestRemovedWorktree(t *testing.T) {
 		{"/Users/me/src/github.com/me/app/.claude/worktrees/fix-login", "me/app", "fix-login"},
 	}
 	for _, c := range cases {
-		repo, name, ok := removedWorktree(c.path, home)
+		repo, name, _, ok := removedWorktree(c.path, home)
 		if !ok || repo != c.repo || name != c.name {
 			t.Errorf("removedWorktree(%s) = %q %q %v", c.path, repo, name, ok)
 		}
 	}
-	if _, _, ok := removedWorktree("/Users/me/src/github.com/me/app", home); ok {
+	if _, _, _, ok := removedWorktree("/Users/me/src/github.com/me/app", home); ok {
 		t.Error("a plain folder is not a worktree")
 	}
 }

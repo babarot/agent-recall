@@ -27,6 +27,8 @@ const (
 	focusDone
 	focusDetails
 	numFocus
+	// focusFolders is the sidebar, outside the frames numFocus counts.
+	focusFolders = numFocus
 )
 
 var frameTitles = [numFocus]string{"", "Conversation", "What was done", "Details"}

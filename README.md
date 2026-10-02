@@ -138,12 +138,16 @@ recall version
 | `Space` | Preview the start and end of the conversation |
 | `/` | Filter by title, folder, branch or ID; `Esc` clears it |
 | `s` | Sort by ended, started, message count or size |
+| `.` | Switch between the folder `recall` was started in and all folders |
+| `f` | Show or hide the folder list; `←` moves to it, `↑` `↓` pick a folder, `Enter` returns to the sessions |
 | `Tab` | Show or hide the detail pane |
 | `+` `-` | Make the detail pane taller or shorter |
-| `]` `[` | Move focus to the next or previous frame of the detail pane; `↑` `↓`, `j` `k`, PgUp, PgDn, `g` and `G` then scroll it, `Esc` returns to the list |
+| `]` `[` | Move focus to the next or previous frame of the detail pane (and the folder list when it is shown); `↑` `↓`, `j` `k`, PgUp, PgDn, `g` and `G` then scroll it, `Esc` returns to the list |
 | `q` | Quit |
 
 The title is the session's `/rename` name, or else the title Claude Code generated, or else its first prompt.
+
+Started inside a repository (or one of its worktrees, or a subdirectory), `recall` lists only that repository's sessions, with a Worktree column in place of Folder; `.` shows every folder again. A folder with no sessions starts with all of them. The folder list on the left (`f`) narrows the list to any folder: a repository together with its worktrees, or a directory outside git. It needs a terminal at least 100 columns wide with the detail pane below, and whether it is open is remembered.
 
 The detail pane has three frames: Conversation (the first request, a `⋮ N messages` marker for what lies between, and the latest messages, always including the last thing you said), What was done (activity over the session, then bars for the tools used most and the commands run most, and the edited files grouped by repository) and Details (when, how much, where: times, counts, size, branch, ID, version, and the folder's full path). Below the list, Details sits under Conversation in a few wide lines and What was done runs down the right. A taller pane shows more of the conversation and of What was done. The height you pick is remembered in `~/.local/state/claude-recall/state.json`.
 
@@ -163,6 +167,9 @@ detail_height = 16
 # catppuccin-latte on a light one. Also: tokyo-night, dracula, nord,
 # gruvbox-dark, and ansi (the terminal's own 16 colors).
 theme = "auto"
+# Which sessions to start with: "folder" (default) for the repository recall is
+# started in, when it has sessions, or "all".
+scope = "folder"
 ```
 
 The look follows [cc360](https://github.com/achton/cc360). A worktree that has since been removed is shown struck through, with its repository and name guessed from where herdr (`~/.herdr/worktrees/<repo>/worktree-<name>`) or Claude Code (`<repo>/.claude/worktrees/<name>`) put it.
