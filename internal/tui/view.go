@@ -246,14 +246,16 @@ func (m Model) renderConversation(p db.Preview, w int) string {
 	textW := max(20, w-whoW-2)
 	var b strings.Builder
 	one := func(msg db.Message) {
-		who := m.st.claude.Render("claude")
+		// As in the Conversation frame: the user's words bold, Claude's
+		// softer.
+		who, text := m.st.claude.Render("claude"), m.st.subtle
 		if msg.Role == "user" {
-			who = m.st.user.Render("you")
+			who, text = m.st.user.Render("you"), m.st.strong.Bold(true)
 		}
 		label := who + " " + m.st.dim.Render(formatEnded(msg.Timestamp, m.now()))
 		labelPad := strings.Repeat(" ", max(0, whoW-ansi.StringWidth(label)))
 		for i, l := range wrap(strings.TrimSpace(msg.Content), textW) {
-			l = m.st.strong.Render(l)
+			l = text.Render(l)
 			if i == 0 {
 				fmt.Fprintf(&b, " %s%s %s\n", label, labelPad, l)
 			} else {

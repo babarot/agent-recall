@@ -574,3 +574,27 @@ func TestConversationMarksTheGap(t *testing.T) {
 		t.Fatalf("at the top the marker counts what was not loaded:\n%s", s)
 	}
 }
+
+func TestPreviewBoldsTheUser(t *testing.T) {
+	m, _ := newTestModel(t, config.Default().TUI, 140, 30)
+	m = press(t, m, "space")
+	out := m.render()
+	bold := func(text string) bool {
+		for _, l := range strings.Split(out, "\n") {
+			if strings.Contains(ansi.Strip(l), text) {
+				// The style right before the text decides.
+				i := strings.Index(l, text)
+				esc := l[strings.LastIndex(l[:i], "\x1b["):i]
+				return strings.HasPrefix(esc, "\x1b[1;") || strings.HasPrefix(esc, "\x1b[1m")
+			}
+		}
+		t.Fatalf("%q not in preview", text)
+		return false
+	}
+	if !bold("first question about") {
+		t.Error("the user's message should be bold")
+	}
+	if bold("last answer") {
+		t.Error("Claude's message should not be bold")
+	}
+}
