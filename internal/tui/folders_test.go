@@ -234,3 +234,31 @@ func TestSidebarFitsTheTerminal(t *testing.T) {
 		}
 	}
 }
+
+func TestArrowsOpenEnterLeaveAndCloseTheSidebar(t *testing.T) {
+	f := newFolderFixture(t)
+	m := folderModel(t, config.Default().TUI, f, 140, 40)
+	left, right := tea.KeyPressMsg{Code: tea.KeyLeft}, tea.KeyPressMsg{Code: tea.KeyRight}
+	if m = update(t, m, left); !m.sidebarShown() || m.focus != focusList {
+		t.Fatalf("first ← opens the folder list and stays on the sessions: shown %v focus %v", m.sidebarShown(), m.focus)
+	}
+	if m = update(t, m, left); m.focus != focusFolders {
+		t.Fatalf("second ← moves into the folder list: %v", m.focus)
+	}
+	if m = update(t, m, right); !m.sidebarShown() || m.focus != focusList {
+		t.Fatalf("→ in the folder list returns to the sessions: shown %v focus %v", m.sidebarShown(), m.focus)
+	}
+	if m = update(t, m, right); m.sidebarShown() || m.focus != focusList {
+		t.Fatalf("→ on the sessions closes the folder list: shown %v focus %v", m.sidebarShown(), m.focus)
+	}
+	// From a frame of the detail pane the arrows do nothing.
+	m = press(t, m, "]")
+	if m = update(t, m, left); m.sidebarShown() {
+		t.Fatal("← with a frame focused should not open the folder list")
+	}
+	// Too narrow, ← says why.
+	m = update(t, folderModel(t, config.Default().TUI, f, 90, 30), left)
+	if m.sidebarShown() || !strings.Contains(screen(m), "needs 100 columns") {
+		t.Fatalf("narrow:\n%s", screen(m))
+	}
+}

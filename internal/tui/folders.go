@@ -153,21 +153,34 @@ func (m Model) listLeft() int {
 
 // toggleSidebar opens the sidebar, focused, or closes it.
 func (m *Model) toggleSidebar() tea.Cmd {
-	if m.sidebar {
-		m.sidebar = false
-		if m.focus == focusFolders {
-			m.focus = focusList
-		}
-		m.clamp()
-		return m.saveState()
+	if m.sidebarShown() {
+		return m.closeSidebar()
 	}
+	return m.openSidebar(true)
+}
+
+// openSidebar shows the sidebar, moving the focus to it when focus is set.
+func (m *Model) openSidebar(focus bool) tea.Cmd {
+	was := m.sidebar
 	m.sidebar = true
 	if !m.sidebarShown() {
-		m.sidebar = false
+		m.sidebar = was
 		return m.showToast(toastInfo, fmt.Sprintf("The folder list needs %d columns and the detail pane below", minSidebarWidth))
 	}
-	m.focus = focusFolders
+	if focus {
+		m.focus = focusFolders
+	}
 	m.revealFolder()
+	m.clamp()
+	return m.saveState()
+}
+
+func (m *Model) closeSidebar() tea.Cmd {
+	m.sidebar = false
+	if m.focus == focusFolders {
+		m.focus = focusList
+	}
+	m.clamp()
 	return m.saveState()
 }
 

@@ -531,9 +531,20 @@ list:
 		}
 	case "space":
 		return m, m.openPreview()
+	// ← ← opens the folder list and moves into it, → → comes back and
+	// closes it.
 	case "left":
+		if m.focus != focusList {
+			break
+		}
 		if m.sidebarShown() {
 			m.focus = focusFolders
+			return m, nil
+		}
+		return m, m.openSidebar(false)
+	case "right":
+		if m.focus == focusList && m.sidebarShown() {
+			return m, m.closeSidebar()
 		}
 	}
 	return m, nil
