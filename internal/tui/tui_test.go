@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -19,7 +20,22 @@ import (
 
 var now = time.Date(2026, 10, 2, 19, 0, 0, 0, time.Local)
 
-type fakePreview struct{ calls []string }
+type fakePreview struct {
+	calls []string
+	// said is what each session's conversation holds, for text search.
+	said map[string]string
+}
+
+func (f *fakePreview) SessionsWithText(text string) ([]string, error) {
+	var ids []string
+	for id, s := range f.said {
+		if strings.Contains(strings.ToLower(s), strings.ToLower(text)) {
+			ids = append(ids, id)
+		}
+	}
+	slices.Sort(ids)
+	return ids, nil
+}
 
 func (f *fakePreview) SessionPreview(id string, head, tail int) (db.Preview, error) {
 	f.calls = append(f.calls, id)

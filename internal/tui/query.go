@@ -7,12 +7,13 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// The filter is words to find in a session's title, folder, branch or ID,
-// and key:value terms that narrow by one field. in:<folder> is the first
-// such term; new ones get a field in query and a case in parseQuery.
+// The filter is words to find in a session's title, folder, branch, ID or
+// conversation, and key:value terms that narrow by one field: in:<folder>
+// and text:<word>. New ones get a field in query and a case in parseQuery.
 
 const (
 	inPrefix   = "in:"
+	textPrefix = "text:"
 	maxSuggest = 8
 	// The suggestion box opens under the filter line, this far in.
 	suggestX, suggestTop = 3, 2
@@ -26,6 +27,8 @@ type query struct {
 	// contains any of them. They override the folder the list is narrowed
 	// to.
 	in []string
+	// text are words to find only in the conversation.
+	text []string
 }
 
 func parseQuery(s string) query {
@@ -37,18 +40,32 @@ func parseQuery(s string) query {
 			}
 			continue
 		}
+		if v, ok := strings.CutPrefix(w, textPrefix); ok {
+			if v != "" {
+				q.text = append(q.text, v)
+			}
+			continue
+		}
 		q.words = append(q.words, w)
 	}
 	return q
 }
 
-// match reports whether r passes the query, the folder scope aside.
-func (q query) match(r *row) bool {
+// match reports whether r passes the query, the folder scope aside. A
+// plain word may be in the session's fields or its conversation; a text:
+// word only in the conversation. Words still being looked up in the
+// conversation match only the fields until they are found.
+func (m Model) match(q query, r *row) bool {
 	if len(q.in) > 0 && !q.inFolder(r.groupName) {
 		return false
 	}
 	for _, w := range q.words {
-		if !strings.Contains(r.search, w) {
+		if !strings.Contains(r.search, w) && !m.said(w, r.s.ID) {
+			return false
+		}
+	}
+	for _, w := range q.text {
+		if !m.said(w, r.s.ID) {
 			return false
 		}
 	}

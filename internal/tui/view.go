@@ -144,6 +144,9 @@ func (m Model) renderHeader() string {
 		where = m.folderName(m.scope)
 	}
 	right := m.st.tag.Render(count)
+	if m.searching() {
+		right = m.st.tag.Render("searching… · ") + right
+	}
 	if where != "" {
 		// The folder gives way first when the bar is short.
 		room := m.width - 2 - ansi.StringWidth(left) - 1 - len(count) - len("in  · ") - len(sort)
@@ -287,7 +290,7 @@ func (m Model) renderHelp() string {
 		if list, _ := m.suggestions(); len(list) > 0 {
 			pairs = [][2]string{{"↑↓", "folder"}, {"enter", "pick"}, {"tab", "complete"}, {"esc", "close"}}
 		} else if _, _, _, ok := m.inTerm(); !ok {
-			pairs = append(pairs, [2]string{"in:", "folder"})
+			pairs = append(pairs, [2]string{"in:", "folder"}, [2]string{"text:", "conversation only"})
 		}
 	case modePreview:
 		pairs = [][2]string{{"space", "back"}, {"↑↓", "scroll"}, {"enter", "resume"}, {"y", "copy id"}, {"Y", "copy cmd"}}
