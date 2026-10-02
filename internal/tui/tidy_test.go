@@ -50,16 +50,33 @@ func TestMiddleEllipsis(t *testing.T) {
 	}
 }
 
-func TestCommandParts(t *testing.T) {
-	cases := []struct{ in, prog, args, rest string }{
-		{"cd /Users/me/src/app && go test ./... 2>&1 | tail -5", "go", "test ./... 2>&1", "| tail -5"},
-		{"S=/tmp/x && cd $S && python3 run.py", "python3", "run.py", ""},
-		{"git status\nsecond line", "git", "status", ""},
+func TestProgramOf(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"cd /Users/me/src/app && go test ./... 2>&1 | tail -5", "go test"},
+		{"S=/tmp/x && cd $S && python3 run.py", "python3"},
+		{"git status\nsecond line", "git status"},
+		// Assignments whose values hold spaces and flags.
+		{`c=$(readlink -f "$(command -v codex)"); echo $c`, "echo"},
+		{`UA='Mozilla/5.0 (Macintosh; Intel)' curl -A "$UA" x`, "curl"},
+		{"FROM=$(($(date -v-30d +%s) * 1000)); for i in a b; do pup api $i; done", "pup"},
+		// Loops, comments, continuations, subshells, functions, wrappers.
+		{"for f in a.tf b.tf; do\n  terraform fmt $f\ndone", "terraform fmt"},
+		{"until [ -f /tmp/done ]; do sleep 5; done", "sleep"},
+		{"# check the alerts first\ngh api repos/x/y", "gh api"},
+		{"FILENAME=a.tf \\\n  conftest test a.tf", "conftest"},
+		{"(npx wrangler dev > /tmp/log 2>&1 &)", "npx"},
+		{`q() { gh api -X GET search/issues; }`, "gh api"},
+		{"builtin cd ~/x\ngit fetch", "git fetch"},
+		{"timeout 60 go test ./...", "go test"},
+		{"q(){ pup metrics query; }; q a", "pup"},
+		{"for n in 1 2; do\n  case $n in\n    1) team=a;;\n    2) team=b;;\n  esac\n  gh issue view $n\ndone", "gh issue"},
+		{`"$SKILL_DIR/get-summary.ts" --json`, "get-summary.ts"},
+		{`K="kubectl --context dev"; $K get pods`, ""},
+		{"", ""},
 	}
 	for _, c := range cases {
-		p, a, r := commandParts(c.in)
-		if p != c.prog || a != c.args || r != c.rest {
-			t.Errorf("commandParts(%q) = %q %q %q", c.in, p, a, r)
+		if got := programOf(c.in); got != c.want {
+			t.Errorf("programOf(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
 }

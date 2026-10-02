@@ -17,8 +17,7 @@ import (
 var (
 	tempPath       = regexp.MustCompile(`^(/private)?/tmp/|/scratchpad/`)
 	herdrFile      = regexp.MustCompile(`/\.herdr/worktrees/([^/]+)/(?:worktree-)?([^/]+)/(.+)$`)
-	leadingCd      = regexp.MustCompile(`^\s*cd\s+\S+\s*(&&|;)\s*`)
-	leadingAssign  = regexp.MustCompile(`^\s*[A-Za-z_][A-Za-z0-9_]*=\S*\s*(&&|;)?\s*`)
+	assignment     = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\[[^]]*\])?\+?=`)
 	subcommandWord = regexp.MustCompile(`^[a-z][a-z0-9_:-]*$`)
 )
 
@@ -104,25 +103,163 @@ func middleEllipsis(p string, n int) string {
 	return "…" + string(r[len(r)-n+1:])
 }
 
-// commandParts splits a shell command for display: the program, its
-// arguments, and what follows the first pipe. A leading `cd dir &&` and
-// variable assignments are dropped; only the first line counts.
-func commandParts(cmd string) (prog, args, rest string) {
-	c, _, _ := strings.Cut(cmd, "\n")
-	for range 4 {
-		next := leadingAssign.ReplaceAllString(leadingCd.ReplaceAllString(c, ""), "")
-		if next == c {
-			break
+// simpleCommands splits a shell script into its simple commands, each as
+// its words: split at ; & | && || newlines and parentheses, with quotes,
+// $(...), ${...} and backticks kept inside one word, line continuations
+// joined and comments dropped. It is no shell parser, only enough to tell
+// which programs a command runs.
+func simpleCommands(script string) [][]string {
+	var (
+		out    [][]string
+		words  []string
+		word   strings.Builder
+		inWord bool
+	)
+	endWord := func() {
+		if inWord {
+			words = append(words, word.String())
 		}
-		c = next
+		word.Reset()
+		inWord = false
 	}
-	c = collapse(c)
-	main, after, piped := strings.Cut(c, " | ")
-	if piped {
-		rest = "| " + after
+	endCmd := func() {
+		endWord()
+		if len(words) > 0 {
+			out = append(out, words)
+		}
+		words = nil
 	}
-	prog, args, _ = strings.Cut(main, " ")
-	return prog, args, rest
+	r := []rune(script)
+	for i := 0; i < len(r); i++ {
+		c := r[i]
+		switch {
+		case c == '\\' && i+1 < len(r):
+			if r[i+1] != '\n' {
+				word.WriteRune(r[i+1])
+				inWord = true
+			}
+			i++
+		case c == '\'' || c == '"':
+			// Quotes: up to the matching one, dropped from the word.
+			j := i + 1
+			for j < len(r) && r[j] != c {
+				if c == '"' && r[j] == '\\' && j+1 < len(r) {
+					j++
+				}
+				j++
+			}
+			word.WriteString(string(r[i+1 : min(j, len(r))]))
+			inWord = true
+			i = j
+		case c == '`' || (c == '$' && i+1 < len(r) && (r[i+1] == '(' || r[i+1] == '{')):
+			// A substitution: kept whole, nesting included.
+			j := closing(r, i)
+			word.WriteString(string(r[i:min(j+1, len(r))]))
+			inWord = true
+			i = j
+		case c == '#' && !inWord:
+			for i+1 < len(r) && r[i+1] != '\n' {
+				i++
+			}
+		case c == '&' && i > 0 && (r[i-1] == '>' || r[i-1] == '<'), c == '>' && i > 0 && r[i-1] == '&':
+			word.WriteRune(c) // 2>&1, &>file
+			inWord = true
+		case c == '(' && i+1 < len(r) && r[i+1] == ')':
+			word.WriteString("()") // a function definition: name()
+			inWord = true
+			i++
+		case c == ';' || c == '&' || c == '|' || c == '\n' || c == '(' || c == ')':
+			endCmd()
+		case c == ' ' || c == '\t':
+			endWord()
+		default:
+			word.WriteRune(c)
+			inWord = true
+		}
+	}
+	endCmd()
+	return out
+}
+
+// closing returns the index of what closes the substitution starting at i:
+// a backtick, or the parenthesis or brace matching the one after $.
+func closing(r []rune, i int) int {
+	if r[i] == '`' {
+		for j := i + 1; j < len(r); j++ {
+			if r[j] == '`' {
+				return j
+			}
+		}
+		return len(r)
+	}
+	open, shut := r[i+1], ')'
+	if open == '{' {
+		shut = '}'
+	}
+	depth := 0
+	for j := i + 1; j < len(r); j++ {
+		switch r[j] {
+		case open:
+			depth++
+		case shut:
+			if depth--; depth == 0 {
+				return j
+			}
+		case '\'':
+			for j++; j < len(r) && r[j] != '\''; j++ {
+			}
+		}
+	}
+	return len(r)
+}
+
+var (
+	// shellWords open or close a compound command; the command they
+	// introduce follows them.
+	shellWords = map[string]bool{
+		"do": true, "then": true, "else": true, "elif": true, "if": true, "while": true, "until": true,
+		"!": true, "{": true, "}": true, "done": true, "fi": true, "time": true,
+	}
+	// headers are compound commands whose own words are not a command:
+	// `for f in a b`.
+	headers = map[string]bool{"for": true, "select": true, "in": true}
+	// wrappers run the command that follows them.
+	wrappers = map[string]bool{"builtin": true, "command": true, "exec": true, "nohup": true, "sudo": true, "env": true, "timeout": true}
+	// plumbing is shell housekeeping, not what the command is about.
+	plumbing = map[string]bool{
+		"cd": true, "set": true, "export": true, "unset": true, "local": true, "[": true, "[[": true,
+		"test": true, "true": true, "false": true, ":": true, "trap": true, "shopt": true,
+	}
+)
+
+// commandWords returns the words of the first real command in a simple
+// command, without leading assignments, shell keywords and wrappers, or nil
+// when it runs nothing of interest.
+func commandWords(words []string) []string {
+	for len(words) > 0 {
+		w := words[0]
+		switch {
+		case assignment.MatchString(w), shellWords[w]:
+			words = words[1:]
+		case headers[w], plumbing[w]:
+			return nil
+		case strings.Contains(w, "()"):
+			words = words[1:] // a function definition, name() {, then its body
+		case len(words) > 1 && words[1] == "()":
+			words = words[2:]
+		case wrappers[w]:
+			words = words[1:]
+			// Their own flags, and timeout's duration.
+			for len(words) > 0 && (strings.HasPrefix(words[0], "-") || w == "timeout" && words[0] != "" && words[0][0] >= '0' && words[0][0] <= '9') {
+				words = words[1:]
+			}
+		case strings.HasPrefix(w, "$") && !strings.Contains(w, "/"), strings.HasPrefix(w, "-"), w == "":
+			return nil // a command in a variable, or not a command at all
+		default:
+			return words
+		}
+	}
+	return nil
 }
 
 // subcommandTools are counted by subcommand ("git commit", "go test"),
@@ -133,24 +270,36 @@ var subcommandTools = map[string]bool{
 	"terraform": true, "uv": true, "pip": true, "brew": true, "mise": true,
 }
 
-// programOf names what a command runs, for counting: the program, plus the
-// subcommand for tools like git and go.
+// programOf names what a command runs, for counting: its first real
+// program, plus the subcommand for tools like git and go.
 func programOf(cmd string) string {
-	prog, args, _ := commandParts(cmd)
-	if prog == "" {
-		return ""
-	}
-	prog = filepath.Base(prog)
-	if subcommandTools[prog] {
-		// The subcommand is the first plain word: not a flag, and not a
-		// flag's value such as the path in `git -C /repo status`.
-		for _, a := range strings.Fields(args) {
-			if subcommandWord.MatchString(a) {
-				return prog + " " + a
+	inCase := false
+	for _, sc := range simpleCommands(cmd) {
+		// A case statement's patterns read like commands; skip all of it.
+		if sc[0] == "case" {
+			inCase = true
+		}
+		if inCase {
+			inCase = !slices.Contains(sc, "esac")
+			continue
+		}
+		words := commandWords(sc)
+		if len(words) == 0 {
+			continue
+		}
+		prog := filepath.Base(words[0])
+		if subcommandTools[prog] {
+			// The subcommand is the first plain word: not a flag, and not a
+			// flag's value such as the path in `git -C /repo status`.
+			for _, a := range words[1:] {
+				if subcommandWord.MatchString(a) {
+					return prog + " " + a
+				}
 			}
 		}
+		return prog
 	}
-	return prog
+	return ""
 }
 
 // commandCounts counts commands by program, most used first.
