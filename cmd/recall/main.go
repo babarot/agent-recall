@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -18,6 +19,7 @@ import (
 
 	"github.com/babarot/claude-recall/internal/config"
 	"github.com/babarot/claude-recall/internal/db"
+	"github.com/babarot/claude-recall/internal/importer"
 	"github.com/babarot/claude-recall/internal/tui"
 )
 
@@ -25,10 +27,16 @@ const usage = `recall - Archive and search coding agent sessions (Go port, in pr
 
 Usage:
   recall [tui]                  Browse sessions interactively
+  recall import [options]       Import sessions into the vault
   recall search <query> [opts]  Full-text search across sessions
 
 Global Options:
   --db <path>     Database path (default: ~/.claude/vault.db)
+
+Import Options:
+  --session <id>  Import a specific session
+  --project <name> Import sessions for a project
+  --dry-run       Show what would be imported
 
 Search Options:
   --project <name> Limit to a project
@@ -58,6 +66,8 @@ func run(args []string, stdout io.Writer) error {
 		return runTUI(args[1:])
 	case "search":
 		return runSearch(args[1:], stdout)
+	case "import":
+		return runImport(args[1:], stdout)
 	default:
 		return fmt.Errorf("unknown or not yet ported command: %s", args[0])
 	}
@@ -128,6 +138,41 @@ func writeJSON(w io.Writer, v any) error {
 	}
 	_, err := w.Write(buf.Bytes())
 	return err
+}
+
+// guardLiveDB refuses to write the live archive while the TypeScript
+// version still writes it: two writers that each delete and reinsert a
+// session can leave it half imported. The guard goes away when the Go port
+// replaces the TypeScript one.
+func guardLiveDB(path string) error {
+	if filepath.Clean(path) == filepath.Clean(config.DefaultDBPath()) && os.Getenv("RECALL_ALLOW_LIVE_DB") != "1" {
+		return fmt.Errorf("refusing to write %s while the TypeScript version owns it; pass --db with a copy", path)
+	}
+	return nil
+}
+
+func runImport(args []string, stdout io.Writer) error {
+	fs := flag.NewFlagSet("import", flag.ContinueOnError)
+	dbPath := fs.String("db", config.DefaultDBPath(), "database path")
+	session := fs.String("session", "", "import a specific session")
+	project := fs.String("project", "", "import sessions for a project")
+	var dryRun bool
+	fs.BoolVar(&dryRun, "dry-run", false, "show what would be imported")
+	fs.BoolVar(&dryRun, "n", false, "show what would be imported")
+	if _, err := parseInterspersed(fs, args); err != nil {
+		return err
+	}
+	if !dryRun {
+		if err := guardLiveDB(*dbPath); err != nil {
+			return err
+		}
+	}
+	return importer.Run(func() (*db.DB, error) { return db.Open(*dbPath, db.Options{}) }, importer.Options{
+		ProjectsDir: config.ProjectsDir(),
+		Session:     *session,
+		Project:     *project,
+		DryRun:      dryRun,
+	}, stdout)
 }
 
 func runTUI(args []string) error {
