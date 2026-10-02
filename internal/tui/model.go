@@ -98,6 +98,10 @@ type Model struct {
 	filter textinput.Model
 	comp   completion
 	sugOff int // first suggestion shown
+	sugSel int // highlighted suggestion
+	// sugHidden is set when Esc closes the suggestions, until the filter
+	// changes.
+	sugHidden bool
 
 	preview    viewport.Model
 	previewFor string // session ID the preview shows
@@ -551,6 +555,34 @@ func (m *Model) cycleFocus(delta int) {
 }
 
 func (m Model) updateFilter(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	// While folder suggestions show, the arrows, Enter and Esc act on them.
+	if list, _ := m.suggestions(); len(list) > 0 {
+		switch msg.String() {
+		case "down", "ctrl+n":
+			m.moveSuggestion(1)
+			m.refresh()
+			return m, nil
+		case "up", "ctrl+p":
+			m.moveSuggestion(-1)
+			m.refresh()
+			return m, nil
+		case "pgdown":
+			m.moveSuggestion(maxSuggest)
+			m.refresh()
+			return m, nil
+		case "pgup":
+			m.moveSuggestion(-maxSuggest)
+			m.refresh()
+			return m, nil
+		case "enter":
+			m.acceptSuggestion()
+			m.refresh()
+			return m, nil
+		case "esc":
+			m.sugHidden = true
+			return m, nil
+		}
+	}
 	switch msg.String() {
 	case "esc":
 		m.filter.SetValue("")
@@ -584,7 +616,7 @@ func (m Model) updateFilter(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	before := m.filter.Value()
 	m.filter, cmd = m.filter.Update(msg)
 	if m.filter.Value() != before {
-		m.sugOff = 0
+		m.sugOff, m.sugSel, m.sugHidden = 0, 0, false
 		m.refresh()
 	}
 	return m, cmd

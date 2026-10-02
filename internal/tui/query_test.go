@@ -69,7 +69,7 @@ func TestInSuggestsAndCompletes(t *testing.T) {
 	f := newFolderFixture(t)
 	m := typeFilter(t, folderModel(t, config.Default().TUI, f, 140, 40), "in:")
 	s := screen(m)
-	if !strings.Contains(s, "╭") || !strings.Contains(s, "notes") || !strings.Contains(s, "tab complete folder") {
+	if !strings.Contains(s, "╭") || !strings.Contains(s, "notes") || !strings.Contains(s, "↑↓ folder · enter pick · tab complete · esc close") {
 		t.Fatalf("in: should list folders to complete:\n%s", s)
 	}
 	m = press(t, m, "tab")
@@ -177,5 +177,52 @@ func TestTabKeepsTheHighlightInView(t *testing.T) {
 	}
 	if s := screen(m); !strings.Contains(m.filter.Value(), "proj-09") || !strings.Contains(s, "▎ ") || !strings.Contains(s, "↑ 2 more") {
 		t.Fatalf("after 10 tabs, %q:\n%s", m.filter.Value(), s)
+	}
+}
+
+func TestKeysGoToTheSuggestions(t *testing.T) {
+	m := typeFilter(t, manyFolders(t), "in:proj")
+	cursor := m.cursor
+	for range 9 {
+		m = press(t, m, "down")
+	}
+	if m.cursor != cursor || m.filter.Value() != "in:proj" {
+		t.Fatalf("down should move the highlight, not the list or the text: cursor %d, %q", m.cursor, m.filter.Value())
+	}
+	if _, idx := m.suggestions(); idx != 9 || !strings.Contains(screen(m), "↑ 2 more") {
+		t.Fatalf("highlight %d:\n%s", idx, screen(m))
+	}
+	m = update(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
+	m = press(t, m, "enter")
+	if v := m.filter.Value(); !strings.HasSuffix(v, "proj-08 ") || m.mode != modeFilter {
+		t.Fatalf("enter should pick proj-08 and keep filtering: %q", v)
+	}
+	if got := visibleIDs(m); got != "s08" {
+		t.Fatalf("list shows %s", got)
+	}
+	// With the box closed, the keys are the list's again.
+	m = press(t, m, "enter")
+	if m.mode != modeList {
+		t.Fatal("a second enter applies the filter")
+	}
+
+	// Tab starts from the highlighted suggestion.
+	m = typeFilter(t, manyFolders(t), "in:proj")
+	m = press(t, m, "down", "down", "tab")
+	if v := m.filter.Value(); !strings.HasSuffix(v, "proj-02") {
+		t.Fatalf("tab after two downs gave %q", v)
+	}
+
+	// Esc closes the box first, then clears the filter.
+	m = typeFilter(t, manyFolders(t), "in:proj")
+	m = press(t, m, "esc")
+	if _, _, _, _, open := m.suggestRect(); open || m.filter.Value() != "in:proj" {
+		t.Fatalf("esc should close the box and keep the text: %q", m.filter.Value())
+	}
+	if m = press(t, m, "down"); m.cursor != 1 {
+		t.Fatalf("with the box closed, down moves the list: %d", m.cursor)
+	}
+	if m = press(t, m, "esc"); m.filter.Value() != "" || m.mode != modeList {
+		t.Fatal("a second esc clears the filter")
 	}
 }

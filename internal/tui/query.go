@@ -108,7 +108,7 @@ func (m Model) inTerm() (start, end int, frag string, ok bool) {
 // suggestions are the folders for the in: term being typed, and which one
 // is highlighted.
 func (m Model) suggestions() ([]folderInfo, int) {
-	if m.mode != modeFilter {
+	if m.mode != modeFilter || m.sugHidden {
 		return nil, 0
 	}
 	_, _, frag, ok := m.inTerm()
@@ -118,7 +118,36 @@ func (m Model) suggestions() ([]folderInfo, int) {
 	if m.comp.active && m.comp.value == m.filter.Value() {
 		return m.foldersMatching(m.comp.base), m.comp.idx
 	}
-	return m.foldersMatching(frag), 0
+	list := m.foldersMatching(frag)
+	return list, max(0, min(m.sugSel, len(list)-1))
+}
+
+// moveSuggestion highlights the suggestion delta away. After a tab it
+// cycles the completed term instead, as tab does.
+func (m *Model) moveSuggestion(delta int) {
+	if m.comp.active && m.comp.value == m.filter.Value() {
+		m.complete(delta)
+		return
+	}
+	list, idx := m.suggestions()
+	m.sugSel = max(0, min(idx+delta, len(list)-1))
+	m.reveal(m.sugSel)
+}
+
+// reveal scrolls the suggestion box to show suggestion i.
+func (m *Model) reveal(i int) {
+	if i < m.sugOff {
+		m.sugOff = i
+	}
+	if i >= m.sugOff+maxSuggest {
+		m.sugOff = i - maxSuggest + 1
+	}
+}
+
+// acceptSuggestion picks the highlighted suggestion.
+func (m *Model) acceptSuggestion() {
+	_, idx := m.suggestions()
+	m.pickSuggestion(idx)
 }
 
 // complete replaces the in: term with the next (delta 1) or previous
@@ -129,9 +158,11 @@ func (m *Model) complete(delta int) bool {
 		return false
 	}
 	if !m.comp.active || m.comp.value != m.filter.Value() {
-		m.comp = completion{active: true, base: frag, idx: -1}
+		// Start from the highlighted suggestion: tab takes it.
+		_, sel := m.suggestions()
+		m.comp = completion{active: true, base: frag, idx: sel - 1}
 		if delta < 0 {
-			m.comp.idx = 0
+			m.comp.idx = sel + 1
 		}
 	}
 	all := m.foldersMatching(m.comp.base)
@@ -141,13 +172,8 @@ func (m *Model) complete(delta int) bool {
 	}
 	m.comp.idx = (m.comp.idx + delta + len(all)) % len(all)
 	m.comp.value = m.replaceTerm(start, end, inPrefix+all[m.comp.idx].name)
-	// Keep the highlighted suggestion in view.
-	if m.comp.idx < m.sugOff {
-		m.sugOff = m.comp.idx
-	}
-	if m.comp.idx >= m.sugOff+maxSuggest {
-		m.sugOff = m.comp.idx - maxSuggest + 1
-	}
+	m.sugSel = m.comp.idx
+	m.reveal(m.comp.idx)
 	return true
 }
 
@@ -199,7 +225,7 @@ func (m *Model) pickSuggestion(i int) {
 	}
 	m.replaceTerm(start, end, inPrefix+list[i].name+" ")
 	m.comp.active = false
-	m.sugOff = 0
+	m.sugOff, m.sugSel = 0, 0
 }
 
 // scrollSuggestions moves the suggestion box's view by delta.

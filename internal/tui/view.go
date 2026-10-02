@@ -273,9 +273,9 @@ func (m Model) renderHelp() string {
 	switch m.mode {
 	case modeFilter:
 		pairs = [][2]string{{"enter", "apply"}, {"esc", "clear"}, {"↑↓", "move"}}
-		if _, _, _, ok := m.inTerm(); ok {
-			pairs = append([][2]string{{"tab", "complete folder"}}, pairs...)
-		} else {
+		if list, _ := m.suggestions(); len(list) > 0 {
+			pairs = [][2]string{{"↑↓", "folder"}, {"enter", "pick"}, {"tab", "complete"}, {"esc", "close"}}
+		} else if _, _, _, ok := m.inTerm(); !ok {
 			pairs = append(pairs, [2]string{"in:", "folder"})
 		}
 	case modePreview:
