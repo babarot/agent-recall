@@ -14,19 +14,20 @@ import (
 // pane below or to the right) shares this one table.
 type column struct {
 	header string
-	// width returns the column width for a list this wide: 0 hides the
-	// column, flex makes it take the space the others leave.
-	width func(listWidth int) int
+	// minWidth is the narrowest list that shows the column.
+	minWidth int
+	// width is the column's width; flex columns share what the fixed ones
+	// leave, Title taking two thirds and Folder one third.
+	width int
+	flex  int // share of the leftover space, 0 for a fixed column
 	right bool
-	// cell renders the value. It must not exceed w cells; render truncates
-	// anyway, but cells that know their content can do it more nicely.
-	cell func(c cellCtx, r *row, w int) string
+	cell  func(c cellCtx, r *row, w int) string
 }
 
 const (
-	flex      = -1
 	colGap    = 2
-	minFlex   = 12
+	rowIndent = 2 // "▎ " on the selected row, two spaces on the others
+	minFlex   = 10
 	ellipsis  = "…"
 	worktreeM = "⌥"
 )
@@ -39,101 +40,58 @@ type cellCtx struct {
 
 func (c cellCtx) style(s lipgloss.Style) lipgloss.Style { return c.st.on(s, c.sel) }
 
-func at(min, w int) func(int) int {
-	return func(lw int) int {
-		if lw >= min {
-			return w
-		}
-		return 0
-	}
-}
-
 var columns = []column{
 	{
-		header: "Ended",
-		width:  at(100, 11),
+		header: "Date", width: 14,
 		cell: func(c cellCtx, r *row, w int) string {
-			return c.style(c.st.dim).Render(formatEnded(r.s.EndedAt, c.now))
+			return c.style(c.st.subtle).Render(relativeDate(r.s.EndedAt, c.now))
 		},
 	},
 	{
-		header: "Age",
-		width: func(lw int) int {
-			if lw < 100 {
-				return 4
-			}
-			return 0
-		},
+		header: "Title", flex: 2,
 		cell: func(c cellCtx, r *row, w int) string {
-			return c.style(c.st.dim).Render(formatAge(r.s.EndedAt, c.now))
+			return c.style(c.st.title).Render(ansi.Truncate(r.title, w, ellipsis))
 		},
 	},
 	{
-		header: "Title",
-		width:  func(int) int { return flex },
+		header: "Folder", flex: 1,
 		cell: func(c cellCtx, r *row, w int) string {
-			return c.style(lipgloss.NewStyle()).Render(ansi.Truncate(r.title, w, ellipsis))
-		},
-	},
-	{
-		header: "Folder",
-		width: func(lw int) int {
-			switch {
-			case lw >= 120:
-				return 32
-			case lw >= 60:
-				return 22
-			}
-			return 0
-		},
-		cell: func(c cellCtx, r *row, w int) string {
-			base := c.style(lipgloss.NewStyle())
+			name, badge := c.style(c.st.text), c.style(c.st.worktree)
 			if r.gone {
-				base = c.style(c.st.warn)
-			}
-			if r.worktree == "" {
-				return base.Render(ansi.Truncate(r.folder, w, ellipsis))
+				name, badge = c.style(c.st.gone), c.style(c.st.gone)
 			}
 			folder := ansi.Truncate(r.folder, w, ellipsis)
-			rest := w - ansi.StringWidth(folder)
+			if r.worktree == "" {
+				return name.Render(folder)
+			}
+			rest := w - ansi.StringWidth(folder) - 1
 			if rest < 4 {
-				return base.Render(folder)
+				return name.Render(folder)
 			}
-			suffix := ansi.Truncate(" "+worktreeM+" "+r.worktree, rest, ellipsis)
-			return base.Render(folder) + c.style(c.st.dim).Render(suffix)
+			return name.Render(folder) + c.style(c.st.text).Render(" ") +
+				badge.Render(ansi.Truncate(worktreeM+" "+r.worktree, rest, ellipsis))
 		},
 	},
 	{
-		header: "Branch",
-		width:  at(120, 24),
+		header: "Branch", width: 16, minWidth: 90,
 		cell: func(c cellCtx, r *row, w int) string {
-			s := c.style(lipgloss.NewStyle())
-			// A branch named after the worktree repeats the Folder column.
-			if r.worktree != "" && strings.Contains(r.s.GitBranch, r.worktree) {
-				s = c.style(c.st.dim)
-			}
-			return s.Render(ansi.Truncate(r.s.GitBranch, w, ellipsis))
+			return c.style(c.st.dim).Render(ansi.Truncate(r.s.GitBranch, w, ellipsis))
 		},
 	},
 	{
-		header: "Msgs",
-		width:  at(60, 5),
-		right:  true,
+		header: "Msgs", width: 5, minWidth: 100, right: true,
 		cell: func(c cellCtx, r *row, w int) string {
-			return c.style(lipgloss.NewStyle()).Render(strconv.Itoa(r.s.MessageCount))
+			return c.style(c.st.text).Render(strconv.Itoa(r.s.MessageCount))
 		},
 	},
 	{
-		header: "Size",
-		width:  at(110, 6),
-		right:  true,
+		header: "Size", width: 6, minWidth: 110, right: true,
 		cell: func(c cellCtx, r *row, w int) string {
-			return c.style(lipgloss.NewStyle()).Render(formatSize(r.s.FileSize))
+			return c.style(c.st.subtle).Render(formatSize(r.s.FileSize))
 		},
 	},
 	{
-		header: "ID",
-		width:  func(int) int { return 8 },
+		header: "ID", width: 8, minWidth: 120,
 		cell: func(c cellCtx, r *row, w int) string {
 			return c.style(c.st.id).Render(r.s.ID[:min(8, len(r.s.ID))])
 		},
@@ -146,34 +104,44 @@ type placed struct {
 }
 
 // layoutColumns returns the visible columns and their widths for a list of
-// the given width, one cell of padding on each side included.
+// the given width.
 func layoutColumns(listWidth int) []placed {
-	inner := listWidth - 2
+	inner := listWidth - rowIndent - 1
 	var out []placed
-	fixed, flexAt := 0, -1
+	fixed, shares := 0, 0
 	for i := range columns {
-		w := columns[i].width(inner)
-		if w == 0 {
+		c := &columns[i]
+		if listWidth < c.minWidth {
 			continue
 		}
-		if w == flex {
-			flexAt = len(out)
-		} else {
-			fixed += w
-		}
-		out = append(out, placed{col: &columns[i], width: w})
+		fixed += c.width
+		shares += c.flex
+		out = append(out, placed{col: c, width: c.width})
 	}
-	if flexAt >= 0 {
-		out[flexAt].width = max(minFlex, inner-fixed-colGap*(len(out)-1))
+	rest := max(minFlex*shares, inner-fixed-colGap*(len(out)-1))
+	given := 0
+	for i := range out {
+		if f := out[i].col.flex; f > 0 {
+			out[i].width = max(minFlex, rest*f/shares)
+			given += out[i].width
+		}
+	}
+	// Rounding leftovers go to the first flex column (Title).
+	for i := range out {
+		if out[i].col.flex > 0 {
+			out[i].width += max(0, rest-given)
+			break
+		}
 	}
 	return out
 }
 
-// renderRow lays cells out at their widths, padded and aligned.
-func renderRow(cols []placed, listWidth int, cells func(p placed) string, pad lipgloss.Style) string {
+// renderRow lays cells out at their widths, padded and aligned, after the
+// row indent. pad styles the spaces between and around cells.
+func renderRow(cols []placed, listWidth int, indent string, cells func(p placed) string, pad lipgloss.Style) string {
 	var b strings.Builder
-	b.WriteString(pad.Render(" "))
-	used := 1
+	b.WriteString(indent)
+	used := ansi.StringWidth(indent)
 	for i, p := range cols {
 		if i > 0 {
 			b.WriteString(pad.Render(strings.Repeat(" ", colGap)))

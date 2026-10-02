@@ -28,11 +28,20 @@ func newRow(s db.Session, home string, wt *worktree.Resolver) row {
 	r := row{s: s, title: displayTitle(s)}
 	info := wt.Resolve(s.ProjectPath)
 	r.gone = !info.Exists
-	if info.IsWorktree() {
+	switch {
+	case info.IsWorktree():
 		r.mainRoot = info.MainRoot
 		r.folder = shortPath(info.MainRoot, home)
 		r.worktree = worktreeName(info.Root)
-	} else {
+	case r.gone:
+		// A removed worktree can no longer be resolved through git, but
+		// the tools that create worktrees put them at recognizable paths.
+		if repo, name, ok := removedWorktree(s.ProjectPath, home); ok {
+			r.folder, r.worktree = repo, name
+			break
+		}
+		r.folder = shortPath(s.ProjectPath, home)
+	default:
 		r.folder = shortPath(s.ProjectPath, home)
 	}
 	r.search = strings.ToLower(strings.Join([]string{r.title, r.folder, r.worktree, s.GitBranch, s.ID}, " "))
@@ -57,6 +66,26 @@ func shortPath(path, home string) string {
 		}
 	}
 	return path
+}
+
+var (
+	// herdr: ~/.herdr/worktrees/<repo>/worktree-<name>
+	herdrWorktree = regexp.MustCompile(`/\.herdr/worktrees/([^/]+)/(?:worktree-)?([^/]+)$`)
+	// Claude Code: <repo>/.claude/worktrees/<name>
+	claudeWorktree = regexp.MustCompile(`^(.+)/\.claude/worktrees/([^/]+)$`)
+)
+
+// removedWorktree guesses the repository and worktree name of a worktree
+// directory that no longer exists, from where herdr or Claude Code put it.
+// herdr's path holds only the repository's name, not its owner.
+func removedWorktree(path, home string) (repo, name string, ok bool) {
+	if m := claudeWorktree.FindStringSubmatch(path); m != nil {
+		return shortPath(m[1], home), m[2], true
+	}
+	if m := herdrWorktree.FindStringSubmatch(path); m != nil {
+		return m[1], m[2], true
+	}
+	return "", "", false
 }
 
 // worktreeName is the worktree directory's name without the "worktree-"
@@ -136,21 +165,27 @@ func formatEnded(t, now time.Time) string {
 	}
 }
 
-// formatAge is a compact age for narrow terminals: 45m, 3h, 12d, 2y.
-func formatAge(t, now time.Time) string {
+// relativeDate is how the list shows when a session ended, as cc360 does:
+// "Today 15:04", "Yesterday", "3d ago", "Sep 28", "2025-12-31".
+func relativeDate(t, now time.Time) string {
 	if t.IsZero() {
 		return "-"
 	}
-	d := now.Sub(t)
+	t, now = t.Local(), now.Local()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	day := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+	days := int(today.Sub(day).Hours() / 24)
 	switch {
-	case d < time.Hour:
-		return fmt.Sprintf("%dm", max(0, int(d.Minutes())))
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh", int(d.Hours()))
-	case d < 365*24*time.Hour:
-		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	case days <= 0:
+		return "Today " + t.Format("15:04")
+	case days == 1:
+		return "Yesterday"
+	case days < 7:
+		return fmt.Sprintf("%dd ago", days)
+	case t.Year() == now.Year():
+		return t.Format("Jan _2")
 	default:
-		return fmt.Sprintf("%dy", int(d.Hours()/24/365))
+		return t.Format("2006-01-02")
 	}
 }
 
@@ -163,15 +198,4 @@ func formatSize(n int64) string {
 	default:
 		return fmt.Sprintf("%dB", n)
 	}
-}
-
-func formatDuration(d time.Duration) string {
-	if d < time.Minute {
-		return "<1m"
-	}
-	h, m := int(d.Hours()), int(d.Minutes())%60
-	if h == 0 {
-		return fmt.Sprintf("%dm", m)
-	}
-	return fmt.Sprintf("%dh %dm", h, m)
 }

@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/babarot/claude-recall/internal/theme"
 )
 
 // Detail pane positions in the TUI.
@@ -29,11 +31,14 @@ type TUI struct {
 	// DetailAutoWidth is the terminal width, in columns, at which "auto"
 	// moves the detail pane to the right.
 	DetailAutoWidth int `toml:"detail_auto_width"`
+	// Theme is a color scheme name from theme.Names, or "auto" to follow
+	// the terminal background.
+	Theme string `toml:"theme"`
 }
 
 // Default returns the settings used when the config file is absent.
 func Default() File {
-	return File{TUI: TUI{DetailPosition: DetailBottom, DetailAutoWidth: 160}}
+	return File{TUI: TUI{DetailPosition: DetailBottom, DetailAutoWidth: 160, Theme: theme.Auto}}
 }
 
 // FilePath returns the config file location, honoring XDG_CONFIG_HOME.
@@ -60,6 +65,9 @@ func Load(path string) (File, error) {
 	default:
 		return File{}, fmt.Errorf("%s: tui.detail_position must be %q, %q or %q, got %q",
 			path, DetailBottom, DetailRight, DetailAuto, cfg.TUI.DetailPosition)
+	}
+	if !theme.Valid(cfg.TUI.Theme) {
+		return File{}, fmt.Errorf("%s: tui.theme must be one of %s, got %q", path, theme.NamesString(), cfg.TUI.Theme)
 	}
 	if cfg.TUI.DetailAutoWidth <= 0 {
 		return File{}, fmt.Errorf("%s: tui.detail_auto_width must be positive", path)

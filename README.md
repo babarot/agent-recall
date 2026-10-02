@@ -151,7 +151,13 @@ The title is the session's `/rename` name, or else the title Claude Code generat
 # on the right when the terminal is at least detail_auto_width columns wide.
 detail_position = "bottom"
 detail_auto_width = 160
+# Color scheme: "auto" (default) picks catppuccin-mocha on a dark terminal and
+# catppuccin-latte on a light one. Also: tokyo-night, dracula, nord,
+# gruvbox-dark, and ansi (the terminal's own 16 colors).
+theme = "auto"
 ```
+
+The look follows [cc360](https://github.com/achton/cc360). A worktree that has since been removed is shown struck through, with its repository and name guessed from where herdr (`~/.herdr/worktrees/<repo>/worktree-<name>`) or Claude Code (`<repo>/.claude/worktrees/<name>`) put it.
 
 ### Import
 

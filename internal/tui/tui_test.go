@@ -12,6 +12,7 @@ import (
 
 	"github.com/babarot/claude-recall/internal/config"
 	"github.com/babarot/claude-recall/internal/db"
+	"github.com/babarot/claude-recall/internal/theme"
 )
 
 var now = time.Date(2026, 10, 2, 19, 0, 0, 0, time.Local)
@@ -197,11 +198,14 @@ func TestColumnsAdaptToWidth(t *testing.T) {
 		}
 		return strings.Join(out, ",")
 	}
-	if got := names(140); got != "Ended,Title,Folder,Branch,Msgs,Size,ID" {
+	if got := names(140); got != "Date,Title,Folder,Branch,Msgs,Size,ID" {
 		t.Errorf("140: %s", got)
 	}
-	if got := names(80); got != "Age,Title,Folder,Msgs,ID" {
+	if got := names(80); got != "Date,Title,Folder" {
 		t.Errorf("80: %s", got)
+	}
+	if got := names(100); got != "Date,Title,Folder,Branch,Msgs" {
+		t.Errorf("100: %s", got)
 	}
 }
 
@@ -260,4 +264,56 @@ func TestShellQuote(t *testing.T) {
 func TestMain(m *testing.M) {
 	os.Setenv("HOME", "/nonexistent-home")
 	os.Exit(m.Run())
+}
+
+func TestRelativeDate(t *testing.T) {
+	cases := map[time.Time]string{
+		now.Add(-time.Hour):                             "Today 18:00",
+		now.Add(-24 * time.Hour):                        "Yesterday",
+		now.Add(-3 * 24 * time.Hour):                    "3d ago",
+		time.Date(2026, 3, 5, 9, 30, 0, 0, time.Local):  "Mar  5",
+		time.Date(2025, 12, 31, 0, 0, 0, 0, time.Local): "2025-12-31",
+		{}: "-",
+	}
+	for in, want := range cases {
+		if got := relativeDate(in, now); got != want {
+			t.Errorf("relativeDate(%v) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestRemovedWorktree(t *testing.T) {
+	home := "/Users/me"
+	cases := []struct{ path, repo, name string }{
+		{"/Users/me/.herdr/worktrees/dotfiles/worktree-brave-stone-cc30", "dotfiles", "brave-stone-cc30"},
+		{"/Users/me/src/github.com/me/app/.claude/worktrees/fix-login", "me/app", "fix-login"},
+	}
+	for _, c := range cases {
+		repo, name, ok := removedWorktree(c.path, home)
+		if !ok || repo != c.repo || name != c.name {
+			t.Errorf("removedWorktree(%s) = %q %q %v", c.path, repo, name, ok)
+		}
+	}
+	if _, _, ok := removedWorktree("/Users/me/src/github.com/me/app", home); ok {
+		t.Error("a plain folder is not a worktree")
+	}
+}
+
+func TestHeaderKeepsCountsAndSort(t *testing.T) {
+	m, _ := newTestModel(t, config.Default().TUI, 120, 30)
+	first := strings.Split(screen(m), "\n")[0]
+	if !strings.Contains(first, "recall // claude-recall") || !strings.Contains(first, "3 / 3 sessions · sort: Ended") {
+		t.Fatalf("header %q", first)
+	}
+}
+
+func TestEveryThemeRenders(t *testing.T) {
+	for _, name := range theme.Names() {
+		cfg := config.Default().TUI
+		cfg.Theme = name
+		m, _ := newTestModel(t, cfg, 120, 30)
+		if !strings.Contains(screen(m), "sessions") {
+			t.Errorf("%s: nothing rendered", name)
+		}
+	}
 }

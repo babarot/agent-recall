@@ -2,42 +2,69 @@ package tui
 
 import (
 	"charm.land/lipgloss/v2"
+
+	"github.com/babarot/claude-recall/internal/theme"
 )
 
-// styles holds every style the TUI renders with. They are rebuilt once the
-// terminal reports whether its background is dark, so the selection and dim
-// text read well on both.
+// styles holds every style the TUI renders with, built from one palette.
+// The layout follows cc360: a header bar, ╌ rules around the column
+// headers, an accent bar on the selected row and a rounded detail pane.
 type styles struct {
-	dark bool
-
-	title    lipgloss.Style // tool name in the header
+	header   lipgloss.Style // the bar itself
+	app      lipgloss.Style // "recall" on the bar
+	tag      lipgloss.Style // the rest of the bar
+	rule     lipgloss.Style
+	colHdr   lipgloss.Style
+	selected lipgloss.Style // background of the selected row
+	bar      lipgloss.Style // ▎ on the selected row
+	title    lipgloss.Style
+	text     lipgloss.Style
+	strong   lipgloss.Style
+	subtle   lipgloss.Style
+	muted    lipgloss.Style
 	dim      lipgloss.Style
-	bold     lipgloss.Style
-	accent   lipgloss.Style
 	id       lipgloss.Style
+	worktree lipgloss.Style
+	gone     lipgloss.Style // a removed folder or worktree
+	key      lipgloss.Style // keys in the help line
+	helpSep  lipgloss.Style
+	filter   lipgloss.Style
+	ok       lipgloss.Style
 	warn     lipgloss.Style
+	border   lipgloss.Style // the detail pane
 	user     lipgloss.Style
 	claude   lipgloss.Style
-	toast    lipgloss.Style
-	rule     lipgloss.Style
-	selected lipgloss.Style // background of the selected row
 }
 
-func newStyles(dark bool) styles {
-	ld := lipgloss.LightDark(dark)
+func fg(c string) lipgloss.Style { return lipgloss.NewStyle().Foreground(lipgloss.Color(c)) }
+
+func newStyles(p theme.Palette) styles {
+	surface := lipgloss.Color(p.Surface)
 	return styles{
-		dark:     dark,
-		title:    lipgloss.NewStyle().Bold(true).Foreground(ld(lipgloss.Color("#1f7a52"), lipgloss.Color("#6fd3a2"))),
-		dim:      lipgloss.NewStyle().Foreground(ld(lipgloss.Color("#6b7570"), lipgloss.Color("#7d8a85"))),
-		bold:     lipgloss.NewStyle().Bold(true),
-		accent:   lipgloss.NewStyle().Foreground(ld(lipgloss.Color("#1f7a52"), lipgloss.Color("#6fd3a2"))),
-		id:       lipgloss.NewStyle().Foreground(ld(lipgloss.Color("#2f62a8"), lipgloss.Color("#7fb4e6"))),
-		warn:     lipgloss.NewStyle().Foreground(ld(lipgloss.Color("#a33a2c"), lipgloss.Color("#e8836a"))),
-		user:     lipgloss.NewStyle().Bold(true).Foreground(ld(lipgloss.Color("#8a5a00"), lipgloss.Color("#e8c46a"))),
-		claude:   lipgloss.NewStyle().Bold(true).Foreground(ld(lipgloss.Color("#1f7a52"), lipgloss.Color("#6fd3a2"))),
-		toast:    lipgloss.NewStyle().Foreground(ld(lipgloss.Color("#1f7a52"), lipgloss.Color("#6fd3a2"))),
-		rule:     lipgloss.NewStyle().Foreground(ld(lipgloss.Color("#d0d6d2"), lipgloss.Color("#2f3a37"))),
-		selected: lipgloss.NewStyle().Background(ld(lipgloss.Color("#dcebe3"), lipgloss.Color("#22312c"))),
+		header:   lipgloss.NewStyle().Background(surface),
+		app:      fg(p.Accent).Bold(true).Background(surface),
+		tag:      fg(p.Dim).Background(surface),
+		rule:     fg(p.Border),
+		colHdr:   fg(p.Strong).Bold(true),
+		selected: lipgloss.NewStyle().Foreground(lipgloss.Color(p.Text)).Background(surface),
+		bar:      fg(p.Accent).Background(surface),
+		title:    fg(p.Title).Bold(true),
+		text:     lipgloss.NewStyle(),
+		strong:   fg(p.Strong),
+		subtle:   fg(p.Subtle),
+		muted:    fg(p.Muted),
+		dim:      fg(p.Dim),
+		id:       fg(p.Accent),
+		worktree: fg(p.Worktree),
+		gone:     fg(p.Dim).Strikethrough(true),
+		key:      fg(p.Accent).Bold(true),
+		helpSep:  fg(p.Border),
+		filter:   fg(p.Prompt),
+		ok:       fg(p.OK),
+		warn:     fg(p.Warn),
+		border:   lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color(p.Border)).Padding(0, 1),
+		user:     fg(p.Prompt).Bold(true),
+		claude:   fg(p.Title).Bold(true),
 	}
 }
 

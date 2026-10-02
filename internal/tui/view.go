@@ -13,12 +13,13 @@ import (
 )
 
 const (
-	headerLines   = 2 // title line, column headers
-	footerLines   = 2 // rule, key help
-	detailLines   = 9 // bottom pane body, below its rule
-	detailWidth   = 48
-	minRightWidth = 100 // narrower terminals always get the pane below
-	previewChrome = 4   // preview header, rule, rule, key help
+	tableChrome   = 4  // rule, column headers, rule, the row count line
+	footerLines   = 2  // status line, key help
+	detailContent = 7  // lines inside the bottom detail pane
+	detailFrame   = 2  // its top and bottom border
+	detailWidth   = 52 // the pane on the right, border included
+	minRightWidth = 100
+	previewChrome = 5 // header bar, rule, folder line, status, help
 )
 
 // detailRight reports whether the detail pane sits right of the list. Only
@@ -43,10 +44,16 @@ func (m Model) listWidth() int {
 	return m.width
 }
 
+func (m Model) filterShown() bool { return m.mode == modeFilter || m.filter.Value() != "" }
+
+// listHeight is the number of session rows that fit.
 func (m Model) listHeight() int {
-	h := m.height - headerLines - footerLines
+	h := m.height - 1 - tableChrome - footerLines
+	if m.filterShown() {
+		h--
+	}
 	if m.detailOpen && !m.detailRight() {
-		h -= detailLines + 1
+		h -= detailContent + detailFrame
 	}
 	return max(1, h)
 }
@@ -54,7 +61,7 @@ func (m Model) listHeight() int {
 func (m Model) View() tea.View {
 	v := tea.NewView(m.render())
 	v.AltScreen = true
-	v.WindowTitle = "claude-recall"
+	v.WindowTitle = "recall"
 	return v
 }
 
@@ -66,30 +73,135 @@ func (m Model) render() string {
 		return m.renderPreview()
 	}
 
-	list := m.renderList()
-	var body string
+	lines := []string{m.renderHeader()}
+	if m.filterShown() {
+		lines = append(lines, " "+m.st.filter.Render(m.filter.View()))
+	}
+	table := m.renderTable()
 	switch {
 	case m.detailRight():
-		pane := lipgloss.NewStyle().
-			Width(detailWidth - 1).
-			Height(len(list)).
-			BorderLeft(true).
-			BorderStyle(lipgloss.NormalBorder()).
-			BorderForeground(m.st.rule.GetForeground()).
-			Render(strings.Join(m.renderDetail(detailWidth-3, true), "\n"))
-		body = lipgloss.JoinHorizontal(lipgloss.Top, strings.Join(list, "\n"), pane)
+		pane := m.renderDetail(detailWidth, len(table)-detailFrame)
+		lines = append(lines, lipgloss.JoinHorizontal(lipgloss.Top, strings.Join(table, "\n"), pane))
 	case m.detailOpen:
-		lines := append(list, m.rule())
-		lines = append(lines, fit(m.renderDetail(m.width-2, false), detailLines)...)
-		body = strings.Join(lines, "\n")
+		lines = append(lines, table...)
+		lines = append(lines, m.renderDetail(m.width, detailContent))
 	default:
-		body = strings.Join(list, "\n")
+		lines = append(lines, table...)
 	}
-	return strings.Join([]string{m.renderHeader(), body, m.rule(), m.renderFooter()}, "\n")
+	lines = append(lines, m.renderStatus(), m.renderHelp())
+	return strings.Join(lines, "\n")
 }
 
-func (m Model) rule() string {
-	return m.st.rule.Render(strings.Repeat("─", m.width))
+func (m Model) rule(w int) string { return m.st.rule.Render(strings.Repeat("╌", w)) }
+
+// bar renders the header bar: left and right text on the surface color.
+func (m Model) bar(left, right string) string {
+	gap := m.width - 2 - ansi.StringWidth(left) - ansi.StringWidth(right)
+	if gap < 1 {
+		right = ""
+		gap = max(0, m.width-2-ansi.StringWidth(left))
+	}
+	s := m.st.header.Render(" ") + left + m.st.header.Render(strings.Repeat(" ", gap)) + right + m.st.header.Render(" ")
+	return ansi.Truncate(s, m.width, "")
+}
+
+func (m Model) renderHeader() string {
+	left := m.st.app.Render("recall") + m.st.tag.Render(" // claude-recall")
+	right := m.st.tag.Render(fmt.Sprintf("%d / %d sessions · sort: %s", len(m.visible), len(m.rows), sorts[m.sortIdx].name))
+	return m.bar(left, right)
+}
+
+// renderTable returns the rules, column headers, exactly listHeight rows
+// and the row count line.
+func (m Model) renderTable() []string {
+	lw := m.listWidth()
+	cols := layoutColumns(lw)
+	plain := lipgloss.NewStyle()
+
+	head := renderRow(cols, lw, "  ", func(p placed) string { return m.st.colHdr.Render(p.col.header) }, plain)
+	lines := []string{m.rule(lw), head, m.rule(lw)}
+
+	h := m.listHeight()
+	now := m.now()
+	end := min(len(m.visible), m.offset+h)
+	for i := m.offset; i < end; i++ {
+		r := &m.rows[m.visible[i]]
+		sel := i == m.cursor
+		ctx := cellCtx{st: m.st, sel: sel, now: now}
+		pad, indent := plain, "  "
+		if sel {
+			pad = m.st.selected
+			indent = m.st.bar.Render("▎") + m.st.selected.Render(" ")
+		}
+		lines = append(lines, renderRow(cols, lw, indent, func(p placed) string { return p.col.cell(ctx, r, p.width) }, pad))
+	}
+	if len(m.visible) == 0 {
+		lines = append(lines, m.st.muted.Render("  No sessions match the filter. Esc clears it."))
+	}
+	for len(lines) < 3+h {
+		lines = append(lines, "")
+	}
+	info := fmt.Sprintf("  %d sessions", len(m.visible))
+	if more := len(m.visible) - end; more > 0 {
+		info += fmt.Sprintf(" · ↓ %d more", more)
+	}
+	return append(lines[:3+h], m.st.muted.Render(info))
+}
+
+// wrap breaks s into lines at most w cells wide.
+func wrap(s string, w int) []string {
+	return strings.Split(lipgloss.NewStyle().Width(w).Render(s), "\n")
+}
+
+// renderDetail draws the selected session in a rounded pane width cells wide
+// with exactly content lines inside.
+func (m Model) renderDetail(width, content int) string {
+	inner := max(10, width-m.st.border.GetHorizontalFrameSize())
+	var lines []string
+	if r := m.current(); r != nil {
+		lines = append(lines, m.st.title.Render(ansi.Truncate(r.title, inner, ellipsis)))
+
+		// The first prompt gets what the fixed lines below leave.
+		promptLines := max(1, content-4)
+		if first := cleanPrompt(r.s.FirstPrompt); first != r.title {
+			wrapped := wrap(first, inner)
+			if len(wrapped) > promptLines {
+				wrapped = wrapped[:promptLines]
+				wrapped[promptLines-1] = ansi.Truncate(wrapped[promptLines-1]+ellipsis, inner, ellipsis)
+			}
+			for _, l := range wrapped {
+				lines = append(lines, m.st.strong.Render(l))
+			}
+		}
+		for len(lines) < 1+promptLines {
+			lines = append(lines, "")
+		}
+
+		name, badge := m.st.strong, m.st.worktree
+		if r.gone {
+			name, badge = m.st.gone, m.st.gone
+		}
+		folder := m.st.subtle.Render("Folder: ") + name.Render(r.folder)
+		if r.worktree != "" {
+			folder += " " + badge.Render(worktreeM+" "+r.worktree)
+		}
+		path := tildePath(r.s.ProjectPath, m.home)
+		if r.gone {
+			path += ", removed"
+		}
+		folder += m.st.muted.Render("  (" + path + ")")
+		if r.mainRoot != "" {
+			folder += m.st.muted.Render("  worktree of " + tildePath(r.mainRoot, m.home))
+		}
+		lines = append(lines, ansi.Truncate(folder, inner, ellipsis))
+
+		meta := fmt.Sprintf("Branch: %s  Msgs: %d  Size: %s  Started: %s  Ended: %s", r.s.GitBranch, r.s.MessageCount,
+			formatSize(r.s.FileSize), r.s.StartedAt.Local().Format("2006-01-02 15:04"), r.s.EndedAt.Local().Format("2006-01-02 15:04"))
+		lines = append(lines, ansi.Truncate(m.st.muted.Render(meta), inner, ellipsis))
+		lines = append(lines, m.st.muted.Render("ID: ")+m.st.id.Render(r.s.ID))
+	}
+	lines = fit(lines, content)
+	return m.st.border.Width(width).Render(strings.Join(lines, "\n"))
 }
 
 // fit pads or cuts lines to exactly n.
@@ -103,127 +215,67 @@ func fit(lines []string, n int) []string {
 	return lines
 }
 
-func (m Model) renderHeader() string {
-	if m.mode == modeFilter || m.filter.Value() != "" {
-		return " " + m.filter.View() + "  " + m.st.dim.Render(fmt.Sprintf("%d matches", len(m.visible)))
+func (m Model) renderStatus() string {
+	if m.toast == "" {
+		return ""
 	}
-	return " " + m.st.title.Render("claude-recall") + "  " +
-		m.st.dim.Render(fmt.Sprintf("%d / %d sessions · sort: %s", len(m.visible), len(m.rows), sorts[m.sortIdx].name))
+	s := m.st.subtle
+	switch m.toastKind {
+	case toastOK:
+		s = m.st.ok
+	case toastWarn:
+		s = m.st.warn
+	}
+	return " " + s.Render(ansi.Truncate(m.toast, m.width-2, ellipsis))
 }
 
-// renderList returns the column header and exactly listHeight rows.
-func (m Model) renderList() []string {
-	lw := m.listWidth()
-	cols := layoutColumns(lw)
-	plain := lipgloss.NewStyle()
-
-	head := renderRow(cols, lw, func(p placed) string { return m.st.dim.Render(p.col.header) }, plain)
-	lines := []string{head}
-
-	h := m.listHeight()
-	now := m.now()
-	for i := m.offset; i < min(len(m.visible), m.offset+h); i++ {
-		r := &m.rows[m.visible[i]]
-		sel := i == m.cursor
-		ctx := cellCtx{st: m.st, sel: sel, now: now}
-		pad := plain
-		if sel {
-			pad = m.st.selected
-		}
-		lines = append(lines, renderRow(cols, lw, func(p placed) string { return p.col.cell(ctx, r, p.width) }, pad))
-	}
-	if len(m.visible) == 0 {
-		lines = append(lines, m.st.dim.Render(" No sessions match the filter. Esc clears it."))
-	}
-	return fit(lines, h+1)
-}
-
-// renderDetail describes the selected session in lines at most w wide. The
-// pane on the right has room to wrap the first prompt.
-func (m Model) renderDetail(w int, tall bool) []string {
-	r := m.current()
-	if r == nil {
-		return nil
-	}
-	const labelW = 12
-	valW := max(10, w-labelW)
-	kv := func(label, value string) string {
-		return " " + m.st.dim.Render(fmt.Sprintf("%-*s", labelW, label)) + ansi.Truncate(value, valW, ellipsis)
-	}
-
-	folder := tildePath(r.s.ProjectPath, m.home)
-	if r.gone {
-		folder = m.st.warn.Render(folder + " (gone)")
-	}
-	lines := []string{
-		" " + m.st.bold.Render(ansi.Truncate(r.title, w, ellipsis)),
-		kv("ID", m.st.id.Render(r.s.ID)),
-		kv("Folder", folder),
-	}
-	if r.mainRoot != "" {
-		lines = append(lines, kv("Worktree of", tildePath(r.mainRoot, m.home)))
-	}
-	lines = append(lines,
-		kv("Branch", r.s.GitBranch),
-		kv("Time", fmt.Sprintf("%s → %s  %s", formatEnded(r.s.StartedAt, m.now()), formatEnded(r.s.EndedAt, m.now()),
-			m.st.dim.Render("("+formatDuration(r.s.EndedAt.Sub(r.s.StartedAt))+")"))),
-		kv("Size", fmt.Sprintf("%d msgs · %s", r.s.MessageCount, formatSize(r.s.FileSize))),
-	)
-	first := cleanPrompt(r.s.FirstPrompt)
-	if tall {
-		wrapped := strings.Split(lipgloss.NewStyle().Width(valW).Render(first), "\n")
-		wrapped = fit(wrapped, min(len(wrapped), 6))
-		lines = append(lines, kv("First", m.st.dim.Render(wrapped[0])))
-		for _, l := range wrapped[1:] {
-			lines = append(lines, " "+strings.Repeat(" ", labelW)+m.st.dim.Render(l))
-		}
-	} else {
-		lines = append(lines, kv("First", m.st.dim.Render(ansi.Truncate(first, valW, ellipsis))))
-	}
-	lines = append(lines, kv("Resume", m.st.accent.Render(resumeCommand(r))))
-	return lines
-}
-
-func (m Model) renderFooter() string {
-	if m.toast != "" {
-		return " " + m.st.toast.Render(ansi.Truncate(m.toast, m.width-2, ellipsis))
-	}
-	var help string
+func (m Model) renderHelp() string {
+	var pairs [][2]string
 	switch m.mode {
 	case modeFilter:
-		help = "type to filter  ↑↓ move  enter apply  esc clear"
+		pairs = [][2]string{{"enter", "apply"}, {"esc", "clear"}, {"↑↓", "move"}}
 	case modePreview:
-		help = "space/esc back  ↑↓ scroll  enter resume  y copy id  Y copy cmd"
+		pairs = [][2]string{{"space", "back"}, {"↑↓", "scroll"}, {"enter", "resume"}, {"y", "copy id"}, {"Y", "copy cmd"}}
 	default:
-		help = "↑↓/jk move  enter resume  space preview  y copy id  Y copy cmd  tab detail  / filter  s sort  q quit"
+		pairs = [][2]string{{"enter", "resume"}, {"space", "preview"}, {"y", "copy id"}, {"Y", "copy cmd"},
+			{"tab", "detail"}, {"/", "filter"}, {"s", "sort"}, {"q", "quit"}}
 	}
-	return " " + m.st.dim.Render(ansi.Truncate(help, m.width-2, ellipsis))
+	parts := make([]string, len(pairs))
+	for i, p := range pairs {
+		parts[i] = m.st.key.Render(p[0]) + " " + m.st.muted.Render(p[1])
+	}
+	return " " + ansi.Truncate(strings.Join(parts, m.st.helpSep.Render(" · ")), m.width-2, ellipsis)
+}
+
+func (m Model) previewRow() *row {
+	for i := range m.rows {
+		if m.rows[i].s.ID == m.previewFor {
+			return &m.rows[i]
+		}
+	}
+	return nil
 }
 
 func (m Model) renderPreview() string {
-	var r *row
-	for i := range m.rows {
-		if m.rows[i].s.ID == m.previewFor {
-			r = &m.rows[i]
-			break
-		}
+	r := m.previewRow()
+	if r == nil {
+		return ""
 	}
-	head := ""
-	if r != nil {
-		where := r.folder
-		if r.worktree != "" {
-			where += " " + worktreeM + " " + r.worktree
-		}
-		meta := fmt.Sprintf("%s · %d msgs · %s · %s", r.s.ID[:min(8, len(r.s.ID))], r.s.MessageCount, formatSize(r.s.FileSize), where)
-		head = " " + m.st.title.Render(r.title) + "  " + m.st.dim.Render(meta)
-		head = ansi.Truncate(head, m.width, ellipsis)
+	left := m.st.app.Render("recall") + m.st.tag.Render(" // ") + m.st.title.Background(m.st.header.GetBackground()).Render(r.title)
+	right := m.st.tag.Render(fmt.Sprintf("%s · %d msgs · %s", r.s.ID[:min(8, len(r.s.ID))], r.s.MessageCount, formatSize(r.s.FileSize)))
+	where := " " + m.st.subtle.Render(r.folder)
+	if r.worktree != "" {
+		where += " " + m.st.worktree.Render(worktreeM+" "+r.worktree)
 	}
-	return strings.Join([]string{head, m.rule(), m.preview.View(), m.rule(), m.renderFooter()}, "\n")
+	where += m.st.dim.Render("  " + r.s.GitBranch)
+	return strings.Join([]string{m.bar(ansi.Truncate(left, m.width-2-ansi.StringWidth(right)-1, ellipsis), right),
+		m.rule(m.width), ansi.Truncate(where, m.width, ellipsis), m.preview.View(), m.renderStatus(), m.renderHelp()}, "\n")
 }
 
 // renderConversation formats preview messages for a terminal w cells wide.
 func (m Model) renderConversation(p db.Preview, w int) string {
-	const whoW = 14
+	// "claude 10/02 17:11" is the widest label.
+	whoW := ansi.StringWidth("claude ") + ansi.StringWidth(formatEnded(m.now().AddDate(0, 0, -1), m.now())) + 1
 	textW := max(20, w-whoW-2)
 	var b strings.Builder
 	one := func(msg db.Message) {
@@ -233,9 +285,8 @@ func (m Model) renderConversation(p db.Preview, w int) string {
 		}
 		label := who + " " + m.st.dim.Render(formatEnded(msg.Timestamp, m.now()))
 		labelPad := strings.Repeat(" ", max(0, whoW-ansi.StringWidth(label)))
-		body := strings.TrimSpace(msg.Content)
-		lines := strings.Split(lipgloss.NewStyle().Width(textW).Render(body), "\n")
-		for i, l := range lines {
+		for i, l := range wrap(strings.TrimSpace(msg.Content), textW) {
+			l = m.st.strong.Render(l)
 			if i == 0 {
 				fmt.Fprintf(&b, " %s%s %s\n", label, labelPad, l)
 			} else {
@@ -248,13 +299,13 @@ func (m Model) renderConversation(p db.Preview, w int) string {
 		one(msg)
 	}
 	if p.Skipped > 0 {
-		fmt.Fprintf(&b, " %s\n\n", m.st.dim.Render(fmt.Sprintf("··· %d messages skipped ···", p.Skipped)))
+		fmt.Fprintf(&b, " %s\n\n", m.st.muted.Render(fmt.Sprintf("··· %d messages skipped ···", p.Skipped)))
 	}
 	for _, msg := range p.Tail {
 		one(msg)
 	}
 	if len(p.Head)+len(p.Tail) == 0 {
-		fmt.Fprintf(&b, " %s\n", m.st.dim.Render("This session has no text messages."))
+		fmt.Fprintf(&b, " %s\n", m.st.muted.Render("This session has no text messages."))
 	}
 	return b.String()
 }

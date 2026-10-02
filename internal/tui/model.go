@@ -17,6 +17,7 @@ import (
 
 	"github.com/babarot/claude-recall/internal/config"
 	"github.com/babarot/claude-recall/internal/db"
+	"github.com/babarot/claude-recall/internal/theme"
 	"github.com/babarot/claude-recall/internal/worktree"
 )
 
@@ -60,6 +61,14 @@ const (
 
 type toastExpired struct{ id int }
 
+type toastKind int
+
+const (
+	toastInfo toastKind = iota
+	toastOK
+	toastWarn
+)
+
 // Model is the Bubble Tea model of the session list.
 type Model struct {
 	cfg     config.TUI
@@ -81,8 +90,9 @@ type Model struct {
 	preview    viewport.Model
 	previewFor string // session ID the preview shows
 
-	toast   string
-	toastID int
+	toast     string
+	toastKind toastKind
+	toastID   int
 
 	// Result is set when the user picks a session to resume.
 	Result *Resume
@@ -106,7 +116,7 @@ func New(sessions []db.Session, source PreviewSource, cfg config.TUI) Model {
 		source:     source,
 		home:       home,
 		now:        time.Now,
-		st:         newStyles(true),
+		st:         newStyles(theme.Get(cfg.Theme, true)),
 		rows:       rows,
 		detailOpen: true,
 		filter:     fi,
@@ -183,8 +193,8 @@ func (m *Model) clamp() {
 	m.offset = max(0, min(m.offset, max(0, len(m.visible)-h)))
 }
 
-func (m *Model) showToast(text string) tea.Cmd {
-	m.toast = text
+func (m *Model) showToast(kind toastKind, text string) tea.Cmd {
+	m.toast, m.toastKind = text, kind
 	m.toastID++
 	id := m.toastID
 	return tea.Tick(toastFor, func(time.Time) tea.Msg { return toastExpired{id} })
@@ -231,15 +241,15 @@ func (m *Model) action(key string) (tea.Cmd, bool) {
 	switch key {
 	case "enter":
 		if r.gone {
-			return m.showToast("Folder no longer exists: " + tildePath(r.s.ProjectPath, m.home)), true
+			return m.showToast(toastWarn, "Folder no longer exists: "+tildePath(r.s.ProjectPath, m.home)), true
 		}
 		m.Result = &Resume{Dir: r.s.ProjectPath, SessionID: r.s.ID}
 		return tea.Quit, true
 	case "y":
-		return tea.Batch(copyCmd(r.s.ID), m.showToast("Copied session ID "+r.s.ID)), true
+		return tea.Batch(copyCmd(r.s.ID), m.showToast(toastOK, "Copied session ID "+r.s.ID)), true
 	case "Y":
 		cmd := resumeCommand(r)
-		return tea.Batch(copyCmd(cmd), m.showToast("Copied "+cmd)), true
+		return tea.Batch(copyCmd(cmd), m.showToast(toastOK, "Copied "+cmd)), true
 	}
 	return nil, false
 }
@@ -247,7 +257,7 @@ func (m *Model) action(key string) (tea.Cmd, bool) {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.BackgroundColorMsg:
-		m.st = newStyles(msg.IsDark())
+		m.st = newStyles(theme.Get(m.cfg.Theme, msg.IsDark()))
 		return m, nil
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -374,7 +384,7 @@ func (m *Model) openPreview() tea.Cmd {
 	}
 	p, err := m.source.SessionPreview(r.s.ID, previewHead, previewTail)
 	if err != nil {
-		return m.showToast("Could not load the conversation: " + err.Error())
+		return m.showToast(toastWarn, "Could not load the conversation: "+err.Error())
 	}
 	m.mode = modePreview
 	m.previewFor = r.s.ID
