@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.0.1](https://github.com/babarot/claude-recall/compare/1.0.0...1.0.1) - 2026-10-02
+### Bug fixes
+- Keep MCP servers up when several import at once by @babarot in https://github.com/babarot/claude-recall/pull/15
+
 ## [1.0.0](https://github.com/babarot/claude-recall/compare/0.2.0...1.0.0) - 2026-10-02
 ### Breaking Changes
 - Rewrite in Go, add a TUI and rename to claude-recall by @babarot in https://github.com/babarot/claude-recall/pull/13
