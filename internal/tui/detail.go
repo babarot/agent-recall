@@ -464,13 +464,9 @@ func (m Model) detailsGrid(r *row, d *db.Detail, inner int) ([]string, bool) {
 	if r.s.StartedAt.Local().Year() != m.now().Year() {
 		stamp = "2006-01-02 15:04"
 	}
-	ended := r.s.EndedAt.Local().Format(stamp)
-	if r.s.StartedAt.Local().Format(time.DateOnly) == r.s.EndedAt.Local().Format(time.DateOnly) {
-		ended = r.s.EndedAt.Local().Format("15:04")
-	}
 	when := []string{m.section("When"),
 		kv(8, "Started", m.st.strong.Render(r.s.StartedAt.Local().Format(stamp))),
-		kv(8, "Ended", m.st.strong.Render(ended)),
+		kv(8, "Ended", m.st.strong.Render(r.s.EndedAt.Local().Format(stamp))),
 		kv(8, "Took", m.st.strong.Render(durationText(r.s.EndedAt.Sub(r.s.StartedAt))))}
 	calls := "?"
 	if d != nil {

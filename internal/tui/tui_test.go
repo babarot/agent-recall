@@ -710,3 +710,16 @@ func TestPreviewSkipLine(t *testing.T) {
 		t.Fatalf("width %d", w)
 	}
 }
+
+func TestDetailsDateBothEnds(t *testing.T) {
+	m, _ := newTestModel(t, config.Default().TUI, 140, 40)
+	r := m.current()
+	r.s.StartedAt = r.s.EndedAt.Add(-2 * time.Hour)
+	end := r.s.EndedAt.Local()
+	s := screen(m)
+	for _, want := range []string{"Started " + end.Add(-2*time.Hour).Format("01-02 15:04"), "Ended   " + end.Format("01-02 15:04")} {
+		if !strings.Contains(s, want) {
+			t.Errorf("Details lacks %q even within one day:\n%s", want, s)
+		}
+	}
+}
