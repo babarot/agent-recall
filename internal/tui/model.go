@@ -97,6 +97,7 @@ type Model struct {
 
 	filter textinput.Model
 	comp   completion
+	sugOff int // first suggestion shown
 
 	preview    viewport.Model
 	previewFor string // session ID the preview shows
@@ -359,6 +360,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Button == tea.MouseLeft && m.mode == modeList {
 			m.click(msg.X, msg.Y)
 		}
+		if i := m.suggestionAt(msg.X, msg.Y); msg.Button == tea.MouseLeft && i >= 0 {
+			m.pickSuggestion(i)
+			m.refresh()
+		}
 		return m, nil
 	case tea.MouseMotionMsg:
 		if m.dragging {
@@ -381,7 +386,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Button == tea.MouseWheelUp {
 			step = -1
 		}
-		if m.sidebarAt(msg.X, msg.Y) >= 0 {
+		if r, _, _, _, ok := m.suggestRect(); ok && r.contains(msg.X, msg.Y) {
+			m.scrollSuggestions(step)
+		} else if m.sidebarAt(msg.X, msg.Y) >= 0 {
 			m.scrollSidebar(3 * step)
 		} else if f := m.frameAt(msg.X, msg.Y); f != focusList {
 			m.scrollFrame(f, 3*step)
@@ -577,6 +584,7 @@ func (m Model) updateFilter(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	before := m.filter.Value()
 	m.filter, cmd = m.filter.Update(msg)
 	if m.filter.Value() != before {
+		m.sugOff = 0
 		m.refresh()
 	}
 	return m, cmd

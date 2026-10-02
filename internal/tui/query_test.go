@@ -1,14 +1,19 @@
 package tui
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/babarot/claude-recall/internal/config"
+	"github.com/babarot/claude-recall/internal/db"
 )
 
 func TestParseQuery(t *testing.T) {
@@ -111,5 +116,66 @@ func TestOverlayKeepsBothSides(t *testing.T) {
 	}
 	if got := ansi.Strip(overlay("あいう", "X", 1)); ansi.StringWidth(got) != 6 {
 		t.Fatalf("a wide character cut in half: %q", got)
+	}
+}
+
+// manyFolders is a model with 12 folders, proj-00 the most recent.
+func manyFolders(t *testing.T) Model {
+	t.Helper()
+	base := t.TempDir()
+	var ss []db.Session
+	for i := range 12 {
+		dir := filepath.Join(base, fmt.Sprintf("proj-%02d", i))
+		os.MkdirAll(dir, 0o755)
+		ss = append(ss, db.Session{ID: fmt.Sprintf("s%02d", i), ProjectPath: dir, Title: "t", EndedAt: now.Add(time.Duration(-i) * time.Hour)})
+	}
+	m := New(ss, &fakePreview{}, config.Default().TUI)
+	m.now = func() time.Time { return now }
+	return update(t, m, tea.WindowSizeMsg{Width: 140, Height: 40})
+}
+
+func TestSuggestionsScrollAndClick(t *testing.T) {
+	m := typeFilter(t, manyFolders(t), "in:proj")
+	if s := screen(m); !strings.Contains(s, "proj-07") || strings.Contains(s, "proj-08") || !strings.Contains(s, "↓ 4 more") {
+		t.Fatalf("the box should show 8 of 12:\n%s", s)
+	}
+	r, _, _, _, _ := m.suggestRect()
+	wheel := tea.MouseWheelMsg{X: r.x + 5, Y: r.y + 2, Button: tea.MouseWheelDown}
+	for range 10 {
+		m = update(t, m, wheel)
+	}
+	s := screen(m)
+	if !strings.Contains(s, "proj-11") || strings.Contains(s, "proj-03") || !strings.Contains(s, "↑ 4 more") {
+		t.Fatalf("scrolled to the end, the box should show proj-04 to proj-11:\n%s", s)
+	}
+	// The first row shown is proj-04; clicking it completes the term.
+	m = update(t, m, tea.MouseClickMsg{X: r.x + 5, Y: r.y + 1, Button: tea.MouseLeft})
+	if v := m.filter.Value(); !strings.HasPrefix(v, "in:") || !strings.HasSuffix(v, "proj-04 ") {
+		t.Fatalf("click gave %q", v)
+	}
+	if got := visibleIDs(m); got != "s04" {
+		t.Fatalf("after the click the list shows %s", got)
+	}
+	if _, _, _, _, open := m.suggestRect(); open {
+		t.Fatal("the box should close once a folder is picked")
+	}
+	// Typing again starts at the top.
+	m = typeFilter(t, manyFolders(t), "in:proj")
+	for range 3 {
+		m = update(t, m, wheel)
+	}
+	m = update(t, m, tea.KeyPressMsg{Code: '-', Text: "-"})
+	if m.sugOff != 0 {
+		t.Fatalf("typing should reset the scroll, got %d", m.sugOff)
+	}
+}
+
+func TestTabKeepsTheHighlightInView(t *testing.T) {
+	m := typeFilter(t, manyFolders(t), "in:proj")
+	for range 10 {
+		m = press(t, m, "tab")
+	}
+	if s := screen(m); !strings.Contains(m.filter.Value(), "proj-09") || !strings.Contains(s, "▎ ") || !strings.Contains(s, "↑ 2 more") {
+		t.Fatalf("after 10 tabs, %q:\n%s", m.filter.Value(), s)
 	}
 }

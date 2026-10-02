@@ -105,11 +105,10 @@ func (m Model) render() string {
 	}
 	lines = append(lines, m.renderStatus(), m.renderHelp())
 	// Folder suggestions for the in: term open just under the filter line.
-	if list, idx := m.suggestions(); len(list) > 0 {
-		box := m.suggestBox(list, idx, min(48, m.width-4))
-		for i, l := range box {
-			if j := 2 + i; j < len(lines) {
-				lines[j] = overlay(lines[j], l, 3)
+	if r, list, idx, from, ok := m.suggestRect(); ok {
+		for i, l := range m.suggestBox(list, idx, from, r.w) {
+			if j := r.y + i; j < len(lines) {
+				lines[j] = overlay(lines[j], l, r.x)
 			}
 		}
 	}
