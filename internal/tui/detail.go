@@ -56,8 +56,8 @@ func (r rect) contains(x, y int) bool { return x >= r.x && x < r.x+r.w && y >= r
 // false when the pane is hidden. Drawing and mouse hit tests both use it.
 func (m Model) paneRects() ([numFocus]rect, bool) {
 	var out [numFocus]rect
-	r := m.current()
-	if r == nil || !m.detailOpen {
+	r := m.current() // nil when nothing matches: the frames stay, empty
+	if !m.detailOpen {
 		return out, false
 	}
 	if m.detailRight() {
@@ -138,8 +138,15 @@ func (c frameLines) messagesBefore(i int) int {
 // widths, which decide how Details is laid out and how What was done
 // aligns its columns.
 func (m Model) frameContent(r *row, inner [numFocus]int) [numFocus]frameLines {
-	d := m.details[r.s.ID]
 	var out [numFocus]frameLines
+	if r == nil {
+		// Nothing to show: each frame says so rather than the pane going.
+		for f := focusConv; f < numFocus; f++ {
+			out[f] = frameLines{scroll: []string{m.st.muted.Render("No session selected")}, keep: -1}
+		}
+		return out
+	}
+	d := m.details[r.s.ID]
 	out[focusConv] = m.conversationContent(r, d)
 	out[focusDone] = m.doneContent(r, d, inner[focusDone])
 	details, ok := m.detailsGrid(r, d, inner[focusDetails])
@@ -577,11 +584,10 @@ func (m Model) label(s string) string { return m.st.subtle.Render(fmt.Sprintf("%
 // beside it as one.
 func (m Model) renderPane() string {
 	rects, ok := m.paneRects()
-	r := m.current()
-	if !ok || r == nil {
+	if !ok {
 		return ""
 	}
-	content := m.sizedContent(r, rects)
+	content := m.sizedContent(m.current(), rects)
 	frame := func(f focus) string { return m.renderFrame(f, content[f], rects[f]) }
 	if m.detailRight() {
 		return strings.Join([]string{frame(focusConv), frame(focusDone), frame(focusDetails)}, "\n")

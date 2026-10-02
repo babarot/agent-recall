@@ -723,3 +723,27 @@ func TestDetailsDateBothEnds(t *testing.T) {
 		}
 	}
 }
+
+func TestPaneStaysWhenNothingMatches(t *testing.T) {
+	for _, pos := range []string{config.DetailBottom, config.DetailRight} {
+		cfg := config.Default().TUI
+		cfg.DetailPosition = pos
+		m, _ := newTestModel(t, cfg, 160, 40)
+		m = press(t, m, "/", "z", "z", "z")
+		s := screen(m)
+		for _, want := range []string{"Conversation", "What was done", "Details", "No session selected", "No sessions match"} {
+			if !strings.Contains(s, want) {
+				t.Errorf("%s: lacks %q:\n%s", pos, want, s)
+			}
+		}
+		lines := strings.Split(m.render(), "\n")
+		if len(lines) != 40 {
+			t.Errorf("%s: %d lines, want the full 40", pos, len(lines))
+		}
+		// The frames can still take focus and scroll without a session.
+		m = press(t, m, "enter", "]", "j")
+		if m.focus != focusList {
+			t.Errorf("%s: with nothing selected the focus stays on the list, got %v", pos, m.focus)
+		}
+	}
+}
