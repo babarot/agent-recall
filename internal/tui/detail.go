@@ -57,9 +57,6 @@ func (r rect) contains(x, y int) bool { return x >= r.x && x < r.x+r.w && y >= r
 func (m Model) paneRects() ([numFocus]rect, bool) {
 	var out [numFocus]rect
 	r := m.current() // nil when nothing matches: the frames stay, empty
-	if !m.detailOpen {
-		return out, false
-	}
 	if m.detailRight() {
 		x, w := m.listWidth()+1, detailWidth-1
 		content := m.frameContent(r, [numFocus]int{focusDone: w - 4, focusDetails: w - 4})

@@ -100,7 +100,6 @@ type Model struct {
 
 	cursor, offset int
 	width, height  int
-	detailOpen     bool
 	mode           mode
 	sortIdx        int
 
@@ -129,6 +128,8 @@ type Model struct {
 	focus     focus
 	scroll    [numFocus]int
 	scrollFor string
+
+	helpOpen bool // the key list is showing
 
 	toast     string
 	toastKind toastKind
@@ -166,7 +167,6 @@ func New(sessions []db.Session, source Source, cfg config.TUI) Model {
 		now:        time.Now,
 		st:         newStyles(theme.Get(cfg.Theme, true)),
 		rows:       rows,
-		detailOpen: true,
 		filter:     fi,
 		preview:    viewport.New(),
 		details:    map[string]*db.Detail{},
@@ -224,7 +224,7 @@ func (m Model) paneTop() int {
 // first time it is shown.
 func (m *Model) loadDetail() {
 	r := m.current()
-	if !m.detailOpen || r == nil {
+	if r == nil {
 		if m.focus != focusFolders {
 			m.focus = focusList
 		}
@@ -380,6 +380,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.MouseClickMsg:
+		if m.helpOpen {
+			m.helpOpen = false
+			return m, nil
+		}
 		if msg.Button == tea.MouseLeft && m.mode == modeList {
 			m.click(msg.X, msg.Y)
 		}
@@ -438,6 +442,19 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.KeyPressMsg:
+		if m.helpOpen {
+			switch msg.String() {
+			case "?", "esc", "q":
+				m.helpOpen = false
+			case "ctrl+c":
+				return m, tea.Quit
+			}
+			return m, nil
+		}
+		if msg.String() == "?" && m.mode != modeFilter && !(m.focus == focusFolders && m.sideTyping) {
+			m.helpOpen = true
+			return m, nil
+		}
 		switch m.mode {
 		case modeFilter:
 			return m.updateFilter(msg)
@@ -456,10 +473,10 @@ func (m Model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	key := msg.String()
 	switch key {
-	case "]":
+	case "tab", "]":
 		m.cycleFocus(1)
 		return m, nil
-	case "[":
+	case "shift+tab", "[":
 		m.cycleFocus(-1)
 		return m, nil
 	case ".":
@@ -539,10 +556,6 @@ list:
 		m.move(-len(m.visible))
 	case "end", "G":
 		m.move(len(m.visible))
-	case "tab":
-		m.detailOpen = !m.detailOpen
-		m.focus = focusList
-		m.clamp()
 	case "+", "=":
 		m.resizeDetail(m.detailH + 2)
 		return m, m.saveState()
@@ -583,15 +596,21 @@ list:
 }
 
 // cycleFocus moves the focus along the folder list (when shown), the
-// session list and the detail pane's frames (when open).
+// session list and the detail pane's frames, in the order they are laid
+// out: below the list Details is under Conversation and What was done on
+// the right; beside it What was done comes second.
 func (m *Model) cycleFocus(delta int) {
 	var order []focus
 	if m.sidebarShown() {
 		order = append(order, focusFolders)
 	}
 	order = append(order, focusList)
-	if m.detailOpen && m.current() != nil {
-		order = append(order, focusConv, focusDone, focusDetails)
+	if m.current() != nil {
+		if m.detailRight() {
+			order = append(order, focusConv, focusDone, focusDetails)
+		} else {
+			order = append(order, focusConv, focusDetails, focusDone)
+		}
 	}
 	i := max(0, slices.Index(order, m.focus))
 	m.focus = order[(i+delta+len(order))%len(order)]
