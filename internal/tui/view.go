@@ -82,6 +82,13 @@ func (m Model) render() string {
 	if m.width == 0 || m.height == 0 {
 		return ""
 	}
+	if m.helpOpen {
+		return m.withHelp(m.renderScreen())
+	}
+	return m.renderScreen()
+}
+
+func (m Model) renderScreen() string {
 	if m.mode == modePreview {
 		return m.renderPreview()
 	}
@@ -324,10 +331,11 @@ func (m Model) renderHelp() string {
 		if m.scope != "" && m.scope == m.startFolder {
 			here = "all folders"
 		}
-		pairs = [][2]string{{"enter", "resume"}, {"space", "preview"}, {"y", "copy id"}, {"Y", "copy cmd"},
-			{"tab", "focus"}, {"+/-", "resize"}, {"/", "filter"}, {".", here}, {"←", "folders"}, {"s", "sort"}, {"q", "quit"}}
+		// ? goes early so a narrow terminal still shows where the rest are.
+		pairs = [][2]string{{"enter", "resume"}, {"space", "preview"}, {"?", "keys"}, {"/", "filter"}, {".", here},
+			{"←", "folders"}, {"tab", "focus"}, {"y", "copy id"}, {"Y", "copy cmd"}, {"+/-", "resize"}, {"s", "sort"}, {"q", "quit"}}
 		if m.sidebarShown() {
-			pairs[len(pairs)-3] = [2]string{"→", "close folders"}
+			pairs[5] = [2]string{"→", "close folders"}
 		}
 	}
 	parts := make([]string, len(pairs))

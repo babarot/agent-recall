@@ -142,6 +142,7 @@ recall version
 | `←` `→` / `h` `l` | Show or hide the folder list. `←` opens it and, pressed again, moves into it; `↑` `↓` there pick a folder and `/` searches the folders by fuzzy match (`bdot` finds babarot/dotfiles; `Enter` keeps the search, `Esc` clears it); `→` (or `Enter`) returns to the sessions, and `→` again closes it. The focused side has accent rules and the selection bar |
 | `+` `-` | Make the detail pane taller or shorter |
 | `Tab` `Shift+Tab` (or `]` `[`) | Move focus along the folder list (when shown), the sessions and the detail pane's frames, in the order they are laid out; `↑` `↓`, `j` `k`, PgUp, PgDn, `g` and `G` then scroll it, `Esc` returns to the list |
+| `?` | Show every key, grouped by where it works; `?`, `Esc` or `q` closes the list |
 | `q` | Quit |
 
 The title is the session's `/rename` name, or else the title Claude Code generated, or else its first prompt.

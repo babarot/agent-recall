@@ -129,6 +129,8 @@ type Model struct {
 	scroll    [numFocus]int
 	scrollFor string
 
+	helpOpen bool // the key list is showing
+
 	toast     string
 	toastKind toastKind
 	toastID   int
@@ -378,6 +380,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.MouseClickMsg:
+		if m.helpOpen {
+			m.helpOpen = false
+			return m, nil
+		}
 		if msg.Button == tea.MouseLeft && m.mode == modeList {
 			m.click(msg.X, msg.Y)
 		}
@@ -436,6 +442,19 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.KeyPressMsg:
+		if m.helpOpen {
+			switch msg.String() {
+			case "?", "esc", "q":
+				m.helpOpen = false
+			case "ctrl+c":
+				return m, tea.Quit
+			}
+			return m, nil
+		}
+		if msg.String() == "?" && m.mode != modeFilter && !(m.focus == focusFolders && m.sideTyping) {
+			m.helpOpen = true
+			return m, nil
+		}
 		switch m.mode {
 		case modeFilter:
 			return m.updateFilter(msg)
