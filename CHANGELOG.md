@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.1.0](https://github.com/babarot/claude-recall/compare/1.0.1...1.1.0) - 2026-10-02
+### New Features
+- Improve the TUI's look, detail pane and mouse support by @babarot in https://github.com/babarot/claude-recall/pull/17
+
 ## [1.0.1](https://github.com/babarot/claude-recall/compare/1.0.0...1.0.1) - 2026-10-02
 ### Bug fixes
 - Keep MCP servers up when several import at once by @babarot in https://github.com/babarot/claude-recall/pull/15
