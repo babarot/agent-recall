@@ -6,34 +6,6 @@ on:
   pull_request:
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - uses: denoland/setup-deno@e95548e56dfa95d4e1a28d6f422fafe75c4c26fb # v2.0.3
-        with:
-          deno-version-file: .tool-versions
-      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
-        with:
-          node-version: 22
-
-      # Build UI assets (required by src/ui.ts import)
-      - run: cd ui && npm ci && npm run build
-      - run: deno task ui:embed
-
-      # Tests run with --no-check, so type errors only surface here (and
-      # in deno compile at release time)
-      - run: deno check src/
-
-      # Backend tests
-      - run: deno task test
-
-      # Frontend tests
-      - run: cd ui && npm test
-
-  # Go port (see cmd/recall). Runs beside the Deno tests until the migration
-  # is complete.
   go:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -43,4 +15,20 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go vet ./...
-      - run: go test ./...
+      - run: go test -race ./...
+
+  ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: 22
+      - run: cd ui && npm ci && npm test && npm run build
+      # The release build embeds the UI; make sure that build compiles
+      - run: rm -rf internal/webui/dist && cp -R ui/dist internal/webui/dist
+      - run: go build -tags embedui ./cmd/recall

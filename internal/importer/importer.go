@@ -57,7 +57,9 @@ func ImportFile(d *db.DB, path string, index *parser.IndexEntry) (*Result, error
 	if err != nil {
 		return nil, err
 	}
-	if existing != nil && existing.FileMtime != nil && *existing.FileMtime == mtime &&
+	// A session without a stored title predates titles: import it again
+	// once to fill the title in.
+	if existing != nil && existing.HasTitle && existing.FileMtime != nil && *existing.FileMtime == mtime &&
 		existing.FileSize != nil && *existing.FileSize == size {
 		return &Result{Status: Unchanged, SessionID: sessionID, Project: project, TotalMessages: existing.MessageCount}, nil
 	}
@@ -84,6 +86,7 @@ func ImportFile(d *db.DB, path string, index *parser.IndexEntry) (*Result, error
 		ClaudeVersion: parsed.Meta.ClaudeVersion,
 		FileMtime:     &mtime,
 		FileSize:      &size,
+		Title:         parsed.Meta.Title,
 	}
 	msgs := make([]db.MessageRow, len(parsed.Messages))
 	for i, m := range parsed.Messages {
@@ -94,7 +97,7 @@ func ImportFile(d *db.DB, path string, index *parser.IndexEntry) (*Result, error
 	for _, img := range parsed.Images {
 		data, err := atob(img.Data)
 		if err != nil {
-			continue // the TypeScript importer threw here and stopped the whole run
+			continue // an unreadable image does not fail the session
 		}
 		imgs = append(imgs, db.ImageRow{MessageUUID: img.MessageUUID, ImageIndex: img.ImageIndex, MediaType: img.MediaType, Data: data})
 	}
@@ -153,8 +156,7 @@ type Options struct {
 	DryRun      bool
 }
 
-// Run imports every transcript that matches opts and prints the same
-// summary as `agent-recall import`.
+// Run imports every transcript that matches opts and prints a summary.
 func Run(d func() (*db.DB, error), opts Options, w io.Writer) error {
 	all := parser.Discover(opts.ProjectsDir)
 	targets := all

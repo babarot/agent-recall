@@ -1,6 +1,5 @@
 // Package config holds the filesystem locations claude-recall reads and
-// writes. They match the paths used by the TypeScript implementation so both
-// can run against the same data during the migration.
+// writes, and the user's config file.
 package config
 
 import (

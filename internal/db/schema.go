@@ -1,7 +1,8 @@
 package db
 
-// schemaSQL mirrors src/schema.ts. Every statement uses IF NOT EXISTS, so it is
-// safe to run on every startup of a writable database.
+// schemaSQL is the base schema. Every statement uses IF NOT EXISTS, so it is
+// safe to run on every startup of a writable database. Later changes are
+// migrations (see migrate).
 //
 // The archive holds sessions whose JSONL transcripts no longer exist, so it
 // cannot be rebuilt from scratch. Schema changes must be additive.

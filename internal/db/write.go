@@ -12,14 +12,16 @@ type FileInfo struct {
 	MessageCount int
 	FileMtime    *float64 // milliseconds since the epoch
 	FileSize     *int64
+	// HasTitle is false for a session imported before titles were stored.
+	HasTitle bool
 }
 
 // GetFileInfo returns the stored file metadata of a session, or nil when the
 // session is not archived.
 func (d *DB) GetFileInfo(sessionID string) (*FileInfo, error) {
 	var fi FileInfo
-	err := d.sql.QueryRow(`SELECT message_count, file_mtime, file_size FROM sessions WHERE session_id = ?`, sessionID).
-		Scan(&fi.MessageCount, &fi.FileMtime, &fi.FileSize)
+	err := d.sql.QueryRow(`SELECT message_count, file_mtime, file_size, title IS NOT NULL FROM sessions WHERE session_id = ?`, sessionID).
+		Scan(&fi.MessageCount, &fi.FileMtime, &fi.FileSize, &fi.HasTitle)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -43,6 +45,7 @@ type SessionRow struct {
 	ClaudeVersion string
 	FileMtime     *float64
 	FileSize      *int64
+	Title         string // "" when the session has no title
 }
 
 // MessageRow is a row of the messages table.
@@ -90,10 +93,10 @@ func (d *DB) ReplaceSession(s SessionRow, msgs []MessageRow, imgs []ImageRow) (e
 		}
 	}
 
-	if _, err = tx.Exec(`INSERT INTO sessions (session_id, project, project_path, git_branch, first_prompt, summary, message_count, started_at, ended_at, claude_version, file_mtime, file_size)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	if _, err = tx.Exec(`INSERT INTO sessions (session_id, project, project_path, git_branch, first_prompt, summary, message_count, started_at, ended_at, claude_version, file_mtime, file_size, title)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		s.SessionID, s.Project, s.ProjectPath, s.GitBranch, s.FirstPrompt, s.Summary, s.MessageCount,
-		s.StartedAt, s.EndedAt, s.ClaudeVersion, s.FileMtime, s.FileSize); err != nil {
+		s.StartedAt, s.EndedAt, s.ClaudeVersion, s.FileMtime, s.FileSize, s.Title); err != nil {
 		return fmt.Errorf("insert session: %w", err)
 	}
 
@@ -127,3 +130,6 @@ func (d *DB) ReplaceSession(s SessionRow, msgs []MessageRow, imgs []ImageRow) (e
 	}
 	return nil
 }
+
+// Exec runs a statement. It exists for tests and maintenance.
+func (d *DB) Exec(query string, args ...any) (sql.Result, error) { return d.sql.Exec(query, args...) }

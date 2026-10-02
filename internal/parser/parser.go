@@ -1,10 +1,10 @@
 // Package parser turns a Claude Code JSONL transcript into the rows the
-// archive stores. It mirrors src/parser.ts line for line, including the
-// JavaScript string semantics (trim, UTF-16 length) that decide what ends up
-// in the database.
+// archive stores. Text is trimmed and cut with JavaScript semantics (see
+// jscompat) so it matches rows written before the Go port.
 package parser
 
 import (
+	"cmp"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -45,6 +45,9 @@ type Meta struct {
 	StartedAt     string
 	EndedAt       string
 	ClaudeVersion string
+	// Title is the latest /rename title, or else the latest title Claude
+	// Code generated. Empty when there is neither.
+	Title string
 }
 
 // Session is a parsed transcript.
@@ -78,6 +81,8 @@ type journalLine struct {
 	GitBranch   string                 `json:"gitBranch"`
 	IsSidechain bool                   `json:"isSidechain"`
 	IsMeta      bool                   `json:"isMeta"`
+	CustomTitle string                 `json:"customTitle"`
+	AITitle     string                 `json:"aiTitle"`
 	Origin      *struct{ Kind string } `json:"origin"`
 	Message     *struct {
 		Role    string          `json:"role"`
@@ -111,8 +116,7 @@ func jsString(raw json.RawMessage) (string, bool) {
 	return s, true
 }
 
-// extractText joins the text of a message's content, like extractText in
-// src/parser.ts.
+// extractText joins the text of a message's content.
 func extractText(content json.RawMessage) string {
 	if s, ok := jsString(content); ok {
 		return jscompat.Trim(s)
@@ -144,6 +148,8 @@ type parsedLines struct {
 	header        *header
 	firstUserText string
 	lastTimestamp string
+	customTitle   string
+	aiTitle       string
 }
 
 func parseLines(content string, startTurn int) parsedLines {
@@ -156,6 +162,19 @@ func parseLines(content string, startTurn int) parsedLines {
 		}
 		var p journalLine
 		if json.Unmarshal([]byte(line), &p) != nil {
+			continue
+		}
+		// Claude Code rewrites these as the title changes; the last wins.
+		switch p.Type {
+		case "custom-title":
+			if p.CustomTitle != "" {
+				out.customTitle = p.CustomTitle
+			}
+			continue
+		case "ai-title":
+			if p.AITitle != "" {
+				out.aiTitle = p.AITitle
+			}
 			continue
 		}
 		if p.Type != "user" && p.Type != "assistant" {
@@ -315,6 +334,7 @@ func Parse(content, project string, index *IndexEntry) *Session {
 		StartedAt:     r.header.startedAt,
 		EndedAt:       r.lastTimestamp,
 		ClaudeVersion: r.header.claudeVersion,
+		Title:         cmp.Or(jscompat.Trim(r.customTitle), jscompat.Trim(r.aiTitle)),
 	}
 	if index != nil {
 		if index.FirstPrompt != "" {

@@ -1,8 +1,7 @@
 // Package api builds the JSON values the MCP tools and the web API return.
-// Field order, names and null handling follow src/mcp.ts and src/ui.ts:
-// a field set from `x?.slice(...)` disappears when x is null (undefined is
-// dropped by JSON.stringify), while one set from a nullable column stays as
-// null.
+// Field order, names and null handling are part of the interface: a date
+// derived from a missing start time is left out, while a nullable column is
+// kept as null.
 package api
 
 import (
@@ -48,6 +47,7 @@ func SearchHits(results []db.SearchResult, shortID bool) []SearchHit {
 type ListedSession struct {
 	SessionID     string  `json:"sessionId"`
 	FullSessionID string  `json:"fullSessionId"`
+	Title         *string `json:"title,omitempty"`
 	Project       string  `json:"project"`
 	Branch        *string `json:"branch"`
 	FirstPrompt   *string `json:"firstPrompt,omitempty"`
@@ -59,7 +59,7 @@ type ListedSession struct {
 func List(sessions []db.ListedSession) []ListedSession {
 	out := make([]ListedSession, len(sessions))
 	for i, s := range sessions {
-		out[i] = ListedSession{SessionID: jscompat.Slice(s.SessionID, 8), FullSessionID: s.SessionID,
+		out[i] = ListedSession{SessionID: jscompat.Slice(s.SessionID, 8), FullSessionID: s.SessionID, Title: s.Title,
 			Project: cli.DisplayProject(s.ProjectPath, s.Project), Branch: s.GitBranch,
 			FirstPrompt: slice(s.FirstPrompt, 200), Messages: s.MessageCount, Date: slice(s.StartedAt, 10)}
 	}
@@ -171,6 +171,7 @@ func WebStatsResult(s *db.Stats) WebStats {
 type WebSession struct {
 	SessionID     string  `json:"sessionId"`
 	FullSessionID string  `json:"fullSessionId"`
+	Title         *string `json:"title,omitempty"`
 	Project       string  `json:"project"`
 	Branch        *string `json:"branch"`
 	FirstPrompt   string  `json:"firstPrompt"`
@@ -221,7 +222,7 @@ func WebSessions(d *db.DB, sessions []db.ListedSession) ([]WebSession, error) {
 		if activity == nil {
 			activity = []int{}
 		}
-		out[i] = WebSession{SessionID: jscompat.Slice(s.SessionID, 8), FullSessionID: s.SessionID,
+		out[i] = WebSession{SessionID: jscompat.Slice(s.SessionID, 8), FullSessionID: s.SessionID, Title: s.Title,
 			Project: cli.DisplayProject(s.ProjectPath, s.Project), Branch: s.GitBranch, FirstPrompt: first,
 			LastPrompt: last, Messages: s.MessageCount, Date: slice(s.StartedAt, 10), CreatedAt: s.StartedAt,
 			UpdatedAt: updated, Activity: activity}

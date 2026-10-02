@@ -1,8 +1,9 @@
 // Package cli renders the output of the search, list, export and stats
-// commands exactly as the TypeScript version printed it.
+// commands.
 package cli
 
 import (
+	"cmp"
 	"fmt"
 	"io"
 	"os"
@@ -122,7 +123,7 @@ func List(w io.Writer, sessions []db.ListedSession) {
 			date = jscompat.Slice(*s.StartedAt, 10)
 		}
 		prompt := ""
-		if fp := str(s.FirstPrompt); fp != "" {
+		if fp := cmp.Or(str(s.Title), str(s.FirstPrompt)); fp != "" {
 			more := ""
 			if jscompat.Len(fp) > 60 {
 				more = "..."

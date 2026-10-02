@@ -11,8 +11,7 @@ import (
 	"github.com/babarot/claude-recall/internal/jscompat"
 )
 
-// The read queries below mirror the VaultDB methods in src/db.ts. Nullable
-// columns are pointers so they encode as null, as node:sqlite returns them.
+// Nullable columns are pointers so they encode as null in JSON.
 
 // ListedSession is a row of listSessions.
 type ListedSession struct {
@@ -24,6 +23,7 @@ type ListedSession struct {
 	MessageCount *int64  `json:"messageCount"`
 	StartedAt    *string `json:"startedAt"`
 	EndedAt      *string `json:"endedAt"`
+	Title        *string `json:"title,omitempty"`
 }
 
 // ListOptions narrows ListSessions.
@@ -45,9 +45,15 @@ func (d *DB) ListSessions(opts ListOptions) ([]ListedSession, error) {
 		args = append(args, "%"+opts.Project+"%", "%"+opts.Project+"%")
 	}
 	args = append(args, limit, opts.Offset)
+	title := "NULLIF(title, '')"
+	if ok, err := d.hasColumn("sessions", "title"); err != nil {
+		return nil, fmt.Errorf("list sessions: %w", err)
+	} else if !ok {
+		title = "NULL" // an archive opened read-only before the migration
+	}
 	rows, err := d.sql.Query(`
       SELECT session_id, project, project_path, git_branch, first_prompt,
-             message_count, started_at, ended_at
+             message_count, started_at, ended_at, `+title+`
       FROM sessions `+where+`
       ORDER BY COALESCE(ended_at, started_at) DESC
       LIMIT ? OFFSET ?`, args...)
@@ -59,7 +65,7 @@ func (d *DB) ListSessions(opts ListOptions) ([]ListedSession, error) {
 	for rows.Next() {
 		var s ListedSession
 		if err := rows.Scan(&s.SessionID, &s.Project, &s.ProjectPath, &s.GitBranch, &s.FirstPrompt,
-			&s.MessageCount, &s.StartedAt, &s.EndedAt); err != nil {
+			&s.MessageCount, &s.StartedAt, &s.EndedAt, &s.Title); err != nil {
 			return nil, fmt.Errorf("list sessions: %w", err)
 		}
 		out = append(out, s)

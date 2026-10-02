@@ -12,8 +12,6 @@ import (
 	"github.com/babarot/claude-recall/internal/db"
 )
 
-// These cases port src/import_test.ts.
-
 func userLine(text, uuid, ts string) string {
 	b, _ := json.Marshal(map[string]any{
 		"type": "user", "uuid": uuid, "sessionId": "sess-001", "timestamp": ts, "cwd": "/home/user/project",
@@ -154,5 +152,25 @@ func TestAtob(t *testing.T) {
 	}
 	if _, err := atob("a"); err == nil {
 		t.Error("atob(\"a\") should fail")
+	}
+}
+
+func TestImportFillsTitleOfOlderRows(t *testing.T) {
+	title, _ := json.Marshal(map[string]any{"type": "ai-title", "aiTitle": "Fix the login bug", "sessionId": "sess-001"})
+	e := newEnv(t, userLine("hello", "u1", "2026-01-01T00:00:00Z"), string(title))
+	e.importFile()
+	// Simulate a row written before titles were stored.
+	if _, err := e.db.Exec(`UPDATE sessions SET title = NULL`); err != nil {
+		t.Fatal(err)
+	}
+	if r := e.importFile(); r.Status != Resynced {
+		t.Fatalf("an unchanged file with a NULL title must be imported again: %+v", r)
+	}
+	if r := e.importFile(); r.Status != Unchanged {
+		t.Fatalf("second import: %+v", r)
+	}
+	s, err := e.db.Sessions()
+	if err != nil || len(s) != 1 || s[0].Title != "Fix the login bug" {
+		t.Fatalf("%+v %v", s, err)
 	}
 }

@@ -28,8 +28,7 @@ const (
 	pollInterval    = 250 * time.Millisecond
 )
 
-// Status is the watcher state reported by /api/status. Field order follows
-// the TypeScript WatcherStatus object.
+// Status is the watcher state reported by /api/status.
 type Status struct {
 	Enabled      bool   `json:"enabled"`
 	Running      bool   `json:"running"`

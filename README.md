@@ -1,132 +1,112 @@
-# agent-recall
+# claude-recall
 
-[![Test](https://github.com/babarot/agent-recall/actions/workflows/test.yaml/badge.svg)](https://github.com/babarot/agent-recall/actions/workflows/test.yaml)
+[![Test](https://github.com/babarot/claude-recall/actions/workflows/test.yaml/badge.svg)](https://github.com/babarot/claude-recall/actions/workflows/test.yaml)
 
-A searchable archive of your coding agent sessions — CLI, MCP, and a live web UI, all on SQLite FTS5.
+A searchable archive of your Claude Code sessions: a TUI to find a past session, a CLI, an MCP server for agents, and a live web UI, all on SQLite FTS5 in one binary called `recall`.
 
 ## Why
 
-Claude Code stores conversations as JSONL files under `~/.claude/projects/`, but old sessions are automatically deleted and `/compact` loses detail. agent-recall automatically archives sessions on exit so you can search and reference past conversations anytime.
+Claude Code stores conversations as JSONL files under `~/.claude/projects/`, but old sessions are deleted after a while and a closed session is hard to find again. claude-recall archives every session into SQLite so you can browse, search and reference past conversations anytime, including ones whose JSONL is already gone.
 
-Put simply, agent-recall is a **recall tool**, not a memory system. The goal is to make `grep ~/.claude/projects/**/*.jsonl` a better experience. Nothing more, nothing less. When the agent realizes it doesn't know something, it looks it up. That's it.
+Put simply, claude-recall is a recall tool, not a memory system. The goal is to make `grep ~/.claude/projects/**/*.jsonl` a better experience. Nothing more, nothing less. When you or the agent realize something was discussed before, you look it up.
 
 ## Why not just [claude-mem](https://github.com/thedotmack/claude-mem)?
 
-Fair question. [claude-mem](https://github.com/thedotmack/claude-mem) is an excellent project solving a related problem, and if it fits your workflow, you should use it. But agent-recall is **not** trying to be claude-mem. It's deliberately solving a different problem.
+[claude-mem](https://github.com/thedotmack/claude-mem) is an excellent project solving a related problem, and if it fits your workflow, you should use it. claude-recall deliberately solves a different one.
 
-**claude-mem extends the agent's memory.** It captures observations in real time on every tool use, summarizes them with an LLM into structured facts, stores them in a vector DB, and automatically injects the result into the next session's prompt. The agent picks up "where it left off" without being asked. It runs a resident worker, depends on Bun / Python / Chroma, and calls external LLM APIs during indexing. It intervenes at the memory layer.
+claude-mem extends the agent's memory. It captures observations on every tool use, summarizes them with an LLM into structured facts, stores them in a vector DB, and injects the result into the next session's prompt. It runs a resident worker, depends on Bun, Python and Chroma, and calls external LLM APIs during indexing.
 
-**agent-recall is a recall tool.** It doesn't touch the memory layer at all. It just takes the JSONL files Claude Code already writes, dedupes them into SQLite, and exposes FTS5 full-text search through an MCP server. When the agent needs to know what happened last time, it calls `recall_search` the same way it'd call any other tool: a normal, explicit lookup. Nothing runs in the background. Nothing is auto-injected. Nothing is summarized by an LLM.
+claude-recall doesn't touch the memory layer. It takes the JSONL files Claude Code already writes, stores them in SQLite, and exposes FTS5 full-text search through a TUI, a CLI and an MCP server. When the agent needs to know what happened last time, it calls `recall_search` like any other tool. Nothing is auto-injected and nothing is summarized by an LLM.
 
-|  | claude-mem | agent-recall |
+|  | claude-mem | claude-recall |
 |---|---|---|
-| **Goal** | Extend the agent's memory | Help the agent recall |
-| **Layer** | Memory layer (intervenes) | Filesystem layer (doesn't touch memory) |
-| **Metaphor** | RAG + auto-memory | A better `grep` for JSONLs |
-| **Injection** | Push (auto-injected at `SessionStart`) | Pull (agent looks it up when needed) |
-| **When it writes** | Every `PostToolUse` (real-time) | FS watcher while UI/MCP runs (real-time) |
-| **What's stored** | LLM-summarized observations (title / facts / concepts) | Raw user/assistant text, noise-stripped |
-| **Search** | FTS5 + Chroma vector hybrid | FTS5 only (deterministic) |
-| **LLM calls during indexing** | Yes (Anthropic / Gemini / OpenRouter) | **Zero** |
-| **Runtime** | Node + Bun + Python (uv) + Chroma, resident worker on `:37777` | Single `deno compile` binary, no daemon |
-| **License** | AGPL-3.0 | MIT |
+| Goal | Extend the agent's memory | Help you and the agent recall |
+| Injection | Push (auto-injected at `SessionStart`) | Pull (looked up when needed) |
+| What's stored | LLM-summarized observations | Raw user and assistant text, noise-stripped |
+| Search | FTS5 + Chroma vector hybrid | FTS5 only (deterministic) |
+| LLM calls during indexing | Yes | None |
+| Runtime | Node + Bun + Python (uv) + Chroma, resident worker | One static binary, no daemon |
+| License | AGPL-3.0 | MIT |
 
-### Why I built agent-recall anyway
+The tradeoff claude-recall picks:
 
-Extending the agent's memory has real costs:
-
-- **LLM summaries drift.** By the time you want the exact wording of a past conversation, all that's left is a summary.
-- **Non-determinism.** What gets stored depends on how the LLM felt that day. You can't `git log` that.
-- **API cost and dependencies.** Per-tool-use LLM calls aren't free, and the runtime keeps growing.
-- **Phantom memory.** Auto-injection is nice until the agent confidently references a hallucinated summary of something that never happened the way it "remembers."
-
-agent-recall picks the opposite tradeoff:
-
-- **Raw logs don't lie.** What's stored is literally what happened. No interpretation.
-- **The agent admits when it doesn't know.** If it needs past context, it runs `recall_search`. That's a tool call, not a memory.
-- **Idle means idle.** No worker, no background LLM calls, no auto-injection. The tool does nothing until you or the agent asks.
-- **Zero deps.** One binary. MIT licensed. Works offline.
-
-Different problem, different tradeoffs. If you want the agent to silently pick up where it left off, use claude-mem. If you want a deterministic, searchable archive of what actually happened (something the agent can reference like any other file system), use agent-recall.
-
-See [`docs/comparison-claude-mem.md`](docs/comparison-claude-mem.md) for a deeper breakdown.
+- Raw logs don't drift. What's stored is what happened, not a summary of it.
+- The agent says when it doesn't know. Past context comes from a tool call, not from memory it may misremember.
+- Idle means idle. No worker, no background LLM calls.
+- One binary, MIT licensed, works offline.
 
 ## Features
 
-- **Auto-sync** -- FS watcher keeps the DB up-to-date while the UI or MCP server is running
-- **Real-time Web UI** -- Sessions appear and update live as Claude Code writes to disk, without reload
-- **Full-text search** -- Fast search powered by SQLite FTS5 with Porter stemmer
-- **Noise filtering** -- Drops filesystem snapshots, system turn-duration events, and sidechain branches; keeps the real conversation (text, thinking, tool calls, results, slash-command meta)
-- **JSONL mirror** -- SQLite tracks the session file exactly; every import is a full re-parse, idempotent via `(session_id, uuid, block_index)` uniqueness
-- **Idempotent** -- safe to import repeatedly; concurrent watcher + CLI runs converge on the same state
-- **MCP server** -- Agents can autonomously search past sessions via `recall_search`, `recall_list`, `recall_export`, `recall_stats` tools
-- **Zero dependencies** -- Single binary via `deno compile`; no external services
+- TUI: `recall` opens a list of every session with its title, folder (a git worktree is shown under the repository it belongs to), branch, message count, size and ID. Resume one, copy its ID, or preview the conversation
+- Full-text search with SQLite FTS5 and the Porter stemmer
+- MCP server: agents search past sessions with `recall_search`, `recall_list`, `recall_export` and `recall_stats`
+- Live web UI: sessions appear and update as Claude Code writes to disk
+- Keeps sessions whose JSONL Claude Code has since deleted
+- Noise filtering: drops file snapshots, system events and sidechain branches; keeps text, thinking, tool calls and results, and slash-command expansions
 
 ## Install
 
-Downloads precompiled binaries from GitHub Releases. No runtime dependencies needed.
+### curl
+
+Downloads the latest release, imports your sessions and registers the MCP server:
 
 ```bash
-# curl
-curl -fsSL https://raw.githubusercontent.com/babarot/agent-recall/main/bin/install.sh | bash
-
-# deno
-deno run -A https://raw.githubusercontent.com/babarot/agent-recall/main/bin/install.ts
+curl -fsSL https://raw.githubusercontent.com/babarot/claude-recall/main/bin/install.sh | bash
 ```
+
+`recall` goes to `~/.local/bin` (set `RECALL_INSTALL_DIR` to change it).
 
 ### Nix
 
-Each release is published to [babarot/nur-packages](https://github.com/babarot/nur-packages).
+Each release is published to [babarot/nur-packages](https://github.com/babarot/nur-packages):
 
 ```bash
-nix profile install github:babarot/nur-packages#agent-recall
+nix profile install github:babarot/nur-packages#claude-recall
 ```
 
-The package also carries the [Claude Code plugin](#claude-code-plugin) under `share/claude-plugin/agent-recall`.
+The package also carries the [Claude Code plugin](#claude-code-plugin) under `share/claude-plugin/claude-recall`.
 
 ### Build from source
 
-Requires [Deno](https://deno.com/) 2.x.
+Requires Go and Node.js (for the web UI):
 
 ```bash
-git clone https://github.com/babarot/agent-recall.git
-cd agent-recall
-deno task compile && cp agent-recall ~/.claude/agent-recall
+git clone https://github.com/babarot/claude-recall.git
+cd claude-recall
+make install   # builds the UI, embeds it, installs recall to ~/.local/bin
 ```
 
-### MCP Server Setup (agent-autonomous search)
+`go install github.com/babarot/claude-recall/cmd/recall@latest` also works; that build leaves the web UI out.
 
-Register the MCP server so agents can search past sessions autonomously:
+### MCP server
+
+The [plugin](#claude-code-plugin) registers it for you. Without the plugin:
 
 ```bash
-claude mcp add agent-recall -s user -- ~/.claude/agent-recall mcp
+claude mcp add claude-recall -s user -- recall mcp
 ```
-
-This exposes 4 tools to the agent:
 
 | Tool | Description |
 |------|-------------|
 | `recall_search` | Full-text search across past sessions |
 | `recall_list` | List archived sessions |
-| `recall_export` | Export a specific session's full conversation |
+| `recall_export` | Export a session's full conversation |
 | `recall_stats` | Show archive statistics |
-
-Agents will call these tools on their own when they need context from past conversations.
 
 ### Claude Code plugin
 
-[`plugin/`](plugin) is a Claude Code plugin that wires agent-recall into Claude Code, with `agent-recall` on PATH:
+[`plugin/`](plugin) wires claude-recall into Claude Code, with `recall` on PATH:
 
 | Component | What it does |
 |-----------|--------------|
-| MCP server | Runs `agent-recall mcp`, so there is no need for the `claude mcp add` above |
-| `SessionEnd` hook | Runs `agent-recall import` when a session ends |
-| `recall` skill | `/recall` opens the web UI on the current session; `/recall list`, `/recall stats`, `/recall <session-id>` and `/recall stop` too |
+| MCP server | Runs `recall mcp` |
+| `SessionEnd` hook | Runs `recall import` when a session ends |
+| `recall` skill | `/recall` opens the web UI on the current session; also `/recall list`, `/recall stats`, `/recall <session-id>` and `/recall stop` |
 
-Each release ships it as `agent-recall-plugin.tar.gz`. A plugin directory saved under `~/.claude/skills/` loads as `agent-recall@skills-dir`, so with Nix:
+Each release ships it as `claude-recall-plugin.tar.gz`. A plugin directory under `~/.claude/skills/` loads as `claude-recall@skills-dir`, so with Nix:
 
 ```bash
-ln -s ~/.nix-profile/share/claude-plugin/agent-recall ~/.claude/skills/agent-recall
+ln -s ~/.nix-profile/share/claude-plugin/claude-recall ~/.claude/skills/claude-recall
 ```
 
 For Codex and other agents, link just the skill: `plugin/skills/recall` into `~/.agents/skills/recall`.
@@ -134,51 +114,60 @@ For Codex and other agents, link just the skill: `plugin/skills/recall` into `~/
 ## Usage
 
 ```bash
-# Import all sessions
-agent-recall import
+recall                      # Browse sessions (same as recall tui)
+recall import               # Import all sessions
+recall search "terraform module"
+recall search "deploy" --project oksskolten --from 2026-03-01
+recall list --project gh-infra --format json
+recall export <session-id> --format json --output session.json
+recall stats
+recall ui                   # Web UI in the background (http://localhost:6276)
+recall version
+```
 
-# Full-text search
-agent-recall search "terraform module"
+### TUI
 
-# Filter by project and date
-agent-recall search "deploy" --project oksskolten --from 2026-03-01
+`recall` (or `recall tui`) lists every archived session, most recently ended first.
 
-# List sessions
-agent-recall list
-agent-recall list --project gh-infra --format json
+| Key | Action |
+|-----|--------|
+| `↑` `↓` / `j` `k` | Move (`g` `G` for top and bottom, PgUp and PgDn by page) |
+| `Enter` | Resume the session: `claude -r <id>` from the session's folder |
+| `y` | Copy the session ID, to hand it to another agent ("look this session up with claude-recall") |
+| `Y` | Copy the resume command |
+| `Space` | Preview the start and end of the conversation |
+| `/` | Filter by title, folder, branch or ID; `Esc` clears it |
+| `s` | Sort by ended, started, message count or size |
+| `Tab` | Show or hide the detail pane |
+| `q` | Quit |
 
-# Export a session as Markdown
-agent-recall export <session-id>
-agent-recall export <session-id> --format json --output session.json
+The title is the session's `/rename` name, or else the title Claude Code generated, or else its first prompt.
 
-# Show statistics
-agent-recall stats
+`~/.config/claude-recall/config.toml` (or `$XDG_CONFIG_HOME/claude-recall/config.toml`):
 
-# Web UI
-agent-recall ui                    # Start in background (default port: 6276)
-agent-recall ui --foreground       # Start in foreground
-agent-recall ui --port 8080        # Custom port
-agent-recall ui status             # Show server status
-agent-recall ui stop               # Stop the server
+```toml
+[tui]
+# Where the detail pane goes: "bottom" (default), "right", or "auto" to put it
+# on the right when the terminal is at least detail_auto_width columns wide.
+detail_position = "bottom"
+detail_auto_width = 160
 ```
 
 ### Import
 
 ```
-agent-recall import [options]
+recall import [options]
 
-Options:
-  --session <uuid>    Import a specific session
-  --project <name>    Import sessions for a specific project
+  --session <uuid>    Import a specific session (an ID prefix works)
+  --project <name>    Import sessions whose project matches
   --dry-run           Show what would be imported without writing
 ```
 
 ### Search
 
 ```
-agent-recall search <query> [options]
+recall search <query> [options]
 
-Options:
   --project <name>    Filter by project
   --limit <n>         Max results (default: 20)
   --from <date>       Start date (YYYY-MM-DD)
@@ -186,14 +175,13 @@ Options:
   --format text|json  Output format (default: text)
 ```
 
-Supports FTS5 query syntax: `"exact phrase"`, `term1 AND term2`, `term1 OR term2`, `term1 NOT term2`
+Supports FTS5 query syntax: `"exact phrase"`, `term1 AND term2`, `term1 OR term2`, `term1 NOT term2`.
 
 ### List
 
 ```
-agent-recall list [options]
+recall list [options]
 
-Options:
   --project <name>    Filter by project
   --limit <n>         Max sessions (default: 50)
   --format text|json  Output format (default: text)
@@ -202,167 +190,132 @@ Options:
 ### Export
 
 ```
-agent-recall export <session-id> [options]
+recall export <session-id> [options]
 
-Options:
   --format markdown|json|text  Output format (default: markdown)
   --output <file>              Write to file instead of stdout
 ```
 
-Session ID supports prefix matching -- `export a1b2` works.
+A session ID prefix works: `recall export a1b2`.
 
 ### Stats
 
 ```
-agent-recall stats [options]
-
-Options:
-  --project <name>    Filter by project
+recall stats [--project <name>]
 ```
 
-### UI
+### Web UI
 
 ```
-agent-recall ui [options]
-
-Options:
-  --port <n>          Port number (default: 6276)
-  --foreground        Run in foreground instead of background
-
-Subcommands:
-  agent-recall ui stop     Stop the running server
-  agent-recall ui status   Show server status
+recall ui [--port <n>]        Start in the background (default port: 6276)
+recall ui --foreground        Run in the foreground
+recall ui status              Show server status
+recall ui stop                Stop the server
 ```
 
-Opens `http://localhost:6276` with session browser, chat viewer, and search.
+The server listens on 127.0.0.1 only. It serves a session browser, a chat viewer and search.
 
-**Live updates**: while the UI (or MCP server) is running, a filesystem watcher observes `~/.claude/projects` and imports new/changed sessions into SQLite. The UI additionally pushes `session_updated` events to browsers over Server-Sent Events — the session list reflects new activity at the top without reload, and the chat view auto-refreshes (and follows the tail if you were already scrolled to the bottom) while a session is still running in Claude Code. No Claude Code hook configuration is required; the watcher runs inside the UI/MCP process itself. See [docs/adr/002-fs-watch-for-realtime-updates.md](docs/adr/002-fs-watch-for-realtime-updates.md) for the rationale.
+While the UI (or the MCP server) runs, a watcher imports new and changed sessions within about half a second, and the UI receives `session_updated` events over server-sent events: the session list moves updated sessions to the top, and the chat view of a running session follows new messages. No Claude Code hook is needed; see [ADR-002](docs/adr/002-fs-watch-for-realtime-updates.md).
 
-Live update rules for the session list:
+How the session list applies live updates:
 
-- **No search, no filter**: every `session_updated` event is applied. A known session is bumped to the top with its new message count; a brand-new session is prepended if the server now ranks it first.
-- **Project filter active**: events whose session is outside the current project are silently dropped. Sessions inside the filter are updated in place as above.
-- **Search mode** (after pressing Enter / clicking Search with a non-empty query): the result set is frozen and live events are ignored. Typing into the search box **without** committing does not freeze updates — only a committed search does. Clearing the search box (making it empty) immediately returns to the live list.
-- **Chat view**: a `session_updated` event for the session you're currently viewing triggers a refetch. If you were scrolled to (or near) the bottom, the view follows the tail; otherwise your scroll position is preserved.
+- No search or filter: every event is applied. A known session moves to the top with its new message count; a new session is prepended if it now ranks first.
+- Project filter: events for sessions outside the project are ignored.
+- Committed search: the result set is frozen until the search box is cleared. Typing without committing does not freeze it.
+- Chat view: an event for the open session refetches it. If you were at the bottom, the view follows the tail; otherwise your scroll position stays.
+
+### Global options
+
+```
+--db <path>   Database file (default: ~/.claude/vault.db)
+--help        Show help
+```
 
 ## Architecture
 
-agent-recall is a single binary (`~/.claude/agent-recall`) with three interfaces:
+`recall` is one binary with four interfaces:
 
 | Interface | How it starts | Purpose |
-|-----------|--------------|---------|
-| **MCP** | Automatically when Claude Code starts (registered via `claude mcp add`) | Lets agents search past sessions autonomously |
-| **CLI** | Manually by the user (`agent-recall search ...`) | Search, list, export, stats from the terminal |
-| **Web UI** | Manually by the user (`agent-recall ui`) | Browse sessions and chat history in the browser, with live updates |
+|-----------|---------------|---------|
+| TUI | `recall` | Find a past session, resume it or copy its ID |
+| MCP | By Claude Code, through the plugin or `claude mcp add` | Lets agents search past sessions |
+| CLI | `recall search ...` | Search, list, export and stats from the terminal |
+| Web UI | `recall ui` | Browse sessions and conversations in the browser, live |
 
-The DB is kept in sync by the Web UI and MCP server: both run a full import on startup and keep an FS watcher running for real-time ingestion while they're up. The CLI reads the DB as-is — run `agent-recall import` manually when needed.
+The web UI and the MCP server import everything on startup and run the watcher while they are up. The `SessionEnd` hook imports when a session ends. The TUI and the CLI read the archive as it is.
 
 ```mermaid
 flowchart TD
     JSONL["~/.claude/projects/*/*.jsonl"]
-    JSONL -->|"Deno.watchFs (live, while UI/MCP runs)"| Watcher["watcher.ts<br/>debounced per file"]
-    JSONL -->|"startup full sync (UI/MCP)"| Import["import.ts<br/>full-parse + mirror to SQLite"]
-    Watcher --> Import
+    JSONL -->|"watcher (while UI or MCP runs)"| Import["importer<br/>full parse, one transaction per session"]
+    JSONL -->|"startup import, SessionEnd hook"| Import
     Import --> DB["SQLite + FTS5<br/>~/.claude/vault.db"]
-    Import --> SSE["SSEBroadcaster"]
-    SSE -->|/api/stream| UI["Web UI<br/>http://localhost:6276<br/><i>live</i>"]
-    DB --> CLI["CLI<br/>agent-recall search/list/export/stats"]
-    DB --> MCP["MCP Server<br/>agent-recall mcp<br/><i>auto-started by Claude Code</i>"]
+    Import --> SSE["server-sent events"]
+    SSE -->|/api/stream| UI["Web UI"]
+    DB --> TUI["TUI<br/>recall"]
+    DB --> CLI["CLI<br/>recall search/list/export/stats"]
+    DB --> MCP["MCP server<br/>recall mcp"]
     DB --> UI
-
-    style JSONL fill:#1c2128,stroke:#30363d,color:#e6edf3
-    style Import fill:#1c2128,stroke:#30363d,color:#e6edf3
-    style Watcher fill:#1c2128,stroke:#30363d,color:#e6edf3
-    style DB fill:#1c2f50,stroke:#58a6ff,color:#e6edf3
-    style SSE fill:#1c2f50,stroke:#58a6ff,color:#e6edf3
-    style CLI fill:#21262d,stroke:#30363d,color:#e6edf3
-    style MCP fill:#21262d,stroke:#30363d,color:#e6edf3
-    style UI fill:#21262d,stroke:#30363d,color:#e6edf3
 ```
 
-### Sync Timing
+### Sync timing
 
 | State | What happens |
 |---|---|
-| UI or MCP running | JSONL writes land in SQLite after a ~300 ms debounce (one import per burst, not per keystroke) |
-| Both UI and MCP stopped | Nothing is imported. Claude Code keeps writing JSONL files normally — no data is lost, just not indexed yet |
-| UI or MCP starts | Runs a full import first, catching up on everything written while both were stopped |
+| UI or MCP running | Changed transcripts are imported after they stop changing for 300 ms |
+| A session ends | The plugin's `SessionEnd` hook runs `recall import` |
+| UI or MCP starts | A full import catches up on everything written in the meantime |
 
-In practice, if you use Claude Code's MCP integration, the MCP server is always up during sessions and the DB tracks Claude Code in near real-time.
-
-### DB Schema
+### Database
 
 ```sql
 sessions (session_id, project, project_path, git_branch, first_prompt,
           summary, message_count, started_at, ended_at, claude_version,
-          imported_at)
+          file_mtime, file_size, imported_at, title)
 
 messages (id, session_id, uuid, role, block_type, block_index, content,
           tool_name, tool_input, timestamp, turn_index)
-          -- UNIQUE(session_id, uuid, block_index) is the dedup key. It's a
-          -- natural key (uuid + block position within the JSONL line), so
-          -- every import can safely re-parse the whole file and rely on
-          -- INSERT OR IGNORE to no-op duplicates — immune to /compact
-          -- in-place rewrites, interrupted prior runs, etc.
+          -- UNIQUE(session_id, uuid, block_index): a natural key, so a
+          -- re-import of the whole file is idempotent
+
+images (id, session_id, message_uuid, image_index, media_type, data)
 
 messages_fts (content)  -- FTS5, porter unicode61 tokenizer
 ```
 
-The DB is a derived cache of the JSONL master — on schema changes, delete
-`~/.claude/vault.db` (plus `-shm`, `-wal`) and let the next UI/MCP start
-rebuild it. No migrations.
+Each import mirrors the session's current JSONL: its rows are replaced in one transaction (see [ADR-003](docs/adr/003-mirror-jsonl-not-independent-archive.md)). Sessions whose JSONL was deleted stay in the archive, which makes `vault.db` the only copy of them: back it up, and never delete it to rebuild it. Schema changes are additive migrations tracked by `PRAGMA user_version`.
 
-SQLite mirrors the current JSONL rather than accumulating its own history. This works because Claude Code's JSONL files are append-only in practice (`/compact` adds a summary boundary rather than shrinking the file). See [docs/adr/003-mirror-jsonl-not-independent-archive.md](docs/adr/003-mirror-jsonl-not-independent-archive.md) for why the mirror design was chosen over an explicit append-only archive layer.
-
-### Filtering
+### What is stored
 
 | Stored (as `block_type`) | Excluded |
 |--------|----------|
-| `text` (user + assistant) | system (turn_duration, etc.) |
+| `text` (user and assistant) | system events (turn_duration and others) |
 | `thinking` | file-history-snapshot |
-| `tool_use` / `tool_result` | isSidechain = true |
-| `meta` (slash-command expansions, task notifications) | progress / queue-operation / last-prompt / pr-link |
-
-## Global Options
-
-```
---db <path>   Database file path (default: ~/.claude/vault.db)
---help        Show help
-```
+| `tool_use` and `tool_result` | sidechains (`isSidechain`) |
+| `meta` (slash-command expansions, task notifications) | progress, queue-operation, last-prompt, pr-link |
 
 ## Development
 
 ```bash
-# CLI
-deno task dev -- search "query"
+make test                      # go vet, go test, UI tests
+make build                     # recall with the web UI embedded
+go run ./cmd/recall search "query" --db /tmp/vault-copy.db
 
-# MCP server (stdio)
-deno task dev -- mcp
-
-# Web UI (frontend dev server + API server)
-deno task ui:dev               # Vite dev server (port 5173, proxies /api to 6276)
-deno task dev -- ui --foreground  # API server (port 6276)
-
-# Build UI assets
-deno task ui:build             # Vite build → ui/dist/
-deno task ui:embed             # Embed ui/dist/ → src/ui_assets.ts
-
-# Compile and install
-deno task compile
-deno task install
-
-# Tests
-deno task test
+# Web UI: Vite dev server on 5173, proxying /api to the Go server on 6276
+cd ui && npm run dev
+go run ./cmd/recall ui --foreground
 ```
 
-## Tech Stack
+Work against a copy of the archive (`sqlite3 ~/.claude/vault.db ".backup '/tmp/vault-copy.db'"`), not the live file.
 
-- [Deno](https://deno.com/) 2.x
-- `node:sqlite` (DatabaseSync, built-in)
-- SQLite FTS5
-- `@std/cli`, `@std/fmt`, `@std/path`
-- [Preact](https://preactjs.com/) + [Vite](https://vitejs.dev/) + [Tailwind CSS](https://tailwindcss.com/) (Web UI)
-- [marked](https://marked.js.org/) (Markdown rendering)
+[ADR-004](docs/adr/004-go-port.md) records why claude-recall moved from Deno to Go.
+
+## Tech stack
+
+- Go, [modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite) (SQLite without CGo) with FTS5
+- [Bubble Tea](https://github.com/charmbracelet/bubbletea), Bubbles and Lip Gloss (TUI)
+- The [MCP Go SDK](https://github.com/modelcontextprotocol/go-sdk)
+- [Preact](https://preactjs.com/), [Vite](https://vitejs.dev/), [Tailwind CSS](https://tailwindcss.com/) and [marked](https://marked.js.org/) (web UI)
 
 ## License
 

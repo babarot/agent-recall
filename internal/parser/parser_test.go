@@ -6,8 +6,6 @@ import (
 	"testing"
 )
 
-// These cases port src/parser_test.ts.
-
 func line(v map[string]any) string {
 	b, err := json.Marshal(v)
 	if err != nil {
@@ -252,5 +250,29 @@ func TestParseToolResult(t *testing.T) {
 	}
 	if r.messages[1].Content != "a\nb" || r.messages[2].Content != "" {
 		t.Errorf("%q %q", r.messages[1].Content, r.messages[2].Content)
+	}
+}
+
+func TestParseTitle(t *testing.T) {
+	ai := func(s string) string {
+		return line(map[string]any{"type": "ai-title", "aiTitle": s, "sessionId": "sess-001"})
+	}
+	custom := func(s string) string {
+		return line(map[string]any{"type": "custom-title", "customTitle": s, "sessionId": "sess-001"})
+	}
+	u := userMsg("hello", "u1", "2026-01-01T00:00:00Z")
+	cases := []struct {
+		lines []string
+		want  string
+	}{
+		{[]string{u}, ""},
+		{[]string{u, ai("First"), ai("Second")}, "Second"},
+		{[]string{u, custom("renamed"), ai("Later AI title")}, "renamed"},
+		{[]string{u, ai(" padded ")}, "padded"},
+	}
+	for _, c := range cases {
+		if got := mustParse(t, jsonl(c.lines...)).Meta.Title; got != c.want {
+			t.Errorf("title %q, want %q", got, c.want)
+		}
 	}
 }

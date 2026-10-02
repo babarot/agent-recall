@@ -1,9 +1,6 @@
-agent-recall
-dist/
-coverage/
+/recall
+/dist/
 *.db
 ui/dist/
 ui/node_modules/
-src/ui_assets.ts
-/recall-go
 /internal/webui/dist/

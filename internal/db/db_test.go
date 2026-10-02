@@ -5,8 +5,6 @@ import (
 	"testing"
 )
 
-// These cases port the FTS5 search tests in src/db_test.ts.
-
 func newTestDB(t *testing.T) *DB {
 	t.Helper()
 	d, err := Open(filepath.Join(t.TempDir(), "vault.db"), Options{})
@@ -193,5 +191,38 @@ func TestFTSQuery(t *testing.T) {
 		if got := ftsQuery(in); got != want {
 			t.Errorf("ftsQuery(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestMigrationAddsTitleToAnExistingArchive(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vault.db")
+	// An archive from before migrations: the base schema only.
+	old, err := Open(path, Options{ReadOnly: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	old.sql.Exec(`ALTER TABLE sessions DROP COLUMN title`)
+	old.sql.Exec(`PRAGMA user_version = 0`)
+	seedSession(t, old, "s1", "p", "/p")
+	old.Close()
+
+	d, err := Open(path, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	var version int
+	d.sql.QueryRow(`PRAGMA user_version`).Scan(&version)
+	if version != 1 {
+		t.Fatalf("user_version %d", version)
+	}
+	fi, err := d.GetFileInfo("s1")
+	if err != nil || fi == nil || fi.HasTitle {
+		t.Fatalf("existing rows must keep a NULL title: %+v %v", fi, err)
+	}
+	// Opening again must not run the migration twice.
+	d.Close()
+	if d, err = Open(path, Options{}); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -1,6 +1,6 @@
-// Command recall is the Go port of agent-recall: archive Claude Code
-// sessions in SQLite, browse them in a TUI, search them from the CLI, an MCP
-// server or a web UI.
+// Command recall archives Claude Code sessions in SQLite and lets you find
+// them again: a TUI to browse, a CLI to search, an MCP server for agents and
+// a web UI.
 package main
 
 import (
@@ -15,7 +15,6 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -29,6 +28,7 @@ import (
 	"github.com/babarot/claude-recall/internal/importer"
 	"github.com/babarot/claude-recall/internal/mcp"
 	"github.com/babarot/claude-recall/internal/tui"
+	"github.com/babarot/claude-recall/internal/version"
 	"github.com/babarot/claude-recall/internal/watcher"
 	"github.com/babarot/claude-recall/internal/web"
 )
@@ -47,6 +47,7 @@ Usage:
   recall ui --foreground        Start web UI in foreground
   recall ui stop                Stop running UI server
   recall ui status              Show UI server status
+  recall version                Show the version
 
 Global Options:
   --db <path>     Database path (default: ~/.claude/vault.db)
@@ -91,11 +92,11 @@ func main() {
 	}
 }
 
-// options are the flags every subcommand accepts, like the single parseArgs
-// call in src/main.ts.
+// options are the flags every subcommand accepts. They may appear anywhere
+// on the command line.
 type options struct {
 	db, session, project, format, from, to, output, port, limit string
-	help, dryRun, foreground                                    bool
+	help, dryRun, foreground, version                           bool
 	limitSet, portSet                                           bool
 	positional                                                  []string
 }
@@ -118,6 +119,7 @@ func parse(args []string) (*options, error) {
 	fs.BoolVar(&o.dryRun, "dry-run", false, "")
 	fs.BoolVar(&o.dryRun, "n", false, "")
 	fs.BoolVar(&o.foreground, "foreground", false, "")
+	fs.BoolVar(&o.version, "version", false, "")
 	// Flags may appear before, between or after positional arguments.
 	for {
 		if err := fs.Parse(args); err != nil {
@@ -166,6 +168,10 @@ func run(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if o.version || (len(o.positional) == 1 && o.positional[0] == "version") {
+		fmt.Fprintf(stdout, "recall %s\n", version.Version)
+		return nil
+	}
 	if o.help {
 		fmt.Fprint(stdout, usage+"\n") // console.log(USAGE)
 		return nil
@@ -197,25 +203,9 @@ func run(args []string, stdout, stderr io.Writer) error {
 	}
 }
 
-// guardLiveDB refuses to write the live archive while the TypeScript
-// version still writes it: two writers that each delete and reinsert a
-// session can leave it half imported. The guard goes away when the Go port
-// replaces the TypeScript one.
-func guardLiveDB(path string) error {
-	if filepath.Clean(path) == filepath.Clean(config.DefaultDBPath()) && os.Getenv("RECALL_ALLOW_LIVE_DB") != "1" {
-		return fmt.Errorf("refusing to write %s while the TypeScript version owns it; pass --db with a copy", path)
-	}
-	return nil
-}
-
 func openRead(o *options) (*db.DB, error) { return db.Open(o.db, db.Options{ReadOnly: true}) }
 
-func openWrite(o *options) (*db.DB, error) {
-	if err := guardLiveDB(o.db); err != nil {
-		return nil, err
-	}
-	return db.Open(o.db, db.Options{})
-}
+func openWrite(o *options) (*db.DB, error) { return db.Open(o.db, db.Options{}) }
 
 func importAll(o *options, w io.Writer) error {
 	return importer.Run(func() (*db.DB, error) { return openWrite(o) }, importer.Options{ProjectsDir: config.ProjectsDir()}, w)
@@ -425,11 +415,13 @@ func serveUI(o *options, port int, stdout io.Writer) error {
 	}
 	defer d.Close()
 
-	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	// Loopback only: the API serves transcripts and local images, which
+	// must not be reachable from the network.
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(stdout, "agent-recall UI: http://localhost:%d\n", ln.Addr().(*net.TCPAddr).Port)
+	fmt.Fprintf(stdout, "recall UI: http://localhost:%d\n", ln.Addr().(*net.TCPAddr).Port)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -458,7 +450,7 @@ func startBackground(o *options, port int, addr string, stdout, stderr io.Writer
 			PID int `json:"pid"`
 		}
 		if getStatus(addr, &st) == nil {
-			fmt.Fprintf(stdout, "agent-recall UI: %s (pid: %d)\n", addr, st.PID)
+			fmt.Fprintf(stdout, "recall UI: %s (pid: %d)\n", addr, st.PID)
 			return nil
 		}
 	}

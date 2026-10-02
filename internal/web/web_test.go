@@ -7,6 +7,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -111,5 +113,33 @@ func TestStreamSendsHelloAndEvents(t *testing.T) {
 	cancel()
 	if _, err := io.ReadAll(r); err != nil && !strings.Contains(err.Error(), "EOF") {
 		t.Logf("stream closed with %v", err)
+	}
+}
+
+func TestFileServesOnlyImages(t *testing.T) {
+	s := newServer(t)
+	dir := t.TempDir()
+	png := filepath.Join(dir, "shot.png")
+	secret := filepath.Join(dir, "id_ed25519")
+	link := filepath.Join(dir, "sneaky.png")
+	os.WriteFile(png, []byte("PNG"), 0o644)
+	os.WriteFile(secret, []byte("PRIVATE KEY"), 0o600)
+	os.Symlink(secret, link)
+
+	cases := []struct {
+		path string
+		code int
+		body string
+	}{
+		{png, 200, "PNG"},
+		{secret, 403, "Forbidden"},
+		{link, 403, "Forbidden"},
+		{filepath.Join(dir, "missing.png"), 404, "Not Found"},
+	}
+	for _, c := range cases {
+		rec := get(t, s, "/api/file?path="+url.QueryEscape(c.path))
+		if rec.Code != c.code || rec.Body.String() != c.body {
+			t.Errorf("%s: got %d %q, want %d %q", c.path, rec.Code, rec.Body.String(), c.code, c.body)
+		}
 	}
 }

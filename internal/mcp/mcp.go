@@ -1,6 +1,5 @@
 // Package mcp is the MCP server: the recall_search, recall_list,
-// recall_export and recall_stats tools over stdio. Tool names, schemas and
-// results match src/mcp.ts; the protocol itself is the official Go SDK's.
+// recall_export and recall_stats tools over stdio, on the official Go SDK.
 package mcp
 
 import (
@@ -15,10 +14,8 @@ import (
 	"github.com/babarot/claude-recall/internal/api"
 	"github.com/babarot/claude-recall/internal/db"
 	"github.com/babarot/claude-recall/internal/jscompat"
+	"github.com/babarot/claude-recall/internal/version"
 )
-
-// Version is reported in serverInfo.
-var Version = "0.1.0"
 
 type prop struct {
 	Type        string `json:"type"`
@@ -67,8 +64,8 @@ var (
 	}
 )
 
-// args is the loosely typed arguments object, read the way the TypeScript
-// handlers read it.
+// args is the loosely typed arguments object. A missing or mistyped value
+// falls back to its default instead of failing the call.
 type args map[string]any
 
 func (a args) str(key string) string {
@@ -153,7 +150,7 @@ func (h Handlers) handler(name string) mcp.ToolHandler {
 
 // NewServer returns the MCP server with the four tools.
 func NewServer(d *db.DB) *mcp.Server {
-	s := mcp.NewServer(&mcp.Implementation{Name: "agent-recall", Version: Version}, nil)
+	s := mcp.NewServer(&mcp.Implementation{Name: "claude-recall", Version: version.Version}, nil)
 	h := Handlers{DB: d}
 	for _, t := range []*mcp.Tool{searchTool, listTool, exportTool, statsTool} {
 		s.AddTool(t, h.handler(t.Name))

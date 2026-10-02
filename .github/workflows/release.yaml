@@ -41,31 +41,34 @@ jobs:
           fetch-tags: true
           persist-credentials: false
 
-      - name: Setup Deno
-        uses: denoland/setup-deno@e95548e56dfa95d4e1a28d6f422fafe75c4c26fb # v2.0.3
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          deno-version-file: .tool-versions
+          go-version-file: go.mod
 
       - name: Setup Node.js
         uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
           node-version: 22
 
-      - name: Build UI assets
+      - name: Build the web UI
         run: |
           cd ui && npm ci && npm run build && cd ..
-          deno task ui:embed
+          rm -rf internal/webui/dist && cp -R ui/dist internal/webui/dist
 
       - name: Compile binaries
+        env:
+          CGO_ENABLED: "0"
         run: |
           mkdir -p dist
-          deno task compile:macos-arm
-          deno task compile:macos-x86
-          deno task compile:linux-arm
-          deno task compile:linux-x86
+          for target in darwin/arm64/arm64 darwin/amd64/x86_64 linux/arm64/arm64 linux/amd64/x86_64; do
+            IFS=/ read -r goos goarch name <<<"$target"
+            GOOS=$goos GOARCH=$goarch go build -tags embedui -trimpath -ldflags "-s -w" \
+              -o "dist/claude-recall-$goos-$name" ./cmd/recall
+          done
 
       - name: Package the Claude Code plugin
-        run: tar -czf dist/agent-recall-plugin.tar.gz -C plugin .
+        run: tar -czf dist/claude-recall-plugin.tar.gz -C plugin .
 
       - name: Generate checksums
         run: |
@@ -102,18 +105,18 @@ jobs:
           nur="$RUNNER_TEMP/nur-packages"
           git clone --depth 1 "https://x-access-token:${NUR_GITHUB_TOKEN}@github.com/babarot/nur-packages.git" "$nur"
 
-          file="$nur/pkgs/agent-recall/default.nix"
+          file="$nur/pkgs/claude-recall/default.nix"
           prev=$(sed -n 's/^  version = "\(.*\)";$/\1/p' "$file" 2>/dev/null || true)
           mkdir -p "$(dirname "$file")"
           .github/scripts/nix-derivation.sh "$TAG" "$RUNNER_TEMP/checksums.txt" > "$file"
 
           cd "$nur"
-          git add pkgs/agent-recall
+          git add pkgs/claude-recall
           if git diff --cached --quiet; then
             echo "nothing to publish"
             exit 0
           fi
           git -c user.name="github-actions[bot]" \
               -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-              commit -m "agent-recall: ${prev:+$prev -> }$TAG"
+              commit -m "claude-recall: ${prev:+$prev -> }$TAG"
           git push

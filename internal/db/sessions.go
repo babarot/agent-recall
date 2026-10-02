@@ -96,7 +96,7 @@ type Preview struct {
 
 // textMessages selects the text blocks a reader would recognize as the
 // conversation. User blocks that are only tags (slash commands, hook output)
-// are skipped, like getFirstUserText in src/db.ts.
+// are skipped.
 const textMessages = `FROM messages
       WHERE session_id = ? AND block_type = 'text'
         AND NOT (role = 'user' AND content LIKE '<%')`

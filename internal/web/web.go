@@ -1,5 +1,4 @@
-// Package web serves the web UI and its JSON API, mirroring src/ui.ts and
-// src/sse.ts.
+// Package web serves the web UI, its JSON API and server-sent events.
 package web
 
 import (
@@ -10,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -189,7 +189,7 @@ func internalError(w http.ResponseWriter) {
 	text(w, http.StatusInternalServerError, "Internal Server Error")
 }
 
-// ServeHTTP routes a request like the Deno.serve handler in src/ui.ts.
+// ServeHTTP routes a request.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.EscapedPath()
 	switch {
@@ -387,22 +387,35 @@ var fileTypes = map[string]string{
 	"gif": "image/gif", "webp": "image/webp", "svg": "image/svg+xml",
 }
 
-// serveFile serves a local file named in a transcript ([Image: source: ...]).
+// serveFile serves a local image named in a transcript
+// ([Image: source: /path/to/file]). Only image files are served: the UI
+// needs nothing else, and any other file (an SSH key, a token) must not be
+// readable through the server.
 func serveFile(w http.ResponseWriter, q map[string][]string) {
 	path, _ := param(q, "path")
 	if path == "" || !strings.HasPrefix(path, "/") {
 		text(w, http.StatusBadRequest, "Bad Request")
 		return
 	}
-	data, err := os.ReadFile(path)
+	typ, ok := fileTypes[strings.ToLower(strings.TrimPrefix(filepath.Ext(path), "."))]
+	if !ok {
+		text(w, http.StatusForbidden, "Forbidden")
+		return
+	}
+	// Resolve symlinks so a link named x.png cannot point at another file.
+	real, err := filepath.EvalSymlinks(path)
 	if err != nil {
 		text(w, http.StatusNotFound, "Not Found")
 		return
 	}
-	ext := strings.ToLower(path[strings.LastIndex(path, ".")+1:])
-	typ, ok := fileTypes[ext]
-	if !ok {
-		typ = "application/octet-stream"
+	if _, ok := fileTypes[strings.ToLower(strings.TrimPrefix(filepath.Ext(real), "."))]; !ok {
+		text(w, http.StatusForbidden, "Forbidden")
+		return
+	}
+	data, err := os.ReadFile(real)
+	if err != nil {
+		text(w, http.StatusNotFound, "Not Found")
+		return
 	}
 	w.Header().Set("Content-Type", typ)
 	w.Header().Set("Cache-Control", "public, max-age=86400")

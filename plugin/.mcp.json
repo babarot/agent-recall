@@ -1,8 +1,10 @@
 {
   "mcpServers": {
-    "agent-recall": {
-      "command": "agent-recall",
-      "args": ["mcp"]
+    "claude-recall": {
+      "command": "recall",
+      "args": [
+        "mcp"
+      ]
     }
   }
 }

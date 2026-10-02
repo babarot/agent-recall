@@ -24,7 +24,7 @@ type Options struct {
 }
 
 // Open opens the archive at path. A writable database gets WAL mode and the
-// schema, like the TypeScript VaultDB constructor.
+// schema, then any pending migrations.
 func Open(path string, opts Options) (*DB, error) {
 	q := url.Values{}
 	q.Add("_pragma", "busy_timeout(5000)")
@@ -39,21 +39,61 @@ func Open(path string, opts Options) (*DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
-	// One connection keeps pragmas and the schema on the same handle, and
-	// matches the single synchronous handle the TypeScript version uses.
+	// One connection keeps pragmas and the schema on the same handle and
+	// serializes access; every query is short.
 	sqlDB.SetMaxOpenConns(1)
 
 	if err := sqlDB.Ping(); err != nil {
 		sqlDB.Close()
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
+	d := &DB{sql: sqlDB}
 	if !opts.ReadOnly {
 		if _, err := sqlDB.Exec(schemaSQL); err != nil {
 			sqlDB.Close()
 			return nil, fmt.Errorf("apply schema: %w", err)
 		}
+		if err := d.migrate(); err != nil {
+			sqlDB.Close()
+			return nil, fmt.Errorf("migrate: %w", err)
+		}
 	}
-	return &DB{sql: sqlDB}, nil
+	return d, nil
+}
+
+// migrations upgrade the schema one PRAGMA user_version at a time. They only
+// ever add: the archive keeps sessions whose transcripts are gone, so it can
+// never be dropped and rebuilt.
+var migrations = []string{
+	// 1: the session title Claude Code writes (custom-title or ai-title).
+	// NULL means the session was imported before titles were; the importer
+	// imports it again. An empty string means it has no title.
+	`ALTER TABLE sessions ADD COLUMN title TEXT`,
+}
+
+func (d *DB) migrate() error {
+	var version int
+	if err := d.sql.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		return err
+	}
+	for i := version; i < len(migrations); i++ {
+		tx, err := d.sql.Begin()
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(migrations[i]); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("migration %d: %w", i+1, err)
+		}
+		if _, err := tx.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, i+1)); err != nil {
+			tx.Rollback()
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Close closes the database.
@@ -68,7 +108,7 @@ type SearchOptions struct {
 }
 
 // SearchResult is one matching message. Field order and JSON names match the
-// TypeScript output so `search --format json` stays byte-compatible.
+// output of `search --format json` from before the Go port.
 type SearchResult struct {
 	SessionID   string  `json:"sessionId"`
 	Project     string  `json:"project"`

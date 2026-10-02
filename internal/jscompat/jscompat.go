@@ -1,7 +1,8 @@
-// Package jscompat reproduces the JavaScript string and JSON behavior the
-// TypeScript importer relied on, so the Go port stores byte-identical rows:
-// String.prototype.trim, length and slice (which count UTF-16 code units),
-// and JSON.stringify.
+// Package jscompat reproduces the JavaScript string and JSON behavior of the
+// original TypeScript implementation: String.prototype.trim, length and
+// slice (which count UTF-16 code units), toFixed and JSON.stringify. The
+// importer uses it so re-importing a transcript stores the same text the
+// TypeScript importer stored, and the API and MCP output keeps its shape.
 package jscompat
 
 import (
