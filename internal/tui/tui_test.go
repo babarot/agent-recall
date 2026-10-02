@@ -644,3 +644,19 @@ func TestWrapStaysWithinWidth(t *testing.T) {
 		}
 	}
 }
+
+func TestPreviewSkipLine(t *testing.T) {
+	m, _ := newTestModel(t, config.Default().TUI, 100, 30)
+	p := db.Preview{
+		Head:    []db.Message{{Role: "user", Content: "a", Timestamp: now.Add(-6 * time.Hour)}},
+		Tail:    []db.Message{{Role: "assistant", Content: "b", Timestamp: now.Add(-20 * time.Minute)}},
+		Skipped: 148,
+	}
+	line := ansi.Strip(m.skipLine(p, 98))
+	if !strings.Contains(line, "148 messages skipped · 13:00 → 18:40 (5h 40m)") || !strings.HasPrefix(line, "──") || !strings.HasSuffix(line, "──") {
+		t.Fatalf("skip line %q", line)
+	}
+	if w := ansi.StringWidth(line); w != 98 {
+		t.Fatalf("width %d", w)
+	}
+}

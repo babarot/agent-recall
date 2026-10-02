@@ -283,6 +283,22 @@ func (m Model) renderPreview() string {
 		m.rule(m.width), ansi.Truncate(where, m.width, ellipsis), m.preview.View(), m.renderStatus(), m.renderHelp()}, "\n")
 }
 
+// skipLine marks the messages the preview leaves out: a rule across w
+// cells with the count, and the time span skipped, in its middle.
+func (m Model) skipLine(p db.Preview, w int) string {
+	label := m.st.id.Bold(true).Render(fmt.Sprintf("%d messages skipped", p.Skipped))
+	if len(p.Head) > 0 && len(p.Tail) > 0 {
+		from, to := p.Head[len(p.Head)-1].Timestamp, p.Tail[0].Timestamp
+		if !from.IsZero() && !to.IsZero() {
+			label += m.st.muted.Render(fmt.Sprintf(" · %s → %s (%s)",
+				from.Local().Format("15:04"), to.Local().Format("15:04"), durationText(to.Sub(from))))
+		}
+	}
+	label = " " + label + " "
+	rest := max(0, w-ansi.StringWidth(label))
+	return m.st.rule.Render(strings.Repeat("─", rest/2)) + label + m.st.rule.Render(strings.Repeat("─", rest-rest/2))
+}
+
 // renderConversation formats preview messages for a terminal w cells wide.
 // The user's messages sit in a box with the speaker and time on its top
 // edge, in bold; Claude's carry a rail down their left side, in a softer
@@ -322,7 +338,7 @@ func (m Model) renderConversation(p db.Preview, w int) string {
 		one(msg)
 	}
 	if p.Skipped > 0 {
-		fmt.Fprintf(&b, "   %s\n\n", m.st.muted.Render(fmt.Sprintf("··· %d messages skipped ···", p.Skipped)))
+		fmt.Fprintf(&b, " %s\n\n", m.skipLine(p, w-2))
 	}
 	for _, msg := range p.Tail {
 		one(msg)
