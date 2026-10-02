@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -45,5 +46,50 @@ func TestLoadScope(t *testing.T) {
 	os.WriteFile(path, []byte("[tui]\nscope = \"repo\"\n"), 0o644)
 	if _, err := Load(path); err == nil {
 		t.Fatal("expected an error for an unknown scope")
+	}
+}
+
+func TestLoadRejectsUnknownKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	cases := map[string]string{
+		"scope = \"all\"\n":        `unknown key "scope"; it belongs under [tui]`,
+		"[tui]\nscop = \"all\"\n":  `unknown key "tui.scop" (known: tui.detail_position`,
+		"[ui]\ntheme = \"nord\"\n": `unknown key "ui"`,
+	}
+	for body, want := range cases {
+		os.WriteFile(path, []byte(body), 0o644)
+		_, err := Load(path)
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: got %v, want %q", body, err, want)
+		}
+	}
+}
+
+func TestTemplateLoadsAsTheDefaults(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sub", "config.toml")
+	if err := WriteTemplate(path); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(path)
+	if err != nil || got != Default() {
+		t.Fatalf("got %+v, %v", got, err)
+	}
+	// It never replaces a file that is there.
+	os.WriteFile(path, []byte("[tui]\nscope = \"all\"\n"), 0o644)
+	if err := WriteTemplate(path); err == nil {
+		t.Fatal("expected an error for an existing file")
+	}
+	if got, _ := Load(path); got.TUI.Scope != ScopeAll {
+		t.Fatal("the existing file was replaced")
+	}
+	// Every setting is in the template, and the README shows the template.
+	for _, k := range knownKeys() {
+		if !strings.Contains(Template, "# "+strings.TrimPrefix(k, "tui.")+" = ") {
+			t.Errorf("template lacks %s", k)
+		}
+	}
+	readme, _ := os.ReadFile("../../README.md")
+	if !strings.Contains(string(readme), Template) {
+		t.Error("README.md should show the config template as written")
 	}
 }

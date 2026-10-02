@@ -6,6 +6,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 
@@ -67,15 +69,57 @@ func FilePath() string {
 	return filepath.Join(dir, "claude-recall", "config.toml")
 }
 
+// Template is the config file written on first run: every setting at its
+// default, commented out, so a default changed later still applies until
+// the user picks a value.
+const Template = `# claude-recall settings. Uncomment a line to change it.
+
+[tui]
+# Where the detail pane goes: "bottom" (default), "right", or "auto" to put it
+# on the right when the terminal is at least detail_auto_width columns wide.
+# detail_position = "bottom"
+# detail_auto_width = 160
+# Initial height of the detail pane below the list, in lines (at least 10).
+# detail_height = 16
+# Color scheme: "auto" (default) picks catppuccin-mocha on a dark terminal and
+# catppuccin-latte on a light one. Also: tokyo-night, dracula, nord,
+# gruvbox-dark, and ansi (the terminal's own 16 colors).
+# theme = "auto"
+# Which sessions to start with: "folder" (default) for the repository recall is
+# started in, when it has sessions, or "all".
+# scope = "folder"
+`
+
+// WriteTemplate writes Template to path unless a file is already there.
+func WriteTemplate(path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := f.WriteString(Template); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
+}
+
 // Load reads the config file at path. A missing file yields the defaults;
-// keys left out of the file keep their defaults.
+// keys left out of the file keep their defaults. A key it does not know is
+// an error, since it would otherwise be ignored without a word.
 func Load(path string) (File, error) {
 	cfg := Default()
-	if _, err := toml.DecodeFile(path, &cfg); err != nil {
+	md, err := toml.DecodeFile(path, &cfg)
+	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return Default(), nil
 		}
 		return File{}, fmt.Errorf("read %s: %w", path, err)
+	}
+	if keys := md.Undecoded(); len(keys) > 0 {
+		return File{}, unknownKey(path, keys[0].String())
 	}
 	switch cfg.TUI.DetailPosition {
 	case DetailBottom, DetailRight, DetailAuto:
@@ -96,4 +140,25 @@ func Load(path string) (File, error) {
 		return File{}, fmt.Errorf("%s: tui.detail_auto_width must be positive", path)
 	}
 	return cfg, nil
+}
+
+// unknownKey explains a key Load does not know, pointing a TUI setting
+// written outside [tui] to where it belongs.
+func unknownKey(path, key string) error {
+	t := reflect.TypeOf(TUI{})
+	for i := range t.NumField() {
+		if name := t.Field(i).Tag.Get("toml"); name == key {
+			return fmt.Errorf("%s: unknown key %q; it belongs under [tui]", path, key)
+		}
+	}
+	return fmt.Errorf("%s: unknown key %q (known: %s)", path, key, strings.Join(knownKeys(), ", "))
+}
+
+func knownKeys() []string {
+	var out []string
+	t := reflect.TypeOf(TUI{})
+	for i := range t.NumField() {
+		out = append(out, "tui."+t.Field(i).Tag.Get("toml"))
+	}
+	return out
 }

@@ -470,6 +470,9 @@ func startBackground(o *options, port int, addr string, stdout, stderr io.Writer
 }
 
 func runTUI(o *options) error {
+	// The first run leaves a commented config to edit; one that is there,
+	// or a directory that cannot be written, is left alone.
+	_ = config.WriteTemplate(config.FilePath())
 	cfg, err := config.Load(config.FilePath())
 	if err != nil {
 		return err
