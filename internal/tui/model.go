@@ -645,12 +645,21 @@ func (m Model) updateFilter(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "ctrl+c":
 		return m, tea.Quit
-	case "tab", "shift+tab":
-		delta := 1
-		if msg.String() == "shift+tab" {
-			delta = -1
+	case "tab", "right":
+		// The hinted key first; then tab completes a value.
+		if m.acceptKeyHint() {
+			m.refresh()
+			return m, nil
 		}
-		if m.complete(delta) {
+		if msg.String() == "right" {
+			break
+		}
+		if m.complete(1) {
+			m.refresh()
+		}
+		return m, nil
+	case "shift+tab":
+		if m.complete(-1) {
 			m.refresh()
 		}
 		return m, nil

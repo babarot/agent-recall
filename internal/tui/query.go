@@ -131,6 +131,49 @@ func (q query) inFolder(name string) bool {
 	return false
 }
 
+// keyOrder lists the keys for the key hint.
+var keyOrder = []string{inPrefix, textPrefix, titlePrefix, branchPrefix, worktreePrefix, idPrefix}
+
+// minKeyHint is how much of a key's name brings up its hint: two letters
+// tell every key apart (te for text:, ti for title:).
+const minKeyHint = 2
+
+// keyHint is the rest of the key whose name starts with the word being
+// typed at the end of the filter ("anch:" after "bra"), or "".
+func (m Model) keyHint() string {
+	v := m.filter.Value()
+	if m.filter.Position() != len([]rune(v)) {
+		return ""
+	}
+	word := strings.ToLower(v[strings.LastIndex(v, " ")+1:])
+	if len([]rune(word)) < minKeyHint || strings.Contains(word, ":") {
+		return ""
+	}
+	for _, k := range keyOrder {
+		if strings.HasPrefix(k, word) {
+			return k[len(word):]
+		}
+	}
+	return ""
+}
+
+// keyHintKey is the whole key the hint completes.
+func (m Model) keyHintKey() string {
+	v := m.filter.Value()
+	return strings.ToLower(v[strings.LastIndex(v, " ")+1:]) + m.keyHint()
+}
+
+// acceptKeyHint types the rest of the hinted key.
+func (m *Model) acceptKeyHint() bool {
+	hint := m.keyHint()
+	if hint == "" {
+		return false
+	}
+	m.filter.SetValue(m.filter.Value() + hint)
+	m.filter.CursorEnd()
+	return true
+}
+
 // completers are the keys whose values the filter suggests while one is
 // typed, and how: folders fuzzily, as in: matches; branches and worktrees
 // by the part typed, most recently used first.

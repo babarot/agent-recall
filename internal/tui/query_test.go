@@ -304,3 +304,58 @@ func TestBranchAndWorktreeSuggest(t *testing.T) {
 		t.Fatalf("title: should not suggest, got %+v", list)
 	}
 }
+
+func TestKeyHint(t *testing.T) {
+	cases := map[string]string{
+		"bra":       "nch:",
+		"te":        "xt:",
+		"ti":        "tle:",
+		"wo":        "rktree:",
+		"in":        ":",
+		"id":        ":",
+		"nix BR":    "anch:", // the last word, any case
+		"t":         "",      // one letter could be text: or title:
+		"branch:":   "",
+		"docs":      "",
+		"ドキュメント te": "xt:",
+	}
+	for typed, want := range cases {
+		m, _ := newTestModel(t, config.Default().TUI, 140, 40)
+		m = typeFilter(t, m, typed)
+		if got := m.keyHint(); got != want {
+			t.Errorf("%q: hint %q, want %q", typed, got, want)
+		}
+	}
+	// It shows faint after the cursor, and tab or → takes it.
+	m, _ := newTestModel(t, config.Default().TUI, 140, 40)
+	m = typeFilter(t, m, "bra")
+	if !strings.Contains(screen(m), "/ bra") || !strings.Contains(screen(m), "nch:") || !strings.Contains(screen(m), "tab key branch:") {
+		t.Fatalf("the hint should show:\n%s", screen(m))
+	}
+	m = press(t, m, "tab")
+	if m.filter.Value() != "branch:" {
+		t.Fatalf("tab gave %q", m.filter.Value())
+	}
+	if list, _ := m.suggestions(); len(list) == 0 {
+		t.Fatal("the branch suggestions should follow")
+	}
+	m, _ = newTestModel(t, config.Default().TUI, 140, 40)
+	m = update(t, typeFilter(t, m, "te"), tea.KeyPressMsg{Code: tea.KeyRight})
+	if m.filter.Value() != "text:" {
+		t.Fatalf("→ gave %q", m.filter.Value())
+	}
+	// Not at the end of the filter, no hint; → just moves the cursor.
+	m, _ = newTestModel(t, config.Default().TUI, 140, 40)
+	m = update(t, typeFilter(t, m, "te"), tea.KeyPressMsg{Code: tea.KeyLeft})
+	if m.keyHint() != "" {
+		t.Fatal("with the cursor inside the word, there is no hint")
+	}
+	if m = update(t, m, tea.KeyPressMsg{Code: tea.KeyRight}); m.filter.Value() != "te" {
+		t.Fatalf("→ inside the word should only move, got %q", m.filter.Value())
+	}
+	// Enter applies the filter as typed.
+	m, _ = newTestModel(t, config.Default().TUI, 140, 40)
+	if m = press(t, typeFilter(t, m, "te"), "enter"); m.filter.Value() != "te" || m.mode != modeList {
+		t.Fatalf("enter gave %q", m.filter.Value())
+	}
+}

@@ -88,7 +88,12 @@ func (m Model) render() string {
 
 	lines := []string{m.renderHeader()}
 	if m.filterShown() {
-		lines = append(lines, " "+m.st.filter.Render(m.filter.View()))
+		line := " " + m.st.filter.Render(m.filter.View())
+		// The hinted key follows the cursor, faint, until tab takes it.
+		if hint := m.keyHint(); hint != "" && m.mode == modeFilter {
+			line = " " + m.st.filter.Render(strings.TrimRight(m.filter.View(), " ")) + m.st.dim.Render(hint)
+		}
+		lines = append(lines, line)
 	}
 	table := m.renderTable()
 	if m.sidebarShown() {
@@ -289,6 +294,8 @@ func (m Model) renderHelp() string {
 		pairs = [][2]string{{"enter", "apply"}, {"esc", "clear"}, {"↑↓", "move"}}
 		if list, _ := m.suggestions(); len(list) > 0 {
 			pairs = [][2]string{{"↑↓", "folder"}, {"enter", "pick"}, {"tab", "complete"}, {"esc", "close"}}
+		} else if m.keyHint() != "" {
+			pairs = append([][2]string{{"tab", "key " + m.keyHintKey()}}, pairs...)
 		} else if _, _, _, _, ok := m.keyTerm(); !ok {
 			pairs = append(pairs, [2]string{"in: text: title: branch: worktree: id:", "one field"})
 		}
