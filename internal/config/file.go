@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -53,11 +54,20 @@ type TUI struct {
 	// Scope is ScopeFolder to start with only the sessions of the folder
 	// (repository and its worktrees) the TUI is started in, or ScopeAll.
 	Scope string `toml:"scope"`
+	// AskModel is the model `a` (ask Claude) runs claude -p with: a family
+	// and version (sonnet-5.5), a full model ID, or an alias claude knows.
+	AskModel string `toml:"ask_model"`
+	// AskShowCost shows what an answer cost, as claude reports it.
+	AskShowCost bool `toml:"ask_show_cost"`
+	// AskReasons shows why Claude picked a session, under its row and in
+	// Conversation, after an ask.
+	AskReasons bool `toml:"ask_reasons"`
 }
 
 // Default returns the settings used when the config file is absent.
 func Default() File {
-	return File{TUI: TUI{DetailPosition: DetailBottom, DetailAutoWidth: 160, Theme: theme.Auto, DetailHeight: 16, Scope: ScopeFolder}}
+	return File{TUI: TUI{DetailPosition: DetailBottom, DetailAutoWidth: 160, Theme: theme.Auto, DetailHeight: 16, Scope: ScopeFolder,
+		AskModel: "sonnet-5.5", AskShowCost: true, AskReasons: true}}
 }
 
 // FilePath returns the config file location, honoring XDG_CONFIG_HOME.
@@ -88,6 +98,14 @@ const Template = `# claude-recall settings. Uncomment a line to change it.
 # Which sessions to start with: "folder" (default) for the repository recall is
 # started in, when it has sessions, or "all".
 # scope = "folder"
+# a asks Claude Code (claude -p, on your Claude plan) to find sessions.
+# The model: a family and version such as "sonnet-5.5", "opus-5.5" or
+# "haiku-4.5", or a full model ID. Whether to show what an answer cost (the
+# price claude reports; on a Claude plan it counts toward your usage rather
+# than being billed), and why Claude picked each session.
+# ask_model = "sonnet-5.5"
+# ask_show_cost = true
+# ask_reasons = true
 `
 
 // WriteTemplate writes Template to path unless a file is already there.
@@ -136,6 +154,9 @@ func Load(path string) (File, error) {
 	if cfg.TUI.DetailHeight < MinDetailHeight {
 		return File{}, fmt.Errorf("%s: tui.detail_height must be at least %d", path, MinDetailHeight)
 	}
+	if strings.TrimSpace(cfg.TUI.AskModel) == "" {
+		return File{}, fmt.Errorf("%s: tui.ask_model must not be empty", path)
+	}
 	if cfg.TUI.DetailAutoWidth <= 0 {
 		return File{}, fmt.Errorf("%s: tui.detail_auto_width must be positive", path)
 	}
@@ -161,4 +182,16 @@ func knownKeys() []string {
 		out = append(out, "tui."+t.Field(i).Tag.Get("toml"))
 	}
 	return out
+}
+
+var familyVersion = regexp.MustCompile(`^(sonnet|opus|haiku|fable)-(\d+)\.(\d+)$`)
+
+// ModelID turns a family and version (sonnet-5.5) into the model ID claude
+// takes (claude-sonnet-5-5); anything else is passed on as written.
+func ModelID(name string) string {
+	name = strings.TrimSpace(name)
+	if m := familyVersion.FindStringSubmatch(strings.ToLower(name)); m != nil {
+		return fmt.Sprintf("claude-%s-%s-%s", m[1], m[2], m[3])
+	}
+	return name
 }

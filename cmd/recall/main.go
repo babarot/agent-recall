@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -490,6 +491,11 @@ func runTUI(o *options) error {
 	model := tui.New(sessions, d, cfg.TUI).RememberIn(config.StatePath())
 	if wd, err := os.Getwd(); err == nil {
 		model = model.StartIn(wd)
+	}
+	// Asking Claude gives it this recall's MCP server on the same database,
+	// run from a directory of its own so no project's settings apply.
+	if exe, err := os.Executable(); err == nil {
+		model = model.AskWith([]string{exe, "mcp", "--db", o.db}, filepath.Join(filepath.Dir(config.StatePath()), "ask"))
 	}
 	final, err := tea.NewProgram(model).Run()
 	if err != nil {

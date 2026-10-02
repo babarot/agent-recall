@@ -68,6 +68,18 @@ func (m Model) paneHeight() int {
 }
 
 // listHeight is the number of session rows that fit.
+// rowLines is the lines each session takes in the list: two while it shows
+// the sessions Claude found, with why under each.
+func (m Model) rowLines() int {
+	if m.asked != nil && m.cfg.AskReasons {
+		return 2
+	}
+	return 1
+}
+
+// listRows is how many sessions the list shows at once.
+func (m Model) listRows() int { return max(1, m.listHeight()/m.rowLines()) }
+
 func (m Model) listHeight() int {
 	return max(1, m.height-m.chromeLines()-m.paneHeight())
 }
@@ -84,6 +96,9 @@ func (m Model) View() tea.View {
 func (m Model) render() string {
 	if m.width == 0 || m.height == 0 {
 		return ""
+	}
+	if m.ask.stage != askClosed {
+		return m.withAsk(m.renderScreen())
 	}
 	if m.helpOpen {
 		return m.withHelp(m.renderScreen())
@@ -159,6 +174,11 @@ func (m Model) renderHeader() string {
 		where = m.folderName(m.scope)
 	}
 	right := m.st.tag.Render(count)
+	if m.asked != nil {
+		where = ""
+		room := m.width - 2 - ansi.StringWidth(left) - 1 - len(count) - len("asked:  · ") - len(sort)
+		right += m.st.filter.Background(m.st.header.GetBackground()).Render("asked: "+ansi.Truncate(m.askedFor, max(8, room), ellipsis)) + m.st.tag.Render(" · ")
+	}
 	if m.searching() {
 		right = m.st.tag.Render("searching… · ") + right
 	}
@@ -197,7 +217,7 @@ func (m Model) renderTable() []string {
 		bar = m.st.selected.Render(" ")
 	}
 
-	h := m.listHeight()
+	h := m.listRows()
 	now := m.now()
 	end := min(len(m.visible), m.offset+h)
 	for i := m.offset; i < end; i++ {
@@ -210,10 +230,14 @@ func (m Model) renderTable() []string {
 			indent = bar + m.st.selected.Render(" ")
 		}
 		lines = append(lines, renderRow(cols, lw, indent, func(p placed) string { return p.col.cell(ctx, r, p.width) }, pad))
+		if m.rowLines() == 2 {
+			lines = append(lines, "  "+strings.Repeat(" ", 16)+m.reasonLine(r.s.ID, lw-20))
+		}
 	}
 	if len(m.visible) == 0 {
 		lines = append(lines, m.st.muted.Render("  No sessions match the filter. Esc clears it."))
 	}
+	h = m.listHeight()
 	for len(lines) < 3+h {
 		lines = append(lines, "")
 	}
@@ -310,6 +334,15 @@ func (m Model) renderHelp() string {
 			pairs = append(pairs, [2]string{"in: text: title: branch: worktree: id:", "one field"})
 		}
 	case modeList:
+		if m.ask.stage != askClosed {
+			pairs = map[askStage][][2]string{
+				askTyping:   {{"enter", "ask"}, {"esc", "close"}},
+				askRunning:  {{"esc", "cancel"}},
+				askAnswered: {{"↑↓", "pick"}, {"enter", "open"}, {"f", "filter the list to these"}, {"r", "ask again"}, {"esc", "close"}},
+				askFailed:   {{"r", "ask again"}, {"esc", "close"}},
+			}[m.ask.stage]
+			break
+		}
 		if m.focus == focusFolders && m.sideTyping {
 			pairs = [][2]string{{"↑↓", "folder"}, {"enter", "done"}, {"esc", "clear"}}
 			break

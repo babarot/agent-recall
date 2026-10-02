@@ -142,6 +142,7 @@ recall version
 | `←` `→` / `h` `l` | Show or hide the folder list. `←` opens it and, pressed again, moves into it; `↑` `↓` there pick a folder and `/` searches the folders by fuzzy match (`bdot` finds babarot/dotfiles; `Enter` keeps the search, `Esc` clears it); `→` (or `Enter`) returns to the sessions, and `→` again closes it. The focused side has accent rules and the selection bar |
 | `+` `-` | Make the detail pane taller or shorter |
 | `Tab` `Shift+Tab` (or `]` `[`) | Move focus along the folder list (when shown), the sessions and the detail pane's frames, in the order they are laid out; `↑` `↓`, `j` `k`, PgUp, PgDn, `g` and `G` then scroll it, `Esc` returns to the list |
+| `a` | Ask Claude to find sessions: type a question, and Claude Code (`claude -p`, signed in as you, with recall's search as its only tool) looks through the archive. Pick one of the sessions it finds to jump to it, or `f` to narrow the list to all of them, each with why it matched; `Esc` clears that. The answer says which model gave it, how long it took and what claude reports it cost |
 | `?` | Show every key, grouped by where it works; `?`, `Esc` or `q` closes the list |
 | `q` | Quit |
 
@@ -172,6 +173,14 @@ With the mouse: click a session to select it, click a frame to focus it, scroll 
 # Which sessions to start with: "folder" (default) for the repository recall is
 # started in, when it has sessions, or "all".
 # scope = "folder"
+# a asks Claude Code (claude -p, on your Claude plan) to find sessions.
+# The model: a family and version such as "sonnet-5.5", "opus-5.5" or
+# "haiku-4.5", or a full model ID. Whether to show what an answer cost (the
+# price claude reports; on a Claude plan it counts toward your usage rather
+# than being billed), and why Claude picked each session.
+# ask_model = "sonnet-5.5"
+# ask_show_cost = true
+# ask_reasons = true
 ```
 
 The look follows [cc360](https://github.com/achton/cc360). A worktree that has since been removed is shown struck through, with its repository and name guessed from where herdr (`~/.herdr/worktrees/<repo>/worktree-<name>`) or Claude Code (`<repo>/.claude/worktrees/<name>`) put it.
