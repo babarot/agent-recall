@@ -221,17 +221,17 @@ func durationText(d time.Duration) string {
 
 func (m Model) section(s string) string { return m.st.subtle.Bold(true).Render(strings.ToUpper(s)) }
 
-// messageLine is one message of the conversation: time, a colored dot for
-// the speaker, the text. The user's own words are bold.
+// messageLine is one message of the conversation: time, the speaker in its
+// color, the text. The user's own words are bold.
 func (m Model) messageLine(msg db.Message) string {
 	when := "     "
 	if !msg.Timestamp.IsZero() {
 		when = msg.Timestamp.Local().Format("15:04")
 	}
 	if msg.Role == "user" {
-		return m.st.dim.Render(when) + " " + m.st.user.Render("●") + " " + m.st.strong.Bold(true).Render(collapse(msg.Content))
+		return m.st.dim.Render(when) + " " + m.st.user.Render("you   ") + " " + m.st.strong.Bold(true).Render(collapse(msg.Content))
 	}
-	return m.st.dim.Render(when) + " " + m.st.claude.Render("●") + " " + m.st.subtle.Render(collapse(msg.Content))
+	return m.st.dim.Render(when) + " " + m.st.claude.Render("claude") + " " + m.st.subtle.Render(collapse(msg.Content))
 }
 
 func (m Model) dayLine(t time.Time) string {
@@ -254,7 +254,8 @@ func (m Model) conversationContent(r *row, d *db.Detail) frameLines {
 	}
 	c.pinned = append(c.pinned, m.messageLine(*d.First))
 	c.before = d.Hidden
-	c.gap = func(n int) string { return m.st.muted.Render(fmt.Sprintf("      ⋮  %d messages", n)) }
+	// The marker sits under the speaker column.
+	c.gap = func(n int) string { return m.st.muted.Render(fmt.Sprintf("        ⋮    %d messages", n)) }
 	day := d.First.Timestamp.Local().Format(time.DateOnly)
 	for _, msg := range d.Tail {
 		if !msg.Timestamp.IsZero() {

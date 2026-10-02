@@ -570,7 +570,7 @@ func TestConversationMarksTheGap(t *testing.T) {
 	m = update(t, m, tea.MouseClickMsg{X: conv.x + 3, Y: conv.y + 2, Button: tea.MouseLeft})
 	m = press(t, m, "g")
 	// Scrolled to the top, only the 5 messages not loaded remain hidden.
-	if s = screen(m); !strings.Contains(s, "⋮  5 messages") || !strings.Contains(s, "older message 00") {
+	if s = screen(m); !strings.Contains(s, "⋮    5 messages") || !strings.Contains(s, "older message 00") {
 		t.Fatalf("at the top the marker counts what was not loaded:\n%s", s)
 	}
 }
