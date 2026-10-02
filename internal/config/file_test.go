@@ -35,3 +35,15 @@ func TestLoadRejectsUnknownPosition(t *testing.T) {
 		t.Fatal("expected an error")
 	}
 }
+
+func TestLoadScope(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	os.WriteFile(path, []byte("[tui]\nscope = \"all\"\n"), 0o644)
+	if got, err := Load(path); err != nil || got.TUI.Scope != ScopeAll {
+		t.Fatalf("got %+v, %v", got, err)
+	}
+	os.WriteFile(path, []byte("[tui]\nscope = \"repo\"\n"), 0o644)
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected an error for an unknown scope")
+	}
+}

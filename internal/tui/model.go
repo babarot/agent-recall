@@ -80,6 +80,19 @@ type Model struct {
 	rows    []row
 	visible []int // indexes into rows, filtered and sorted
 
+	resolver *worktree.Resolver
+	// folders are what the list can be narrowed to; scope is the chosen
+	// one's key ("" for all) and startFolder the one the TUI started in.
+	folders     []folderInfo
+	scope       string
+	startFolder string
+	sidebar     bool // the folder list is open
+	sideOffset  int
+	// sideSearch narrows the folder list; sideTyping is set while it has
+	// the keys.
+	sideSearch textinput.Model
+	sideTyping bool
+
 	cursor, offset int
 	width, height  int
 	detailOpen     bool
@@ -87,6 +100,12 @@ type Model struct {
 	sortIdx        int
 
 	filter textinput.Model
+	comp   completion
+	sugOff int // first suggestion shown
+	sugSel int // highlighted suggestion
+	// sugHidden is set when Esc closes the suggestions, until the filter
+	// changes.
+	sugHidden bool
 
 	preview    viewport.Model
 	previewFor string // session ID the preview shows
@@ -124,9 +143,17 @@ func New(sessions []db.Session, source Source, cfg config.TUI) Model {
 
 	fi := textinput.New()
 	fi.Prompt = "/ "
-	fi.Placeholder = "filter by title, folder, branch or ID"
+	fi.Placeholder = "filter by title, folder, branch or ID · in:folder"
+
+	ss := textinput.New()
+	ss.Prompt = "/ "
+	ss.Placeholder = "search folders"
+	ss.SetWidth(sidebarWidth - 12)
 
 	m := Model{
+		sideSearch: ss,
+		resolver:   resolver,
+		folders:    groupRows(rows),
 		cfg:        cfg,
 		source:     source,
 		home:       home,
@@ -147,9 +174,11 @@ func New(sessions []db.Session, source Source, cfg config.TUI) Model {
 // state file at path, starting from what is saved there.
 func (m Model) RememberIn(path string) Model {
 	m.statePath = path
-	if st := config.LoadState(path); st.DetailHeight >= config.MinDetailHeight {
+	st := config.LoadState(path)
+	if st.DetailHeight >= config.MinDetailHeight {
 		m.detailH = st.DetailHeight
 	}
+	m.sidebar = st.Sidebar
 	return m
 }
 
@@ -157,7 +186,7 @@ func (m *Model) saveState() tea.Cmd {
 	if m.statePath == "" {
 		return nil
 	}
-	path, st := m.statePath, config.State{DetailHeight: m.detailH}
+	path, st := m.statePath, config.State{DetailHeight: m.detailH, Sidebar: m.sidebar}
 	return func() tea.Msg {
 		_ = config.SaveState(path, st)
 		return nil
@@ -187,7 +216,9 @@ func (m Model) paneTop() int {
 func (m *Model) loadDetail() {
 	r := m.current()
 	if !m.detailOpen || r == nil {
-		m.focus = focusList
+		if m.focus != focusFolders {
+			m.focus = focusList
+		}
 		return
 	}
 	if r.s.ID != m.scrollFor {
@@ -212,10 +243,14 @@ func (m *Model) refresh() {
 	if r := m.current(); r != nil {
 		keep = r.s.ID
 	}
-	q := strings.ToLower(strings.TrimSpace(m.filter.Value()))
+	q := parseQuery(m.filter.Value())
 	m.visible = m.visible[:0]
 	for i := range m.rows {
-		if q == "" || matches(m.rows[i].search, q) {
+		// in: picks folders itself, over the one the list is narrowed to.
+		if m.scope != "" && len(q.in) == 0 && m.rows[i].group != m.scope {
+			continue
+		}
+		if q.match(&m.rows[i]) {
 			m.visible = append(m.visible, i)
 		}
 	}
@@ -230,16 +265,6 @@ func (m *Model) refresh() {
 		}
 	}
 	m.clamp()
-}
-
-// matches requires every space-separated word of q to appear in text.
-func matches(text, q string) bool {
-	for w := range strings.FieldsSeq(q) {
-		if !strings.Contains(text, w) {
-			return false
-		}
-	}
-	return true
 }
 
 func (m *Model) current() *row {
@@ -334,6 +359,9 @@ func (m *Model) action(key string) (tea.Cmd, bool) {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	next, cmd := m.update(msg)
 	if nm, ok := next.(Model); ok {
+		if nm.focus == focusFolders && !nm.sidebarShown() {
+			nm.focus = focusList
+		}
 		nm.loadDetail()
 		return nm, cmd
 	}
@@ -345,6 +373,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseClickMsg:
 		if msg.Button == tea.MouseLeft && m.mode == modeList {
 			m.click(msg.X, msg.Y)
+		}
+		if i := m.suggestionAt(msg.X, msg.Y); msg.Button == tea.MouseLeft && i >= 0 {
+			m.pickSuggestion(i)
+			m.refresh()
 		}
 		return m, nil
 	case tea.MouseMotionMsg:
@@ -368,7 +400,11 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Button == tea.MouseWheelUp {
 			step = -1
 		}
-		if f := m.frameAt(msg.X, msg.Y); f != focusList {
+		if r, _, _, _, ok := m.suggestRect(); ok && r.contains(msg.X, msg.Y) {
+			m.scrollSuggestions(step)
+		} else if m.sidebarAt(msg.X, msg.Y) >= 0 {
+			m.scrollSidebar(3 * step)
+		} else if f := m.frameAt(msg.X, msg.Y); f != focusList {
 			m.scrollFrame(f, 3*step)
 		} else {
 			m.move(step)
@@ -402,23 +438,52 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	key := msg.String()
-	if cmd, ok := m.action(key); ok {
-		return m, cmd
+	if m.focus == focusFolders && m.sideTyping {
+		return m.updateSideSearch(msg)
 	}
+	key := msg.String()
 	switch key {
 	case "]":
-		m.focus = (m.focus + 1) % numFocus
-		if !m.detailOpen {
-			m.focus = focusList
-		}
+		m.cycleFocus(1)
 		return m, nil
 	case "[":
-		m.focus = (m.focus + numFocus - 1) % numFocus
-		if !m.detailOpen {
+		m.cycleFocus(-1)
+		return m, nil
+	case ".":
+		return m, m.toggleScope()
+	}
+	if m.focus == focusFolders {
+		page := max(1, m.sidebarRows()-1)
+		switch key {
+		case "down", "j", "ctrl+n":
+			m.moveFolder(1)
+		case "up", "k", "ctrl+p":
+			m.moveFolder(-1)
+		case "pgdown", "ctrl+f", "ctrl+d":
+			m.moveFolder(page)
+		case "pgup", "ctrl+b", "ctrl+u":
+			m.moveFolder(-page)
+		case "home", "g":
+			m.moveFolder(-len(m.folders) - 1)
+		case "end", "G":
+			m.moveFolder(len(m.folders) + 1)
+		case "/":
+			return m, m.searchFolders()
+		case "esc":
+			if m.sideSearch.Value() != "" {
+				m.clearSideSearch()
+				break
+			}
 			m.focus = focusList
+		case "enter", "right", "l":
+			m.focus = focusList
+		case "q", "ctrl+c":
+			return m, tea.Quit
 		}
 		return m, nil
+	}
+	if cmd, ok := m.action(key); ok {
+		return m, cmd
 	}
 	if m.focus != focusList {
 		if rects, ok := m.paneRects(); ok {
@@ -485,11 +550,69 @@ list:
 		}
 	case "space":
 		return m, m.openPreview()
+	// ← ← (h h) opens the folder list and moves into it, → → (l l) comes
+	// back and closes it.
+	case "left", "h":
+		if m.focus != focusList {
+			break
+		}
+		if m.sidebarShown() {
+			m.focus = focusFolders
+			return m, nil
+		}
+		return m, m.openSidebar(false)
+	case "right", "l":
+		if m.focus == focusList && m.sidebarShown() {
+			return m, m.closeSidebar()
+		}
 	}
 	return m, nil
 }
 
+// cycleFocus moves the focus along the folder list (when shown), the
+// session list and the detail pane's frames (when open).
+func (m *Model) cycleFocus(delta int) {
+	var order []focus
+	if m.sidebarShown() {
+		order = append(order, focusFolders)
+	}
+	order = append(order, focusList)
+	if m.detailOpen && m.current() != nil {
+		order = append(order, focusConv, focusDone, focusDetails)
+	}
+	i := max(0, slices.Index(order, m.focus))
+	m.focus = order[(i+delta+len(order))%len(order)]
+}
+
 func (m Model) updateFilter(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	// While folder suggestions show, the arrows, Enter and Esc act on them.
+	if list, _ := m.suggestions(); len(list) > 0 {
+		switch msg.String() {
+		case "down", "ctrl+n":
+			m.moveSuggestion(1)
+			m.refresh()
+			return m, nil
+		case "up", "ctrl+p":
+			m.moveSuggestion(-1)
+			m.refresh()
+			return m, nil
+		case "pgdown":
+			m.moveSuggestion(maxSuggest)
+			m.refresh()
+			return m, nil
+		case "pgup":
+			m.moveSuggestion(-maxSuggest)
+			m.refresh()
+			return m, nil
+		case "enter":
+			m.acceptSuggestion()
+			m.refresh()
+			return m, nil
+		case "esc":
+			m.sugHidden = true
+			return m, nil
+		}
+	}
 	switch msg.String() {
 	case "esc":
 		m.filter.SetValue("")
@@ -509,11 +632,21 @@ func (m Model) updateFilter(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "ctrl+c":
 		return m, tea.Quit
+	case "tab", "shift+tab":
+		delta := 1
+		if msg.String() == "shift+tab" {
+			delta = -1
+		}
+		if m.complete(delta) {
+			m.refresh()
+		}
+		return m, nil
 	}
 	var cmd tea.Cmd
 	before := m.filter.Value()
 	m.filter, cmd = m.filter.Update(msg)
 	if m.filter.Value() != before {
+		m.sugOff, m.sugSel, m.sugHidden = 0, 0, false
 		m.refresh()
 	}
 	return m, cmd
@@ -593,11 +726,19 @@ func (m *Model) click(x, y int) {
 		m.dragging = true
 		return
 	}
+	if i := m.sidebarAt(x, y); i >= 0 {
+		m.pickFolder(i)
+		m.focus = focusFolders
+		return
+	}
+	// Anywhere else, a search being typed in the folder list stops.
+	m.sideTyping = false
+	m.sideSearch.Blur()
 	if f := m.frameAt(x, y); f != focusList {
 		m.focus = f
 		return
 	}
-	if i := y - m.listTop(); x < m.listWidth() && i >= 0 && i < m.listHeight() && m.offset+i < len(m.visible) {
+	if i := y - m.listTop(); x >= m.listLeft() && x < m.listLeft()+m.listWidth() && i >= 0 && i < m.listHeight() && m.offset+i < len(m.visible) {
 		m.cursor = m.offset + i
 		m.focus = focusList
 		m.clamp()

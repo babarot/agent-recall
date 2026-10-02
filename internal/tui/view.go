@@ -41,7 +41,7 @@ func (m Model) listWidth() int {
 	if m.detailRight() {
 		return m.width - detailWidth
 	}
-	return m.width
+	return m.width - m.listLeft()
 }
 
 func (m Model) filterShown() bool { return m.mode == modeFilter || m.filter.Value() != "" }
@@ -91,6 +91,9 @@ func (m Model) render() string {
 		lines = append(lines, " "+m.st.filter.Render(m.filter.View()))
 	}
 	table := m.renderTable()
+	if m.sidebarShown() {
+		table = strings.Split(joinColumns(strings.Join(m.renderSidebar(len(table)), "\n"), strings.Join(table, "\n"), sidebarWidth, m.st.rule.Render("│")), "\n")
+	}
 	switch {
 	case m.detailRight():
 		lines = append(lines, joinColumns(strings.Join(table, "\n"), m.renderPane(), m.listWidth(), " "))
@@ -101,6 +104,14 @@ func (m Model) render() string {
 		lines = append(lines, table...)
 	}
 	lines = append(lines, m.renderStatus(), m.renderHelp())
+	// Folder suggestions for the in: term open just under the filter line.
+	if r, list, idx, from, ok := m.suggestRect(); ok {
+		for i, l := range m.suggestBox(list, idx, from, r.w) {
+			if j := r.y + i; j < len(lines) {
+				lines[j] = overlay(lines[j], l, r.x)
+			}
+		}
+	}
 	return strings.Join(lines, "\n")
 }
 
@@ -119,8 +130,26 @@ func (m Model) bar(left, right string) string {
 
 func (m Model) renderHeader() string {
 	left := m.st.app.Render("recall") + m.st.tag.Render(" // claude-recall")
-	right := m.st.tag.Render(fmt.Sprintf("%d / %d sessions · sort: %s", len(m.visible), len(m.rows), sorts[m.sortIdx].name))
-	return m.bar(left, right)
+	count := fmt.Sprintf("%d / %d sessions · ", len(m.visible), len(m.rows))
+	sort := "sort: " + sorts[m.sortIdx].name
+	// Where the list is narrowed to: in: folders, else the folder scope.
+	where := ""
+	if q := parseQuery(m.filter.Value()); len(q.in) > 0 {
+		in := m.inFolders(q)
+		where = fmt.Sprintf("%d folders", len(in))
+		if len(in) == 1 {
+			where = in[0].name
+		}
+	} else if m.scope != "" {
+		where = m.folderName(m.scope)
+	}
+	right := m.st.tag.Render(count)
+	if where != "" {
+		// The folder gives way first when the bar is short.
+		room := m.width - 2 - ansi.StringWidth(left) - 1 - len(count) - len("in  · ") - len(sort)
+		right += m.st.filter.Background(m.st.header.GetBackground()).Render("in "+middleEllipsis(where, max(8, room))) + m.st.tag.Render(" · ")
+	}
+	return m.bar(left, right+m.st.tag.Render(sort))
 }
 
 // renderTable returns the rules, column headers, exactly listHeight rows
@@ -130,8 +159,25 @@ func (m Model) renderTable() []string {
 	cols := layoutColumns(lw)
 	plain := lipgloss.NewStyle()
 
-	head := renderRow(cols, lw, "  ", func(p placed) string { return m.st.colHdr.Render(p.col.header) }, plain)
-	lines := []string{m.rule(lw), head, m.rule(lw)}
+	scoped := m.scope != "" && len(parseQuery(m.filter.Value()).in) == 0
+	head := renderRow(cols, lw, "  ", func(p placed) string {
+		if scoped && p.col.header == folderHeader {
+			return m.st.colHdr.Render(worktreeHeader)
+		}
+		return m.st.colHdr.Render(p.col.header)
+	}, plain)
+	// Beside the folder list, the focused side's rules take the accent and
+	// only it marks its selection with the bar.
+	rule := m.rule(lw)
+	if m.sidebarShown() && m.focus == focusList {
+		rule = m.st.id.Render(strings.Repeat("╌", lw))
+		head = m.st.key.Render(ansi.Strip(head))
+	}
+	lines := []string{rule, head, rule}
+	bar := m.st.bar.Render("▎")
+	if m.focus == focusFolders {
+		bar = m.st.selected.Render(" ")
+	}
 
 	h := m.listHeight()
 	now := m.now()
@@ -139,11 +185,11 @@ func (m Model) renderTable() []string {
 	for i := m.offset; i < end; i++ {
 		r := &m.rows[m.visible[i]]
 		sel := i == m.cursor
-		ctx := cellCtx{st: m.st, sel: sel, now: now}
+		ctx := cellCtx{st: m.st, sel: sel, now: now, scoped: scoped}
 		pad, indent := plain, "  "
 		if sel {
 			pad = m.st.selected
-			indent = m.st.bar.Render("▎") + m.st.selected.Render(" ")
+			indent = bar + m.st.selected.Render(" ")
 		}
 		lines = append(lines, renderRow(cols, lw, indent, func(p placed) string { return p.col.cell(ctx, r, p.width) }, pad))
 	}
@@ -238,9 +284,25 @@ func (m Model) renderHelp() string {
 	switch m.mode {
 	case modeFilter:
 		pairs = [][2]string{{"enter", "apply"}, {"esc", "clear"}, {"↑↓", "move"}}
+		if list, _ := m.suggestions(); len(list) > 0 {
+			pairs = [][2]string{{"↑↓", "folder"}, {"enter", "pick"}, {"tab", "complete"}, {"esc", "close"}}
+		} else if _, _, _, ok := m.inTerm(); !ok {
+			pairs = append(pairs, [2]string{"in:", "folder"})
+		}
 	case modePreview:
 		pairs = [][2]string{{"space", "back"}, {"↑↓", "scroll"}, {"enter", "resume"}, {"y", "copy id"}, {"Y", "copy cmd"}}
 	case modeList:
+		if m.focus == focusFolders && m.sideTyping {
+			pairs = [][2]string{{"↑↓", "folder"}, {"enter", "done"}, {"esc", "clear"}}
+			break
+		}
+		if m.focus == focusFolders {
+			pairs = [][2]string{{"↑↓", "folder"}, {"/", "search"}, {"→", "sessions"}, {"[ ]", "next frame"}, {".", "this folder"}, {"q", "quit"}}
+			if m.sideSearch.Value() != "" {
+				pairs[1] = [2]string{"esc", "clear search"}
+			}
+			break
+		}
 		if m.focus != focusList {
 			pairs = [][2]string{{"↑↓", "scroll " + strings.ToLower(frameTitles[m.focus])}, {"[ ]", "next frame"},
 				{"esc", "back to list"}, {"enter", "resume"}, {"y", "copy id"}, {"q", "quit"}}
@@ -248,8 +310,15 @@ func (m Model) renderHelp() string {
 		}
 		fallthrough
 	default:
+		here := "this folder"
+		if m.scope != "" && m.scope == m.startFolder {
+			here = "all folders"
+		}
 		pairs = [][2]string{{"enter", "resume"}, {"space", "preview"}, {"y", "copy id"}, {"Y", "copy cmd"},
-			{"tab", "detail"}, {"+/-", "resize"}, {"/", "filter"}, {"s", "sort"}, {"q", "quit"}}
+			{"tab", "detail"}, {"+/-", "resize"}, {"/", "filter"}, {".", here}, {"←", "folders"}, {"s", "sort"}, {"q", "quit"}}
+		if m.sidebarShown() {
+			pairs[len(pairs)-3] = [2]string{"→", "close folders"}
+		}
 	}
 	parts := make([]string, len(pairs))
 	for i, p := range pairs {

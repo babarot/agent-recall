@@ -316,12 +316,12 @@ func TestRemovedWorktree(t *testing.T) {
 		{"/Users/me/src/github.com/me/app/.claude/worktrees/fix-login", "me/app", "fix-login"},
 	}
 	for _, c := range cases {
-		repo, name, ok := removedWorktree(c.path, home)
+		repo, name, _, ok := removedWorktree(c.path, home)
 		if !ok || repo != c.repo || name != c.name {
 			t.Errorf("removedWorktree(%s) = %q %q %v", c.path, repo, name, ok)
 		}
 	}
-	if _, _, ok := removedWorktree("/Users/me/src/github.com/me/app", home); ok {
+	if _, _, _, ok := removedWorktree("/Users/me/src/github.com/me/app", home); ok {
 		t.Error("a plain folder is not a worktree")
 	}
 }
@@ -720,6 +720,30 @@ func TestDetailsDateBothEnds(t *testing.T) {
 	for _, want := range []string{"Started " + end.Add(-2*time.Hour).Format("01-02 15:04"), "Ended   " + end.Format("01-02 15:04")} {
 		if !strings.Contains(s, want) {
 			t.Errorf("Details lacks %q even within one day:\n%s", want, s)
+		}
+	}
+}
+
+func TestPaneStaysWhenNothingMatches(t *testing.T) {
+	for _, pos := range []string{config.DetailBottom, config.DetailRight} {
+		cfg := config.Default().TUI
+		cfg.DetailPosition = pos
+		m, _ := newTestModel(t, cfg, 160, 40)
+		m = press(t, m, "/", "z", "z", "z")
+		s := screen(m)
+		for _, want := range []string{"Conversation", "What was done", "Details", "No session selected", "No sessions match"} {
+			if !strings.Contains(s, want) {
+				t.Errorf("%s: lacks %q:\n%s", pos, want, s)
+			}
+		}
+		lines := strings.Split(m.render(), "\n")
+		if len(lines) != 40 {
+			t.Errorf("%s: %d lines, want the full 40", pos, len(lines))
+		}
+		// The frames can still take focus and scroll without a session.
+		m = press(t, m, "enter", "]", "j")
+		if m.focus != focusList {
+			t.Errorf("%s: with nothing selected the focus stays on the list, got %v", pos, m.focus)
 		}
 	}
 }

@@ -484,7 +484,11 @@ func runTUI(o *options) error {
 		return err
 	}
 
-	final, err := tea.NewProgram(tui.New(sessions, d, cfg.TUI).RememberIn(config.StatePath())).Run()
+	model := tui.New(sessions, d, cfg.TUI).RememberIn(config.StatePath())
+	if wd, err := os.Getwd(); err == nil {
+		model = model.StartIn(wd)
+	}
+	final, err := tea.NewProgram(model).Run()
 	if err != nil {
 		return err
 	}

@@ -20,6 +20,9 @@ type row struct {
 	worktree string // worktree name, empty outside a linked worktree
 	gone     bool   // the session directory no longer exists
 	mainRoot string // main checkout of a linked worktree
+	// group is the folder the list narrows by: the repository, worktrees
+	// included, or the directory outside git; groupName is how it shows.
+	group, groupName string
 
 	search string // lower-cased text the filter matches against
 }
@@ -28,21 +31,30 @@ func newRow(s db.Session, home string, wt *worktree.Resolver) row {
 	r := row{s: s, title: displayTitle(s)}
 	info := wt.Resolve(s.ProjectPath)
 	r.gone = !info.Exists
+	r.group = realPath(s.ProjectPath)
 	switch {
 	case info.IsWorktree():
 		r.mainRoot = info.MainRoot
 		r.folder = shortPath(info.MainRoot, home)
 		r.worktree = worktreeName(info.Root)
+		r.group = realPath(info.MainRoot)
 	case r.gone:
 		// A removed worktree can no longer be resolved through git, but
 		// the tools that create worktrees put them at recognizable paths.
-		if repo, name, ok := removedWorktree(s.ProjectPath, home); ok {
-			r.folder, r.worktree = repo, name
+		if repo, name, group, ok := removedWorktree(s.ProjectPath, home); ok {
+			r.folder, r.worktree, r.group = repo, name, group
 			break
 		}
 		r.folder = shortPath(s.ProjectPath, home)
 	default:
 		r.folder = shortPath(s.ProjectPath, home)
+		if info.Root != "" {
+			r.group = info.Root
+		}
+	}
+	r.groupName = shortPath(r.group, home)
+	if repo, ok := strings.CutPrefix(r.group, herdrGroup); ok {
+		r.groupName = repo
 	}
 	r.search = strings.ToLower(strings.Join([]string{r.title, r.folder, r.worktree, s.GitBranch, s.ID}, " "))
 	return r
@@ -76,16 +88,29 @@ var (
 )
 
 // removedWorktree guesses the repository and worktree name of a worktree
-// directory that no longer exists, from where herdr or Claude Code put it.
-// herdr's path holds only the repository's name, not its owner.
-func removedWorktree(path, home string) (repo, name string, ok bool) {
+// directory that no longer exists, from where herdr or Claude Code put it,
+// and the group it belongs to. herdr's path holds only the repository's
+// name, not its owner, so its group is a placeholder New resolves.
+func removedWorktree(path, home string) (repo, name, group string, ok bool) {
 	if m := claudeWorktree.FindStringSubmatch(path); m != nil {
-		return shortPath(m[1], home), m[2], true
+		return shortPath(m[1], home), m[2], m[1], true
 	}
 	if m := herdrWorktree.FindStringSubmatch(path); m != nil {
-		return m[1], m[2], true
+		return m[1], m[2], herdrGroup + m[1], true
 	}
-	return "", "", false
+	return "", "", "", false
+}
+
+// realPath resolves symlinks in an existing path, so one folder reached two
+// ways is one group; other paths stay as they are.
+func realPath(p string) string {
+	if p == "" {
+		return ""
+	}
+	if real, err := filepath.EvalSymlinks(p); err == nil {
+		return real
+	}
+	return p
 }
 
 // worktreeName is the worktree directory's name without the "worktree-"

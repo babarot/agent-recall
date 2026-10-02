@@ -19,6 +19,12 @@ const (
 	DetailAuto   = "auto" // right when the terminal is at least DetailAutoWidth wide
 )
 
+// Which sessions the TUI lists when it starts.
+const (
+	ScopeFolder = "folder" // the folder it was started in, when that has sessions
+	ScopeAll    = "all"
+)
+
 // MinDetailHeight is the smallest detail pane, in lines, that still shows
 // each of its three frames.
 const MinDetailHeight = 10
@@ -42,11 +48,14 @@ type TUI struct {
 	// the list, until it is resized with + / - or the mouse; the TUI then
 	// remembers that height instead.
 	DetailHeight int `toml:"detail_height"`
+	// Scope is ScopeFolder to start with only the sessions of the folder
+	// (repository and its worktrees) the TUI is started in, or ScopeAll.
+	Scope string `toml:"scope"`
 }
 
 // Default returns the settings used when the config file is absent.
 func Default() File {
-	return File{TUI: TUI{DetailPosition: DetailBottom, DetailAutoWidth: 160, Theme: theme.Auto, DetailHeight: 16}}
+	return File{TUI: TUI{DetailPosition: DetailBottom, DetailAutoWidth: 160, Theme: theme.Auto, DetailHeight: 16, Scope: ScopeFolder}}
 }
 
 // FilePath returns the config file location, honoring XDG_CONFIG_HOME.
@@ -73,6 +82,9 @@ func Load(path string) (File, error) {
 	default:
 		return File{}, fmt.Errorf("%s: tui.detail_position must be %q, %q or %q, got %q",
 			path, DetailBottom, DetailRight, DetailAuto, cfg.TUI.DetailPosition)
+	}
+	if cfg.TUI.Scope != ScopeFolder && cfg.TUI.Scope != ScopeAll {
+		return File{}, fmt.Errorf("%s: tui.scope must be %q or %q, got %q", path, ScopeFolder, ScopeAll, cfg.TUI.Scope)
 	}
 	if !theme.Valid(cfg.TUI.Theme) {
 		return File{}, fmt.Errorf("%s: tui.theme must be one of %s, got %q", path, theme.NamesString(), cfg.TUI.Theme)
