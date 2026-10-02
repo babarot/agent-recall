@@ -522,21 +522,45 @@ func TestWheelOverListMovesSelection(t *testing.T) {
 	}
 }
 
-func TestBracketsCycleFocusAndJKScroll(t *testing.T) {
+func TestTabCyclesFocusAndJKScroll(t *testing.T) {
 	m, _ := newTestModel(t, config.Default().TUI, 120, 40)
-	m = press(t, m, "]", "]")
-	if m.focus != focusDone {
-		t.Fatalf("focus %v", m.focus)
-	}
-	m = press(t, m, "[", "[", "[")
+	// In layout order: the list, Conversation, Details under it, then What
+	// was done on the right.
+	m = press(t, m, "tab", "tab")
 	if m.focus != focusDetails {
-		t.Fatalf("focus %v", m.focus)
+		t.Fatalf("two tabs: focus %v", m.focus)
 	}
-	m = press(t, m, "]") // back to the list
+	shiftTab := tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}
+	m = update(t, update(t, update(t, m, shiftTab), shiftTab), shiftTab)
+	if m.focus != focusDone {
+		t.Fatalf("three shift+tabs wrap round: focus %v", m.focus)
+	}
+	// [ and ] do the same.
+	if m = press(t, m, "]"); m.focus != focusList {
+		t.Fatalf("] wraps to the list: focus %v", m.focus)
+	}
 	before := m.cursor
 	m = press(t, m, "]", "k", "k")
 	if m.focus != focusConv || m.cursor != before || m.scroll[focusConv] != 2 {
 		t.Fatalf("focus %v cursor %d scroll %d", m.focus, m.cursor, m.scroll[focusConv])
+	}
+	// Beside the list, What was done comes second.
+	cfg := config.Default().TUI
+	cfg.DetailPosition = config.DetailRight
+	m, _ = newTestModel(t, cfg, 160, 40)
+	if m = press(t, m, "tab", "tab"); m.focus != focusDone {
+		t.Fatalf("right layout, two tabs: focus %v", m.focus)
+	}
+}
+
+func TestDetailPaneAlwaysShows(t *testing.T) {
+	m, _ := newTestModel(t, config.Default().TUI, 120, 40)
+	h := m.paneHeight()
+	for range 4 {
+		m = press(t, m, "tab")
+	}
+	if m.paneHeight() != h || !strings.Contains(screen(m), "Conversation") {
+		t.Fatal("tab no longer hides the detail pane")
 	}
 }
 

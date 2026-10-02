@@ -25,7 +25,7 @@ const (
 // detailRight reports whether the detail pane sits right of the list. Only
 // this function knows the configured position; the rest of the view asks it.
 func (m Model) detailRight() bool {
-	if !m.detailOpen || m.width < minRightWidth {
+	if m.width < minRightWidth {
 		return false
 	}
 	switch m.cfg.DetailPosition {
@@ -58,7 +58,7 @@ func (m Model) chromeLines() int {
 // paneHeight is the height of the detail pane below the list: the chosen
 // height, cut so the list keeps a few rows.
 func (m Model) paneHeight() int {
-	if !m.detailOpen || m.detailRight() {
+	if m.detailRight() {
 		return 0
 	}
 	return max(0, min(m.detailH, m.height-m.chromeLines()-minListRows))
@@ -307,14 +307,14 @@ func (m Model) renderHelp() string {
 			break
 		}
 		if m.focus == focusFolders {
-			pairs = [][2]string{{"↑↓", "folder"}, {"/", "search"}, {"→", "sessions"}, {"[ ]", "next frame"}, {".", "this folder"}, {"q", "quit"}}
+			pairs = [][2]string{{"↑↓", "folder"}, {"/", "search"}, {"→", "sessions"}, {"tab", "next"}, {".", "this folder"}, {"q", "quit"}}
 			if m.sideSearch.Value() != "" {
 				pairs[1] = [2]string{"esc", "clear search"}
 			}
 			break
 		}
 		if m.focus != focusList {
-			pairs = [][2]string{{"↑↓", "scroll " + strings.ToLower(frameTitles[m.focus])}, {"[ ]", "next frame"},
+			pairs = [][2]string{{"↑↓", "scroll " + strings.ToLower(frameTitles[m.focus])}, {"tab", "next"},
 				{"esc", "back to list"}, {"enter", "resume"}, {"y", "copy id"}, {"q", "quit"}}
 			break
 		}
@@ -325,7 +325,7 @@ func (m Model) renderHelp() string {
 			here = "all folders"
 		}
 		pairs = [][2]string{{"enter", "resume"}, {"space", "preview"}, {"y", "copy id"}, {"Y", "copy cmd"},
-			{"tab", "detail"}, {"+/-", "resize"}, {"/", "filter"}, {".", here}, {"←", "folders"}, {"s", "sort"}, {"q", "quit"}}
+			{"tab", "focus"}, {"+/-", "resize"}, {"/", "filter"}, {".", here}, {"←", "folders"}, {"s", "sort"}, {"q", "quit"}}
 		if m.sidebarShown() {
 			pairs[len(pairs)-3] = [2]string{"→", "close folders"}
 		}
