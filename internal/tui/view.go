@@ -19,13 +19,13 @@ const (
 	detailWidth   = 56 // the pane on the right
 	minRightWidth = 100
 	minListRows   = 3 // the pane below never squeezes the list further
-	previewChrome = 5 // header bar, rule, folder line, status, help
 )
 
 // detailRight reports whether the detail pane sits right of the list. Only
 // this function knows the configured position; the rest of the view asks it.
 func (m Model) detailRight() bool {
-	if m.width < minRightWidth {
+	// A spread Conversation always takes the full width below the list.
+	if m.expanded || m.width < minRightWidth {
 		return false
 	}
 	switch m.cfg.DetailPosition {
@@ -61,6 +61,9 @@ func (m Model) paneHeight() int {
 	if m.detailRight() {
 		return 0
 	}
+	if m.expanded {
+		return m.expandedPaneHeight()
+	}
 	return max(0, min(m.detailH, m.height-m.chromeLines()-minListRows))
 }
 
@@ -89,9 +92,6 @@ func (m Model) render() string {
 }
 
 func (m Model) renderScreen() string {
-	if m.mode == modePreview {
-		return m.renderPreview()
-	}
 
 	lines := []string{m.renderHeader()}
 	if m.filterShown() {
@@ -306,8 +306,6 @@ func (m Model) renderHelp() string {
 		} else if _, _, _, _, ok := m.keyTerm(); !ok {
 			pairs = append(pairs, [2]string{"in: text: title: branch: worktree: id:", "one field"})
 		}
-	case modePreview:
-		pairs = [][2]string{{"space", "back"}, {"↑↓", "scroll"}, {"enter", "resume"}, {"y", "copy id"}, {"Y", "copy cmd"}}
 	case modeList:
 		if m.focus == focusFolders && m.sideTyping {
 			pairs = [][2]string{{"↑↓", "folder"}, {"enter", "done"}, {"esc", "clear"}}
@@ -318,6 +316,14 @@ func (m Model) renderHelp() string {
 			if m.sideSearch.Value() != "" {
 				pairs[1] = [2]string{"esc", "clear search"}
 			}
+			break
+		}
+		if m.expanded && m.focus == focusConv {
+			pairs = [][2]string{{"j k", "scroll"}, {"tab", "sessions"}, {"space esc", "close"}, {"enter", "resume"}, {"y", "copy id"}, {"?", "keys"}}
+			break
+		}
+		if m.expanded {
+			pairs = [][2]string{{"j k", "next session"}, {"tab", "conversation"}, {"space", "close"}, {"enter", "resume"}, {"+/-", "resize"}, {"?", "keys"}}
 			break
 		}
 		if m.focus != focusList {
@@ -332,7 +338,7 @@ func (m Model) renderHelp() string {
 			here = "all folders"
 		}
 		// ? goes early so a narrow terminal still shows where the rest are.
-		pairs = [][2]string{{"enter", "resume"}, {"space", "preview"}, {"?", "keys"}, {"/", "filter"}, {".", here},
+		pairs = [][2]string{{"enter", "resume"}, {"space", "read"}, {"?", "keys"}, {"/", "filter"}, {".", here},
 			{"←", "folders"}, {"tab", "focus"}, {"y", "copy id"}, {"Y", "copy cmd"}, {"+/-", "resize"}, {"s", "sort"}, {"q", "quit"}}
 		if m.sidebarShown() {
 			pairs[5] = [2]string{"→", "close folders"}
@@ -343,31 +349,6 @@ func (m Model) renderHelp() string {
 		parts[i] = m.st.key.Render(p[0]) + " " + m.st.muted.Render(p[1])
 	}
 	return " " + ansi.Truncate(strings.Join(parts, m.st.helpSep.Render(" · ")), m.width-2, ellipsis)
-}
-
-func (m Model) previewRow() *row {
-	for i := range m.rows {
-		if m.rows[i].s.ID == m.previewFor {
-			return &m.rows[i]
-		}
-	}
-	return nil
-}
-
-func (m Model) renderPreview() string {
-	r := m.previewRow()
-	if r == nil {
-		return ""
-	}
-	left := m.st.app.Render("recall") + m.st.tag.Render(" // ") + m.st.title.Background(m.st.header.GetBackground()).Render(r.title)
-	right := m.st.tag.Render(fmt.Sprintf("%s · %d msgs · %s", r.s.ID[:min(8, len(r.s.ID))], r.s.MessageCount, formatSize(r.s.FileSize)))
-	where := " " + m.st.subtle.Render(r.folder)
-	if r.worktree != "" {
-		where += " " + m.st.worktree.Render(worktreeM+" "+r.worktree)
-	}
-	where += m.st.dim.Render("  " + r.s.GitBranch)
-	return strings.Join([]string{m.bar(ansi.Truncate(left, m.width-2-ansi.StringWidth(right)-1, ellipsis), right),
-		m.rule(m.width), ansi.Truncate(where, m.width, ellipsis), m.preview.View(), m.renderStatus(), m.renderHelp()}, "\n")
 }
 
 // skipLine marks the messages the preview leaves out: a rule across w

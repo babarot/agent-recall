@@ -57,6 +57,15 @@ func (r rect) contains(x, y int) bool { return x >= r.x && x < r.x+r.w && y >= r
 func (m Model) paneRects() ([numFocus]rect, bool) {
 	var out [numFocus]rect
 	r := m.current() // nil when nothing matches: the frames stay, empty
+	if m.expanded {
+		// Conversation alone, across the pane.
+		h := m.paneHeight()
+		if h == 0 {
+			return out, false
+		}
+		out[focusConv] = rect{0, m.paneTop(), m.width, h}
+		return out, true
+	}
 	if m.detailRight() {
 		x, w := m.listWidth()+1, detailWidth-1
 		content := m.frameContent(r, [numFocus]int{focusDone: w - 4, focusDetails: w - 4})
@@ -145,6 +154,9 @@ func (m Model) frameContent(r *row, inner [numFocus]int) [numFocus]frameLines {
 	}
 	d := m.details[r.s.ID]
 	out[focusConv] = m.conversationContent(r, d)
+	if m.expanded {
+		out[focusConv] = frameLines{pinned: []string{m.headLine(r)}, scroll: m.read, keep: -1}
+	}
 	out[focusDone] = m.doneContent(r, d, inner[focusDone])
 	details, ok := m.detailsGrid(r, d, inner[focusDetails])
 	if !ok {
@@ -586,6 +598,9 @@ func (m Model) renderPane() string {
 	}
 	content := m.sizedContent(m.current(), rects)
 	frame := func(f focus) string { return m.renderFrame(f, content[f], rects[f]) }
+	if m.expanded {
+		return frame(focusConv)
+	}
 	if m.detailRight() {
 		return strings.Join([]string{frame(focusConv), frame(focusDone), frame(focusDetails)}, "\n")
 	}

@@ -175,23 +175,6 @@ func TestCopyID(t *testing.T) {
 	}
 }
 
-func TestPreviewOpensAndCloses(t *testing.T) {
-	m, src := newTestModel(t, config.Default().TUI, 140, 30)
-	m = press(t, m, "space")
-	if m.mode != modePreview || len(src.calls) != 1 {
-		t.Fatalf("mode %v calls %v", m.mode, src.calls)
-	}
-	s := screen(m)
-	for _, want := range []string{"first question about bbbbbbbb-2222", "7 messages skipped", "last answer"} {
-		if !strings.Contains(s, want) {
-			t.Errorf("preview lacks %q:\n%s", want, s)
-		}
-	}
-	if m = press(t, m, "space"); m.mode != modeList {
-		t.Fatalf("space should close the preview")
-	}
-}
-
 func TestDetailPosition(t *testing.T) {
 	cases := []struct {
 		pos   string
@@ -665,7 +648,7 @@ func TestConversationMarksTheGap(t *testing.T) {
 	}
 }
 
-func TestPreviewBoldsTheUser(t *testing.T) {
+func TestReadingBoldsTheUser(t *testing.T) {
 	m, _ := newTestModel(t, config.Default().TUI, 140, 30)
 	m = press(t, m, "space")
 	out := m.render()
@@ -678,18 +661,18 @@ func TestPreviewBoldsTheUser(t *testing.T) {
 				return strings.HasPrefix(esc, "\x1b[1;") || strings.HasPrefix(esc, "\x1b[1m")
 			}
 		}
-		t.Fatalf("%q not in preview", text)
+		t.Fatalf("%q not shown", text)
 		return false
 	}
 	if !bold("first question about") {
 		t.Error("the user's message should be bold")
 	}
-	if bold("last answer") {
+	if bold("older message 00") {
 		t.Error("Claude's message should not be bold")
 	}
 }
 
-func TestPreviewBoxesUserAndRailsClaude(t *testing.T) {
+func TestReadingBoxesUserAndRailsClaude(t *testing.T) {
 	m, _ := newTestModel(t, config.Default().TUI, 100, 30)
 	m = press(t, m, "space")
 	lines := strings.Split(screen(m), "\n")
@@ -700,7 +683,7 @@ func TestPreviewBoxesUserAndRailsClaude(t *testing.T) {
 			boxTop = true
 		case strings.Contains(l, "│ first question about"):
 			boxBody = true
-		case strings.Contains(l, "▎ last answer"):
+		case strings.Contains(l, "▎ older message 00"):
 			rail = true
 		}
 		if w := ansi.StringWidth(l); w > 100 {

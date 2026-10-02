@@ -135,7 +135,7 @@ recall version
 | `Enter` | Resume the session: `claude -r <id>` from the session's folder |
 | `y` | Copy the session ID, to hand it to another agent ("look this session up with claude-recall") |
 | `Y` | Copy the resume command |
-| `Space` | Preview the start and end of the conversation |
+| `Space` | Read the conversation: it spreads over the detail pane, wrapped, and the pane grows to leave the list a few rows (`+` `-` or dragging its edge change how many, and they are remembered). `Tab` back to the list and `j` `k` read the next session in place; `Space` or `Esc` puts the pane back |
 | `/` | Filter by title, folder, branch, ID or what was said in the conversation (words of two letters or more are looked up there too, in the background); `text:<word>` looks only in the conversation, and `title:`, `branch:`, `worktree:` (parts of those) and `id:` (the start of the ID) only in that field, several of one key matching any of them; `in:<folder>` keeps the sessions of folders whose name matches it fuzzily, as the folder list's search does (`in:bdot` for babarot/dotfiles), over the folder the list is narrowed to (two letters of a key, such as `bra`, show the rest faintly, and `Tab` or `→` types it; `in:`, `branch:` and `worktree:` then suggest their values as you type; while the suggestions show, `↑` `↓` and `Enter` pick one, `Tab` completes the highlighted one, `Esc` closes them; the mouse clicks and scrolls them too); `Esc` clears the filter |
 | `s` | Sort by ended, started, message count or size |
 | `.` | Switch between the folder `recall` was started in and all folders |

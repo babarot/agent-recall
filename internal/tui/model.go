@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"charm.land/bubbles/v2/textinput"
-	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/babarot/claude-recall/internal/config"
@@ -28,9 +27,8 @@ type Resume struct {
 	SessionID string
 }
 
-// Source loads what the preview and the detail pane show about a session.
+// Source loads what the detail pane shows about a session.
 type Source interface {
-	SessionPreview(sessionID string, head, tail int) (db.Preview, error)
 	SessionDetail(sessionID string) (*db.Detail, error)
 	// SessionsWithText lists the sessions whose conversation contains text.
 	SessionsWithText(text string) ([]string, error)
@@ -41,7 +39,6 @@ type mode int
 const (
 	modeList mode = iota
 	modeFilter
-	modePreview
 )
 
 type sortKey struct {
@@ -57,9 +54,7 @@ var sorts = []sortKey{
 }
 
 const (
-	previewHead = 4
-	previewTail = 12
-	toastFor    = 2500 * time.Millisecond
+	toastFor = 2500 * time.Millisecond
 )
 
 type toastExpired struct{ id int }
@@ -112,8 +107,12 @@ type Model struct {
 	// changes.
 	sugHidden bool
 
-	preview    viewport.Model
-	previewFor string // session ID the preview shows
+	// expanded spreads Conversation over the pane, leaving expandRows list
+	// rows; read is its content, rendered for readFor.
+	expanded   bool
+	expandRows int
+	read       []string
+	readFor    string
 
 	// details caches the detail pane's data per session ID.
 	details map[string]*db.Detail
@@ -168,7 +167,7 @@ func New(sessions []db.Session, source Source, cfg config.TUI) Model {
 		st:         newStyles(theme.Get(cfg.Theme, true)),
 		rows:       rows,
 		filter:     fi,
-		preview:    viewport.New(),
+		expandRows: defaultExpandRows,
 		details:    map[string]*db.Detail{},
 		text:       textSearch{found: map[string]map[string]bool{}, pending: map[string]bool{}, delay: textSearchDelay},
 		detailH:    max(config.MinDetailHeight, cfg.DetailHeight),
@@ -188,6 +187,9 @@ func (m Model) RememberIn(path string) Model {
 		m.detailH = st.DetailHeight
 	}
 	m.sidebar = st.Sidebar
+	if st.ExpandRows >= minListRows {
+		m.expandRows = st.ExpandRows
+	}
 	return m
 }
 
@@ -195,7 +197,7 @@ func (m *Model) saveState() tea.Cmd {
 	if m.statePath == "" {
 		return nil
 	}
-	path, st := m.statePath, config.State{DetailHeight: m.detailH, Sidebar: m.sidebar}
+	path, st := m.statePath, config.State{DetailHeight: m.detailH, Sidebar: m.sidebar, ExpandRows: m.expandRows}
 	return func() tea.Msg {
 		_ = config.SaveState(path, st)
 		return nil
@@ -207,8 +209,15 @@ func (m Model) maxDetailH() int {
 	return max(config.MinDetailHeight, m.height-m.chromeLines()-minListRows)
 }
 
+// resizeDetail sets the pane's height; while Conversation is spread, that
+// sets the list rows left above it instead.
 func (m *Model) resizeDetail(h int) {
-	m.detailH = max(config.MinDetailHeight, min(h, m.maxDetailH()))
+	h = max(config.MinDetailHeight, min(h, m.maxDetailH()))
+	if m.expanded {
+		m.expandRows = max(minListRows, m.height-m.chromeLines()-h)
+	} else {
+		m.detailH = h
+	}
 	m.clamp()
 }
 
@@ -372,6 +381,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			nm.focus = focusList
 		}
 		nm.loadDetail()
+		nm.readLines()
 		return nm, tea.Batch(cmd, nm.scheduleTextSearch())
 	}
 	return next, cmd
@@ -404,11 +414,6 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.MouseWheelMsg:
-		if m.mode == modePreview {
-			var cmd tea.Cmd
-			m.preview, cmd = m.preview.Update(msg)
-			return m, cmd
-		}
 		step := 1
 		if msg.Button == tea.MouseWheelUp {
 			step = -1
@@ -425,11 +430,11 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.BackgroundColorMsg:
 		m.st = newStyles(theme.Get(m.cfg.Theme, msg.IsDark()))
+		m.readFor = "" // drawn in the old colors
 		return m, nil
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.filter.SetWidth(max(10, m.width-30))
-		m.sizePreview()
 		m.clamp()
 		return m, nil
 	case textSearchTick:
@@ -458,8 +463,6 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.mode {
 		case modeFilter:
 			return m.updateFilter(msg)
-		case modePreview:
-			return m.updatePreview(msg)
 		default:
 			return m.updateList(msg)
 		}
@@ -520,6 +523,10 @@ func (m Model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			page := max(1, rects[m.focus].h-4)
 			switch key {
 			case "esc":
+				if m.expanded {
+					m.toggleExpand()
+					break
+				}
 				m.focus = focusList
 			case "down", "j", "ctrl+n":
 				m.scrollFrame(m.focus, 1)
@@ -557,10 +564,10 @@ list:
 	case "end", "G":
 		m.move(len(m.visible))
 	case "+", "=":
-		m.resizeDetail(m.detailH + 2)
+		m.resizeDetail(m.paneHeight() + 2)
 		return m, m.saveState()
 	case "-":
-		m.resizeDetail(m.detailH - 2)
+		m.resizeDetail(m.paneHeight() - 2)
 		return m, m.saveState()
 	case "s":
 		m.sortIdx = (m.sortIdx + 1) % len(sorts)
@@ -575,7 +582,7 @@ list:
 			m.refresh()
 		}
 	case "space":
-		return m, m.openPreview()
+		m.toggleExpand()
 	// ← ← (h h) opens the folder list and moves into it, → → (l l) comes
 	// back and closes it.
 	case "left", "h":
@@ -606,7 +613,9 @@ func (m *Model) cycleFocus(delta int) {
 	}
 	order = append(order, focusList)
 	if m.current() != nil {
-		if m.detailRight() {
+		if m.expanded {
+			order = append(order, focusConv)
+		} else if m.detailRight() {
 			order = append(order, focusConv, focusDone, focusDetails)
 		} else {
 			order = append(order, focusConv, focusDetails, focusDone)
@@ -691,51 +700,6 @@ func (m Model) updateFilter(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.refresh()
 	}
 	return m, cmd
-}
-
-func (m Model) updatePreview(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	key := msg.String()
-	if cmd, ok := m.action(key); ok {
-		return m, cmd
-	}
-	switch key {
-	case "space", "esc", "q":
-		m.mode = modeList
-		return m, nil
-	case "ctrl+c":
-		return m, tea.Quit
-	case "g", "home":
-		m.preview.GotoTop()
-		return m, nil
-	case "G", "end":
-		m.preview.GotoBottom()
-		return m, nil
-	}
-	var cmd tea.Cmd
-	m.preview, cmd = m.preview.Update(msg)
-	return m, cmd
-}
-
-func (m *Model) openPreview() tea.Cmd {
-	r := m.current()
-	if r == nil {
-		return nil
-	}
-	p, err := m.source.SessionPreview(r.s.ID, previewHead, previewTail)
-	if err != nil {
-		return m.showToast(toastWarn, "Could not load the conversation: "+err.Error())
-	}
-	m.mode = modePreview
-	m.previewFor = r.s.ID
-	m.sizePreview()
-	m.preview.SetContent(m.renderConversation(p, m.width))
-	m.preview.GotoTop()
-	return nil
-}
-
-func (m *Model) sizePreview() {
-	m.preview.SetWidth(m.width)
-	m.preview.SetHeight(max(1, m.height-previewChrome))
 }
 
 // listTop is the screen row of the first session row.
