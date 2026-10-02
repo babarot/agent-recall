@@ -69,3 +69,47 @@ func TestTruthy(t *testing.T) {
 		}
 	}
 }
+
+func TestMarshal(t *testing.T) {
+	got, err := Marshal(map[string]any{"s": "<a>& \\u2028\b"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// JSON.stringify({s: "<a>& \\u2028\b"})
+	if want := "{\"s\":\"<a>& \\\\u2028\\b\"}"; string(got) != want {
+		t.Fatalf("got %s want %s", got, want)
+	}
+	got, _ = Marshal([]int{1}, "  ")
+	if string(got) != "[\n  1\n]" {
+		t.Fatalf("indent: %q", got)
+	}
+}
+
+func TestToFixed(t *testing.T) {
+	// (1.25).toFixed(1), (0.75).toFixed(1), (2.5).toFixed(0), (1.005).toFixed(2), (0.04).toFixed(1)
+	cases := []struct {
+		x    float64
+		d    int
+		want string
+	}{{1.25, 1, "1.3"}, {0.75, 1, "0.8"}, {2.5, 0, "3"}, {1.005, 2, "1.00"}, {0.04, 1, "0.0"}, {1023.96, 1, "1024.0"}}
+	for _, c := range cases {
+		if got := ToFixed(c.x, c.d); got != c.want {
+			t.Errorf("ToFixed(%v, %d) = %s, want %s", c.x, c.d, got, c.want)
+		}
+	}
+}
+
+func TestPadAndSliceFrom(t *testing.T) {
+	if got := PadEnd("😀", 4); got != "😀  " {
+		t.Errorf("PadEnd %q", got)
+	}
+	if got := PadStart("7", 3); got != "  7" {
+		t.Errorf("PadStart %q", got)
+	}
+	s := "ab😀cd"
+	for start, want := range map[int]string{-2: "cd", -3: "�cd", -4: "😀cd", -10: s, 0: s, 2: "😀cd", 3: "�cd"} {
+		if got := SliceFrom(s, start); got != want {
+			t.Errorf("SliceFrom(%d) = %q, want %q", start, got, want)
+		}
+	}
+}

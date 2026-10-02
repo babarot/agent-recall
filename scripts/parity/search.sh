@@ -53,7 +53,7 @@ for q in "${queries[@]}"; do
     printf 'ok    %s (%s bytes)\n' "$q" "$(wc -c <"$work/ts.json" | tr -d ' ')"
   else
     printf 'DIFF  %s\n' "$q"
-    diff "$work/ts.json" "$work/go.json" | head -20
+    diff "$work/ts.json" "$work/go.json" | head -20 || true
     fail=1
   fi
 done

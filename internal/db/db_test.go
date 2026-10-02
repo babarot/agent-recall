@@ -114,7 +114,7 @@ func TestSearchRespectsLimit(t *testing.T) {
 		seedMessage(t, d, "s1", "m"+string(rune('0'+i)), "user", "item number "+string(rune('0'+i)), ts, i)
 	}
 
-	if r := search(t, d, "item", SearchOptions{Limit: 3}); len(r) != 3 {
+	if r := search(t, d, "item", SearchOptions{Limit: new(3)}); len(r) != 3 {
 		t.Fatalf("got %d results, want 3", len(r))
 	}
 }

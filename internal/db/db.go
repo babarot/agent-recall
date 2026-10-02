@@ -62,7 +62,7 @@ func (d *DB) Close() error { return d.sql.Close() }
 // SearchOptions narrows a full-text search.
 type SearchOptions struct {
 	Project string // substring of the encoded project dir or the project path
-	Limit   int    // defaults to 20
+	Limit   *int   // nil means 20
 	From    string // inclusive lower bound on the message timestamp
 	To      string // inclusive upper bound on the message timestamp
 }
@@ -97,9 +97,9 @@ func ftsQuery(query string) string {
 
 // Search runs an FTS5 search across message text, best matches first.
 func (d *DB) Search(query string, opts SearchOptions) ([]SearchResult, error) {
-	limit := opts.Limit
-	if limit == 0 {
-		limit = 20
+	limit := 20
+	if opts.Limit != nil {
+		limit = *opts.Limit
 	}
 
 	conds := []string{"messages_fts MATCH ?"}

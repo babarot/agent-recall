@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"math/big"
 	"slices"
 	"strconv"
 	"strings"
@@ -295,4 +296,105 @@ func abs(n int) int {
 		return -n
 	}
 	return n
+}
+
+// Marshal is JSON.stringify(v) (indent "") or JSON.stringify(v, null, 2)
+// (indent "  ") for values encoding/json can encode. Unlike encoding/json,
+// it leaves <, >, &, U+2028 and U+2029 unescaped, as JavaScript does.
+func Marshal(v any, indent string) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if indent != "" {
+		enc.SetIndent("", indent)
+	}
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return unescapeLineSeparators(bytes.TrimSuffix(buf.Bytes(), []byte("\n"))), nil
+}
+
+// unescapeLineSeparators turns encoding/json's   and   escapes back
+// into the characters. It walks escapes pairwise so an escaped backslash
+// followed by "u2028" text is left alone.
+func unescapeLineSeparators(b []byte) []byte {
+	if !bytes.Contains(b, []byte(`\u202`)) {
+		return b
+	}
+	out := make([]byte, 0, len(b))
+	for i := 0; i < len(b); i++ {
+		if b[i] != '\\' || i+1 >= len(b) {
+			out = append(out, b[i])
+			continue
+		}
+		if b[i+1] == 'u' && i+5 < len(b) && string(b[i+2:i+5]) == "202" && (b[i+5] == '8' || b[i+5] == '9') {
+			if b[i+5] == '8' {
+				out = append(out, " "...)
+			} else {
+				out = append(out, " "...)
+			}
+			i += 5
+			continue
+		}
+		out = append(out, b[i], b[i+1])
+		i++
+	}
+	return out
+}
+
+// ToFixed is Number.prototype.toFixed for non-negative x: halfway cases
+// round up, judged on the exact binary value.
+func ToFixed(x float64, digits int) string {
+	f := new(big.Float).SetPrec(2048).SetFloat64(x)
+	scale := new(big.Float).SetPrec(2048).SetInt(new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(digits)), nil))
+	f.Mul(f, scale).Add(f, big.NewFloat(0.5))
+	n, _ := f.Int(nil) // truncates toward zero: floor for x >= 0
+	s := n.String()
+	if digits == 0 {
+		return s
+	}
+	if len(s) <= digits {
+		s = strings.Repeat("0", digits-len(s)+1) + s
+	}
+	return s[:len(s)-digits] + "." + s[len(s)-digits:]
+}
+
+// PadEnd is s.padEnd(n) with spaces.
+func PadEnd(s string, n int) string {
+	if l := Len(s); l < n {
+		return s + strings.Repeat(" ", n-l)
+	}
+	return s
+}
+
+// PadStart is s.padStart(n) with spaces.
+func PadStart(s string, n int) string {
+	if l := Len(s); l < n {
+		return strings.Repeat(" ", n-l) + s
+	}
+	return s
+}
+
+// SliceFrom is s.slice(start) for start >= 0 or s.slice(-n) for a negative
+// start, counting UTF-16 code units. A surrogate pair cut in half leaves
+// U+FFFD in its place.
+func SliceFrom(s string, start int) string {
+	if start < 0 {
+		start = max(0, Len(s)+start)
+	}
+	units := 0
+	for i, r := range s {
+		w := 1
+		if r >= 0x10000 {
+			w = 2
+		}
+		if units >= start {
+			return s[i:]
+		}
+		if units+w > start { // start falls inside this pair
+			return "�" + s[i+utf8.RuneLen(r):]
+		}
+		units += w
+	}
+	return ""
 }
