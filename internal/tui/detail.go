@@ -157,6 +157,9 @@ func (m Model) frameContent(r *row, inner [numFocus]int) [numFocus]frameLines {
 	if m.expanded {
 		out[focusConv] = frameLines{pinned: []string{m.headLine(r)}, scroll: m.read, keep: -1}
 	}
+	if why := m.reasonLine(r.s.ID, 1<<10); why != "" { // the frame cuts it to fit
+		out[focusConv].pinned = append([]string{out[focusConv].pinned[0], why}, out[focusConv].pinned[1:]...)
+	}
 	out[focusDone] = m.doneContent(r, d, inner[focusDone])
 	details, ok := m.detailsGrid(r, d, inner[focusDetails])
 	if !ok {

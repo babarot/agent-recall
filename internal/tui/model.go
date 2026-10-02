@@ -129,6 +129,15 @@ type Model struct {
 	scrollFor string
 
 	helpOpen bool // the key list is showing
+
+	// ask is the ask-Claude box, askRun how it asks. reasons are why Claude
+	// picked each session found so far; asked narrows the list to the last
+	// answer's sessions, in Claude's order, for the question askedFor.
+	ask      askState
+	askRun   askRunner
+	reasons  map[string]string
+	asked    map[string]int
+	askedFor string
 	// sortMenu is set while the sort menu shows, sortSel its highlight.
 	sortMenu bool
 	sortSel  int
@@ -160,6 +169,9 @@ func New(sessions []db.Session, source Source, cfg config.TUI) Model {
 	ss.SetWidth(sidebarWidth - 12)
 
 	m := Model{
+		ask:        askState{input: newAskInput()},
+		askRun:     claudeRunner([]string{"recall", "mcp"}, cfg.AskModel, ""),
+		reasons:    map[string]string{},
 		sideSearch: ss,
 		resolver:   resolver,
 		folders:    groupRows(rows),
@@ -267,8 +279,13 @@ func (m *Model) refresh() {
 	q := parseQuery(m.filter.Value())
 	m.visible = m.visible[:0]
 	for i := range m.rows {
-		// in: picks folders itself, over the one the list is narrowed to.
-		if m.scope != "" && len(q.in) == 0 && m.rows[i].group != m.scope {
+		// Claude's answer, or in:, picks the sessions itself, over the
+		// folder the list is narrowed to.
+		if m.asked != nil {
+			if _, ok := m.asked[m.rows[i].s.ID]; !ok {
+				continue
+			}
+		} else if m.scope != "" && len(q.in) == 0 && m.rows[i].group != m.scope {
 			continue
 		}
 		if m.match(q, &m.rows[i]) {
@@ -276,6 +293,9 @@ func (m *Model) refresh() {
 		}
 	}
 	less := sorts[m.sortIdx].less
+	if m.asked != nil { // Claude's best first
+		less = func(a, b *row) int { return cmp.Compare(m.asked[a.s.ID], m.asked[b.s.ID]) }
+	}
 	slices.SortStableFunc(m.visible, func(a, b int) int { return less(&m.rows[a], &m.rows[b]) })
 
 	m.cursor = 0
@@ -302,7 +322,7 @@ func (m *Model) move(delta int) {
 
 func (m *Model) clamp() {
 	m.cursor = max(0, min(m.cursor, len(m.visible)-1))
-	h := m.listHeight()
+	h := m.listRows()
 	if h <= 0 {
 		m.offset = 0
 		return
@@ -397,6 +417,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.helpOpen = false
 			return m, nil
 		}
+		if m.ask.stage != askClosed {
+			return m, nil
+		}
 		if m.sortMenu {
 			if i := m.sortMenuAt(msg.X, msg.Y); i >= 0 {
 				m.applySort(i)
@@ -448,6 +471,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.filter.SetWidth(max(10, m.width-30))
 		m.clamp()
 		return m, nil
+	case askStepMsg, askDoneMsg, askTickMsg:
+		return m, m.askMsg(msg)
 	case textSearchTick:
 		return m, m.startTextSearch(msg)
 	case textSearchDone:
@@ -458,6 +483,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.KeyPressMsg:
+		if m.ask.stage != askClosed {
+			return m.updateAsk(msg)
+		}
 		if m.sortMenu {
 			return m.updateSortMenu(msg)
 		}
@@ -498,6 +526,8 @@ func (m Model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case ".":
 		return m, m.toggleScope()
+	case "a":
+		return m, m.openAsk()
 	}
 	if m.focus == focusFolders {
 		page := max(1, m.sidebarRows()-1)
@@ -570,9 +600,9 @@ list:
 	case "up", "k", "ctrl+p":
 		m.move(-1)
 	case "pgdown", "ctrl+f":
-		m.move(max(1, m.listHeight()))
+		m.move(max(1, m.listRows()))
 	case "pgup", "ctrl+b":
-		m.move(-max(1, m.listHeight()))
+		m.move(-max(1, m.listRows()))
 	case "home", "g":
 		m.move(-len(m.visible))
 	case "end", "G":
@@ -592,8 +622,12 @@ list:
 		m.mode = modeFilter
 		return m, m.filter.Focus()
 	case "esc":
-		if m.filter.Value() != "" {
+		switch {
+		case m.filter.Value() != "":
 			m.filter.SetValue("")
+			m.refresh()
+		case m.asked != nil:
+			m.asked = nil
 			m.refresh()
 		}
 	case "space":
@@ -758,7 +792,7 @@ func (m *Model) click(x, y int) {
 		m.focus = f
 		return
 	}
-	if i := y - m.listTop(); x >= m.listLeft() && x < m.listLeft()+m.listWidth() && i >= 0 && i < m.listHeight() && m.offset+i < len(m.visible) {
+	if i := (y - m.listTop()) / m.rowLines(); y >= m.listTop() && x >= m.listLeft() && x < m.listLeft()+m.listWidth() && i < m.listRows() && m.offset+i < len(m.visible) {
 		m.cursor = m.offset + i
 		m.focus = focusList
 		m.clamp()

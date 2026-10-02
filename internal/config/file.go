@@ -53,11 +53,17 @@ type TUI struct {
 	// Scope is ScopeFolder to start with only the sessions of the folder
 	// (repository and its worktrees) the TUI is started in, or ScopeAll.
 	Scope string `toml:"scope"`
+	// AskModel is the model `a` (ask Claude) runs claude -p with.
+	AskModel string `toml:"ask_model"`
+	// AskReasons shows why Claude picked a session, under its row and in
+	// Conversation, after an ask.
+	AskReasons bool `toml:"ask_reasons"`
 }
 
 // Default returns the settings used when the config file is absent.
 func Default() File {
-	return File{TUI: TUI{DetailPosition: DetailBottom, DetailAutoWidth: 160, Theme: theme.Auto, DetailHeight: 16, Scope: ScopeFolder}}
+	return File{TUI: TUI{DetailPosition: DetailBottom, DetailAutoWidth: 160, Theme: theme.Auto, DetailHeight: 16, Scope: ScopeFolder,
+		AskModel: "sonnet", AskReasons: true}}
 }
 
 // FilePath returns the config file location, honoring XDG_CONFIG_HOME.
@@ -88,6 +94,10 @@ const Template = `# claude-recall settings. Uncomment a line to change it.
 # Which sessions to start with: "folder" (default) for the repository recall is
 # started in, when it has sessions, or "all".
 # scope = "folder"
+# a asks Claude Code (claude -p, on your Claude plan) to find sessions: the
+# model it uses, and whether to show why it picked each one.
+# ask_model = "sonnet"
+# ask_reasons = true
 `
 
 // WriteTemplate writes Template to path unless a file is already there.
@@ -135,6 +145,9 @@ func Load(path string) (File, error) {
 	}
 	if cfg.TUI.DetailHeight < MinDetailHeight {
 		return File{}, fmt.Errorf("%s: tui.detail_height must be at least %d", path, MinDetailHeight)
+	}
+	if strings.TrimSpace(cfg.TUI.AskModel) == "" {
+		return File{}, fmt.Errorf("%s: tui.ask_model must not be empty", path)
 	}
 	if cfg.TUI.DetailAutoWidth <= 0 {
 		return File{}, fmt.Errorf("%s: tui.detail_auto_width must be positive", path)
