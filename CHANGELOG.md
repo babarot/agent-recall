@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.2.0](https://github.com/babarot/claude-recall/compare/1.1.0...1.2.0) - 2026-10-02
+### New Features
+- Narrow the TUI to a folder and add a folder list by @babarot in https://github.com/babarot/claude-recall/pull/19
+
 ## [1.1.0](https://github.com/babarot/claude-recall/compare/1.0.1...1.1.0) - 2026-10-02
 ### New Features
 - Improve the TUI's look, detail pane and mouse support by @babarot in https://github.com/babarot/claude-recall/pull/17
