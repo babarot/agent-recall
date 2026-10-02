@@ -145,7 +145,7 @@ recall version
 
 The title is the session's `/rename` name, or else the title Claude Code generated, or else its first prompt.
 
-The detail pane has three frames: Conversation (the first request, a `⋮ N messages` marker for what lies between, and the latest messages, always including the last thing you said), What was done (activity over the session, the tools used most, how often each command ran, and the edited files grouped by repository) and Details (when, how much, where: times, message counts, size, version, the full session ID, folder and path). A taller pane shows more of the conversation, files and commands. The height you pick is remembered in `~/.local/state/claude-recall/state.json`.
+The detail pane has three frames: Conversation (the first request, a `⋮ N messages` marker for what lies between, and the latest messages, always including the last thing you said), What was done (activity over the session, then bars for the tools used most and the commands run most, and the edited files grouped by repository) and Details (when, how much, where: times, counts, size, branch, ID, version, and the folder's full path). Below the list, Details sits under Conversation in a few wide lines and What was done runs down the right. A taller pane shows more of the conversation and of What was done. The height you pick is remembered in `~/.local/state/claude-recall/state.json`.
 
 With the mouse: click a session to select it, click a frame to focus it, scroll the wheel over the list or over a frame, and drag the pane's top edge (or the row count line just above it) to resize the pane. While the TUI has the mouse, most terminals still select text when you hold Shift (Option in iTerm2) while dragging.
 

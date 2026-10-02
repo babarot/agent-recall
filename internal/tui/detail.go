@@ -11,10 +11,11 @@ import (
 )
 
 // The detail pane is three frames: Conversation (how the session began and
-// where it left off), What was done (activity, tools, edited files,
-// commands) and Details (times, counts, IDs). Below the list, the first two
-// share the left column and Details runs down the right; beside the list,
-// all three stack. Each frame scrolls on its own, with the mouse wheel over
+// where it left off), What was done (activity, tools, commands, edited
+// files) and Details (times, counts, IDs, folder). Below the list,
+// Conversation and Details share the wide left column, Details in a few
+// short lines, and What was done runs down the right, where its lists have
+// room to grow; beside the list, all three stack. Each frame scrolls on its own, with the mouse wheel over
 // it or the keys once it has focus.
 
 // focus is what keys and the wheel act on: the session list or a frame.
@@ -31,12 +32,17 @@ const (
 var frameTitles = [numFocus]string{"", "Conversation", "What was done", "Details"}
 
 const (
-	// The Details frame below the list, border included: wide enough for a
-	// full session ID after its label.
-	detailsWidth = 4 + labelWidth + 36
-	labelWidth   = 9 // "Commands " and friends
-	minFrame     = 5 // smallest frame: borders plus three lines
-	sparkChars   = "▁▂▃▄▅▆▇█"
+	// The What was done frame below the list, border included.
+	doneWidth = 49
+	// Narrowest What was done below the list: room for the activity spark.
+	minDoneWidth = 4 + labelWidth + 1 + 24
+	labelWidth   = 9 // "Messages " and friends
+	// Bars in What was done: how many programs, and the longest name.
+	barRows    = 5
+	barNameW   = 14
+	barMaxW    = 24
+	minFrame   = 5 // smallest frame: borders plus three lines
+	sparkChars = "▁▂▃▄▅▆▇█"
 )
 
 // rect is a frame's place on the screen.
@@ -52,11 +58,10 @@ func (m Model) paneRects() ([numFocus]rect, bool) {
 	if r == nil || !m.detailOpen {
 		return out, false
 	}
-	content := m.frameContent(r, 0)
-	need := func(f focus) int { return len(content[f].pinned) + len(content[f].scroll) + 2 }
-
 	if m.detailRight() {
 		x, w := m.listWidth()+1, detailWidth-1
+		content := m.frameContent(r, [numFocus]int{focusDone: w - 4, focusDetails: w - 4})
+		need := func(f focus) int { return len(content[f].pinned) + len(content[f].scroll) + 2 }
 		top := 1
 		if m.filterShown() {
 			top++
@@ -75,18 +80,20 @@ func (m Model) paneRects() ([numFocus]rect, bool) {
 		return out, false
 	}
 	top := m.paneTop()
-	rightW := max(30, min(detailsWidth, m.width-70))
+	rightW := max(minDoneWidth, min(doneWidth, m.width-70))
 	leftW := m.width - rightW - 1
-	convH, doneH := split(h, need(focusConv), need(focusDone))
+	content := m.frameContent(r, [numFocus]int{focusDone: rightW - 4, focusDetails: leftW - 4})
+	need := func(f focus) int { return len(content[f].pinned) + len(content[f].scroll) + 2 }
+	convH, detailsH := split(h, need(focusConv), need(focusDetails))
 	out[focusConv] = rect{0, top, leftW, convH}
-	out[focusDone] = rect{0, top + convH, leftW, doneH}
-	out[focusDetails] = rect{leftW + 1, top, rightW, h}
+	out[focusDetails] = rect{0, top + convH, leftW, detailsH}
+	out[focusDone] = rect{leftW + 1, top, rightW, h}
 	return out, true
 }
 
 // split shares h lines between two stacked frames that would like a and b
-// lines: each gets what it needs if that fits, else the second, What was
-// done, gets what it needs up to half and Conversation the rest.
+// lines: each gets what it needs if that fits, else the second gets what it
+// needs up to half and the first, Conversation, the rest.
 func split(h, a, b int) (int, int) {
 	if a+b <= h {
 		return h - b, b
@@ -125,14 +132,19 @@ func (c frameLines) messagesBefore(i int) int {
 	return n
 }
 
-// frameContent builds each frame's lines. inner is the What was done
-// frame's inner width, for aligning columns; 0 when only counting lines.
-func (m Model) frameContent(r *row, inner int) [numFocus]frameLines {
+// frameContent builds each frame's lines; inner holds the frames' inner
+// widths, which decide how Details is laid out and how What was done
+// aligns its columns.
+func (m Model) frameContent(r *row, inner [numFocus]int) [numFocus]frameLines {
 	d := m.details[r.s.ID]
 	var out [numFocus]frameLines
 	out[focusConv] = m.conversationContent(r, d)
-	out[focusDone] = m.doneContent(r, d, inner)
-	out[focusDetails] = frameLines{scroll: m.detailsLines(r, d), keep: -1}
+	out[focusDone] = m.doneContent(r, d, inner[focusDone])
+	details, ok := m.detailsGrid(r, d, inner[focusDetails])
+	if !ok {
+		details = m.detailsLines(r, d)
+	}
+	out[focusDetails] = frameLines{scroll: details, keep: -1}
 	return out
 }
 
@@ -294,36 +306,44 @@ func (m Model) spark(buckets []int) string {
 	return b.String()
 }
 
-// doneContent pins activity, tools and commands, one line each; the edited
-// files, grouped by where they live, scroll below. inner is the frame's
-// inner width, 0 when only the number of lines matters.
+// doneContent pins the activity; tools, commands and the edited files,
+// grouped by where they live, scroll below. inner is the frame's inner
+// width.
 func (m Model) doneContent(r *row, d *db.Detail, inner int) frameLines {
 	c := frameLines{keep: -1}
 	if d == nil {
 		return c
 	}
-	c.pinned = append(c.pinned, m.section("Activity")+"  "+m.spark(d.Activity)+
-		m.st.muted.Render(fmt.Sprintf("  %s · %d msgs", durationText(r.s.EndedAt.Sub(r.s.StartedAt)), r.s.MessageCount)))
-	var tools []string
-	for _, t := range d.TopTools {
-		tools = append(tools, m.st.strong.Render(t.Name)+" "+m.st.title.UnsetBold().Render(fmt.Sprint(t.N)))
+	// Totals go after the spark and its axis when there is room.
+	spark := m.section("Activity") + "  " + m.spark(d.Activity)
+	axis := strings.Repeat(" ", labelWidth+1) + m.st.muted.Render(m.axis(r.s.StartedAt, r.s.EndedAt, len(d.Activity)))
+	if msgs := m.st.muted.Render(fmt.Sprintf("  %d msgs", r.s.MessageCount)); ansi.StringWidth(spark+msgs) <= inner {
+		spark += msgs
 	}
-	if len(tools) == 0 {
-		tools = []string{m.st.muted.Render("none")}
+	if took := m.st.muted.Render("  " + durationText(r.s.EndedAt.Sub(r.s.StartedAt))); ansi.StringWidth(axis+took) <= inner {
+		axis += took
 	}
-	c.pinned = append(c.pinned, m.section("Tools")+"     "+strings.Join(tools, "   "))
-	c.pinned = append(c.pinned, m.section("Commands")+"  "+m.commandBars(commandCounts(d.Commands), inner-labelWidth-1))
+	c.pinned = append(c.pinned, spark, axis)
+
+	c.scroll = append(c.scroll, "", m.section("Tools"))
+	c.scroll = append(c.scroll, m.bars(d.TopTools, len(d.TopTools), inner)...)
+	programs := commandCounts(d.Commands)
+	c.scroll = append(c.scroll, "", m.section("Commands")+m.st.muted.Render(fmt.Sprintf("  %d run", len(d.Commands))))
+	c.scroll = append(c.scroll, m.bars(programs, barRows, inner)...)
+	if extra := len(programs) - barRows; extra > 0 {
+		c.scroll = append(c.scroll, m.st.muted.Render(fmt.Sprintf("+%d more", extra)))
+	}
 
 	groups, temps := groupFiles(d.Files, r.s.ProjectPath, m.home)
 	places := ""
 	if len(groups)+boolInt(temps > 0) > 1 {
 		places = fmt.Sprintf(" in %d places", len(groups)+boolInt(temps > 0))
 	}
-	c.scroll = append(c.scroll, m.section("Files")+m.st.muted.Render(fmt.Sprintf("  %d edited%s", d.FileCount, places)))
+	c.scroll = append(c.scroll, "", m.section("Files")+m.st.muted.Render(fmt.Sprintf("  %d edited%s", d.FileCount, places)))
 	if d.FileCount == 0 {
 		c.scroll = append(c.scroll, "  "+m.st.muted.Render("none"))
 	}
-	nameW := max(20, inner-10)
+	nameW := max(10, inner-8) // indent, a space and "×N"
 	for _, g := range groups {
 		name := g.name
 		if name == "" {
@@ -336,10 +356,7 @@ func (m Model) doneContent(r *row, d *db.Detail, inner int) frameLines {
 			if f.N > 1 {
 				count = fmt.Sprintf("×%d", f.N)
 			}
-			pad := " "
-			if inner > 0 {
-				pad = strings.Repeat(" ", max(1, nameW-len([]rune(rel))+1))
-			}
+			pad := strings.Repeat(" ", max(1, nameW-len([]rune(rel))+1))
 			c.scroll = append(c.scroll, "    "+m.st.strong.Render(rel)+pad+m.st.muted.Render(count))
 		}
 	}
@@ -352,32 +369,41 @@ func (m Model) doneContent(r *row, d *db.Detail, inner int) frameLines {
 	return c
 }
 
-// commandBars draws how often each program ran as short bars on one line,
-// most used first, as many as fit in w cells.
-func (m Model) commandBars(counts []db.Count, w int) string {
+// axis labels a spark w cells wide with the session's first and last
+// times, the day too when they differ.
+func (m Model) axis(start, end time.Time, w int) string {
+	layout := "15:04"
+	if start.Local().Format(time.DateOnly) != end.Local().Format(time.DateOnly) {
+		layout = "01-02"
+	}
+	a, b := start.Local().Format(layout), end.Local().Format(layout)
+	return a + strings.Repeat(" ", max(1, w-len(a)-len(b))) + b
+}
+
+// bars draws up to n counts, most first, one a line: the name, a bar to
+// scale with the largest and the count at the right edge of inner.
+func (m Model) bars(counts []db.Count, n, inner int) []string {
 	if len(counts) == 0 {
-		return m.st.muted.Render("none")
+		return []string{m.st.muted.Render("none")}
 	}
-	const barMax = 6
-	top := counts[0].N
-	var parts []string
-	used := 0
-	for i, c := range counts {
-		bar := strings.Repeat("▇", max(1, c.N*barMax/top))
-		part := m.st.strong.Bold(true).Render(c.Name) + " " + m.st.id.Render(bar) + " " + m.st.title.UnsetBold().Render(fmt.Sprint(c.N))
-		pw := ansi.StringWidth(part) + 2
-		more := ""
-		if rest := len(counts) - i - 1; rest > 0 {
-			more = fmt.Sprintf("+%d", rest)
-		}
-		if w > 0 && used+pw+len(more) > w && len(parts) > 0 {
-			parts = append(parts, m.st.muted.Render(fmt.Sprintf("+%d", len(counts)-i)))
-			break
-		}
-		parts = append(parts, part)
-		used += pw
+	counts = counts[:min(n, len(counts))]
+	nameW := 0
+	for _, c := range counts {
+		nameW = max(nameW, ansi.StringWidth(c.Name))
 	}
-	return strings.Join(parts, "  ")
+	nameW = min(nameW, barNameW)
+	numW := len(fmt.Sprint(counts[0].N))
+	room := max(4, inner-nameW-numW-2)
+	barW := min(room, barMaxW)
+	var out []string
+	for _, c := range counts {
+		name := ansi.Truncate(c.Name, nameW, ellipsis)
+		bar := strings.Repeat("▇", max(1, c.N*barW/counts[0].N))
+		out = append(out, m.st.strong.Render(name)+strings.Repeat(" ", nameW-ansi.StringWidth(name)+1)+
+			m.st.id.Render(bar)+strings.Repeat(" ", room-ansi.StringWidth(bar)+1)+
+			m.st.title.UnsetBold().Render(fmt.Sprintf("%*d", numW, c.N)))
+	}
+	return out
 }
 
 // detailsLines is the Details frame in three groups: when, how much, where.
@@ -429,6 +455,124 @@ func (m Model) detailsLines(r *row, d *db.Detail) []string {
 	return append(lines, kv("Path", m.st.muted.Render(path)))
 }
 
+// detailsGrid is the Details frame for a wide, short place: when, how much
+// and where side by side in short values, and the folder's full path below.
+// It reports false when the columns do not fit in inner cells.
+func (m Model) detailsGrid(r *row, d *db.Detail, inner int) ([]string, bool) {
+	kv := func(w int, k, v string) string { return m.st.subtle.Render(fmt.Sprintf("%-*s", w, k)) + v }
+	stamp := "01-02 15:04"
+	if r.s.StartedAt.Local().Year() != m.now().Year() {
+		stamp = "2006-01-02 15:04"
+	}
+	ended := r.s.EndedAt.Local().Format(stamp)
+	if r.s.StartedAt.Local().Format(time.DateOnly) == r.s.EndedAt.Local().Format(time.DateOnly) {
+		ended = r.s.EndedAt.Local().Format("15:04")
+	}
+	when := []string{m.section("When"),
+		kv(8, "Started", m.st.strong.Render(r.s.StartedAt.Local().Format(stamp))),
+		kv(8, "Ended", m.st.strong.Render(ended)),
+		kv(8, "Took", m.st.strong.Render(durationText(r.s.EndedAt.Sub(r.s.StartedAt))))}
+	calls := "?"
+	if d != nil {
+		calls = fmt.Sprint(d.Tools)
+	}
+	much := []string{m.section("How much"),
+		kv(6, "Msgs", m.st.strong.Render(fmt.Sprint(r.s.MessageCount))),
+		kv(6, "Calls", m.st.strong.Render(calls)),
+		kv(6, "Size", m.st.strong.Render(formatSize(r.s.FileSize)))}
+	where := []string{m.section("Where"),
+		kv(8, "Branch", m.st.dim.Render(ansi.Truncate(r.s.GitBranch, 20, ellipsis))),
+		kv(8, "ID", m.st.id.Render(r.s.ID[:min(8, len(r.s.ID))]))}
+	if d != nil && d.Version != "" {
+		where = append(where, kv(8, "Version", m.st.muted.Render(d.Version)))
+	}
+
+	cols := [][]string{when, much, where}
+	widths := make([]int, len(cols))
+	total := 3 * (len(cols) - 1)
+	for i, col := range cols {
+		for _, l := range col {
+			widths[i] = max(widths[i], ansi.StringWidth(l))
+		}
+		total += widths[i]
+	}
+	if inner < total {
+		return nil, false
+	}
+	lines := make([]string, len(when))
+	for i := range lines {
+		for j, col := range cols {
+			cell := ""
+			if i < len(col) {
+				cell = col[i]
+			}
+			if j < len(cols)-1 {
+				cell += strings.Repeat(" ", widths[j]-ansi.StringWidth(cell)+3)
+			}
+			lines[i] += cell
+		}
+	}
+
+	// The folder as a path ending in its name; for a worktree, the main
+	// checkout's, and the worktree's own path on the next line. A folder
+	// whose path does not end in its name (a herdr worktree) shows the name
+	// alone, with the path below.
+	folderPath := r.s.ProjectPath
+	if r.mainRoot != "" {
+		folderPath = r.mainRoot
+	}
+	badge := ""
+	if r.worktree != "" {
+		badge = worktreeM + " " + r.worktree
+	}
+	folder := tildePath(folderPath, m.home)
+	ownLine := r.mainRoot != ""
+	if !strings.HasSuffix(folder, "/"+r.folder) && folder != r.folder {
+		folder, ownLine = r.folder, true
+	}
+	lines = append(lines, kv(8, "Folder", m.folderPath(folder, r, badge, inner-8)))
+	if ownLine {
+		path := tildePath(r.s.ProjectPath, m.home)
+		if r.gone {
+			path += ", removed"
+		}
+		lines = append(lines, kv(8, "Path", m.st.muted.Render(middleEllipsis(path, inner-8))))
+	}
+	return lines, true
+}
+
+// folderPath draws a path in w cells with the folder's name at its end
+// bold and the rest muted, followed by badge. When it does not fit, the
+// start of the path gives way first.
+func (m Model) folderPath(path string, r *row, badge string, w int) string {
+	head, tail := "", path
+	if strings.HasSuffix(path, "/"+r.folder) {
+		head, tail = strings.TrimSuffix(path, r.folder), r.folder
+	} else if i := strings.LastIndex(path, "/"); i >= 0 {
+		head, tail = path[:i+1], path[i+1:]
+	}
+	room := w
+	if badge != "" {
+		room -= ansi.StringWidth(badge) + 1
+	}
+	if tw := ansi.StringWidth(tail); tw > room {
+		head, tail = "", middleEllipsis(tail, max(1, room))
+	} else if ansi.StringWidth(head)+tw > room {
+		// Cut at a slash, then mark the gap: "~/src/…/me/app".
+		head = ansi.Truncate(head, max(0, room-tw-2), "")
+		head = head[:strings.LastIndex(head, "/")+1] + "…/"
+	}
+	name, mark := m.st.strong.Bold(true), m.st.worktree
+	if r.gone {
+		name, mark = m.st.gone, m.st.gone
+	}
+	out := m.st.muted.Render(head) + name.Render(tail)
+	if badge != "" {
+		out += " " + mark.Render(badge)
+	}
+	return out
+}
+
 func (m Model) label(s string) string { return m.st.subtle.Render(fmt.Sprintf("%-*s", labelWidth, s)) }
 
 // renderPane draws the three frames: below the list as two columns, or
@@ -444,7 +588,7 @@ func (m Model) renderPane() string {
 	if m.detailRight() {
 		return strings.Join([]string{frame(focusConv), frame(focusDone), frame(focusDetails)}, "\n")
 	}
-	return joinColumns(frame(focusConv)+"\n"+frame(focusDone), frame(focusDetails), rects[focusConv].w, " ")
+	return joinColumns(frame(focusConv)+"\n"+frame(focusDetails), frame(focusDone), rects[focusConv].w, " ")
 }
 
 // scrollFrame moves frame f by delta lines; positive scrolls toward later
@@ -484,5 +628,9 @@ func joinColumns(left, right string, leftW int, gap string) string {
 
 // sizedContent builds the frames' content for their actual size.
 func (m Model) sizedContent(r *row, rects [numFocus]rect) [numFocus]frameLines {
-	return m.frameContent(r, rects[focusDone].w-4)
+	var inner [numFocus]int
+	for f := range numFocus {
+		inner[f] = rects[f].w - 4
+	}
+	return m.frameContent(r, inner)
 }

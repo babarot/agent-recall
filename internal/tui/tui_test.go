@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -348,16 +349,55 @@ func TestDetailPaneShowsThreeFrames(t *testing.T) {
 	m, _ := newTestModel(t, config.Default().TUI, 140, 40)
 	s := screen(m)
 	for _, want := range []string{"Conversation", "What was done", "Details", "please also add docs", "done, docs added",
-		"Bash 6", "a.go", "Claude Code 2.1.287", "WHEN", "HOW MUCH", "WHERE", "FILES", "bbbbbbbb-2222"} {
+		"Version 2.1.287", "WHEN", "HOW MUCH", "WHERE", "bbbbbbbb", "Folder"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("pane lacks %q:\n%s", want, s)
 		}
 	}
-	// Commands show as how often each ran, not one by one.
-	for _, want := range []string{"COMMANDS", "go test ▇▇▇▇▇▇ 1", "git status ▇▇▇▇▇▇ 1"} {
+	// Tools and commands are bars, one a line, the count at the end.
+	for _, want := range []string{"TOOLS", "COMMANDS", "2 run"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("What was done lacks %q:\n%s", want, s)
 		}
+	}
+	for _, re := range []string{`Bash +▇+ +6 │`, `go test +▇+ +1 │`, `git status +▇+ +1 │`} {
+		if !regexp.MustCompile(re).MatchString(s) {
+			t.Errorf("What was done lacks a bar like %s:\n%s", re, s)
+		}
+	}
+}
+
+func TestDetailsSitUnderConversation(t *testing.T) {
+	m, _ := newTestModel(t, config.Default().TUI, 140, 40)
+	rects, _ := m.paneRects()
+	conv, details, done := rects[focusConv], rects[focusDetails], rects[focusDone]
+	if details.x != conv.x || details.y != conv.y+conv.h || done.x <= conv.x+conv.w-1 || done.h != conv.h+details.h {
+		t.Fatalf("Details should be under Conversation and What was done on the right: %+v", rects)
+	}
+}
+
+func TestFolderPathKeepsTheName(t *testing.T) {
+	m, _ := newTestModel(t, config.Default().TUI, 140, 40)
+	r := &row{folder: "me/app"}
+	path := "~/src/github.com/me/app"
+	out := m.folderPath(path, r, "", 40)
+	i := strings.Index(out, "me/app")
+	if ansi.Strip(out) != path || i < 0 || !strings.HasPrefix(out[strings.LastIndex(out[:i], "\x1b["):], "\x1b[1") {
+		t.Fatalf("%q should show the whole path with the name bold", out)
+	}
+	if got := ansi.Strip(m.folderPath(path, r, "⌥ wt", 19)); got != "~/src/…/me/app ⌥ wt" {
+		t.Fatalf("narrow: %q, want the start of the path to give way", got)
+	}
+	if got := ansi.Strip(m.folderPath(path, r, "", 9)); got != "…/me/app" {
+		t.Fatalf("narrower: %q", got)
+	}
+}
+
+func TestNarrowDetailsStack(t *testing.T) {
+	m, _ := newTestModel(t, config.Default().TUI, 90, 40)
+	// Too narrow for three columns: the groups stack instead.
+	if s := screen(m); !strings.Contains(s, "Messages") || !strings.Contains(s, "Started") {
+		t.Fatalf("narrow Details should stack its groups:\n%s", s)
 	}
 }
 
@@ -548,13 +588,23 @@ func manyFiles(m Model) {
 	}
 }
 
-func TestCommandsStayPinnedWithManyFiles(t *testing.T) {
+func TestDoneScrollsToFiles(t *testing.T) {
 	m, _ := newTestModel(t, config.Default().TUI, 140, 40)
 	manyFiles(m)
 	s := screen(m)
-	for _, want := range []string{"COMMANDS", "make step", "FILES", "file00.go"} {
+	for _, want := range []string{"ACTIVITY", "COMMANDS", "make step", "+5 more"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("pane lacks %q:\n%s", want, s)
+		}
+	}
+	rects, _ := m.paneRects()
+	done := rects[focusDone]
+	m = update(t, m, tea.MouseClickMsg{X: done.x + 3, Y: done.y + 3, Button: tea.MouseLeft})
+	m = press(t, m, "G")
+	s = screen(m)
+	for _, want := range []string{"ACTIVITY", "file29.go", "+1 temp files"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("scrolled to the end, the pane lacks %q:\n%s", want, s)
 		}
 	}
 }
