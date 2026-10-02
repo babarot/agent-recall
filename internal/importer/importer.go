@@ -156,8 +156,10 @@ type Options struct {
 	DryRun      bool
 }
 
-// Run imports every transcript that matches opts and prints a summary.
-func Run(d func() (*db.DB, error), opts Options, w io.Writer) error {
+// Run imports every transcript that matches opts and prints a summary. d
+// may be nil for a dry run. A session that fails to import does not stop the
+// others; Run reports how many failed and returns the first error.
+func Run(vault *db.DB, opts Options, w io.Writer) error {
 	all := parser.Discover(opts.ProjectsDir)
 	targets := all
 	switch {
@@ -194,11 +196,6 @@ func Run(d func() (*db.DB, error), opts Options, w io.Writer) error {
 	}
 
 	fmt.Fprintf(w, "Syncing %d sessions...\n", len(targets))
-	vault, err := d()
-	if err != nil {
-		return err
-	}
-	defer vault.Close()
 
 	var order []string
 	byProject := map[string][]parser.File{}
@@ -209,13 +206,18 @@ func Run(d func() (*db.DB, error), opts Options, w io.Writer) error {
 		byProject[t.Project] = append(byProject[t.Project], t)
 	}
 
-	var imported, messages, unchanged, skipped int
+	var imported, messages, unchanged, skipped, failed int
+	var firstErr error
 	for _, project := range order {
 		index := parser.LoadIndex(filepath.Join(opts.ProjectsDir, project))
 		for _, f := range byProject[project] {
 			r, err := ImportFile(vault, f.Path, index[f.SessionID])
 			if err != nil {
-				return err
+				failed++
+				if firstErr == nil {
+					firstErr = fmt.Errorf("import %s: %w", f.SessionID, err)
+				}
+				continue
 			}
 			switch {
 			case r == nil:
@@ -236,6 +238,9 @@ func Run(d func() (*db.DB, error), opts Options, w io.Writer) error {
 	if skipped > 0 {
 		parts = append(parts, fmt.Sprintf("Skipped %d unreadable files.", skipped))
 	}
+	if failed > 0 {
+		parts = append(parts, fmt.Sprintf("Failed to import %d sessions.", failed))
+	}
 	fmt.Fprintln(w, strings.Join(parts, " "))
-	return nil
+	return firstErr
 }

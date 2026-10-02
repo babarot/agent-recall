@@ -3,6 +3,7 @@ package importer
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -131,10 +132,9 @@ func TestRunSummary(t *testing.T) {
 	e := newEnv(t, userLine("hello", "u1", "2026-01-01T00:00:00Z"))
 	projects := filepath.Dir(filepath.Dir(e.path))
 	os.WriteFile(filepath.Join(filepath.Dir(e.path), "broken.jsonl"), []byte("nope\n"), 0o644)
-	open := func() (*db.DB, error) { return e.db, nil }
 
 	var out bytes.Buffer
-	if err := Run(open, Options{ProjectsDir: projects}, &out); err != nil {
+	if err := Run(e.db, Options{ProjectsDir: projects}, &out); err != nil {
 		t.Fatal(err)
 	}
 	want := "Syncing 2 sessions...\nImported 1 sessions (1 messages). Skipped 1 unreadable files.\n"
@@ -172,5 +172,56 @@ func TestImportFillsTitleOfOlderRows(t *testing.T) {
 	s, err := e.db.Sessions()
 	if err != nil || len(s) != 1 || s[0].Title != "Fix the login bug" {
 		t.Fatalf("%+v %v", s, err)
+	}
+}
+
+// Every Claude Code session runs its own `recall mcp`, and each imports
+// everything on startup. Imports from separate connections must wait for
+// each other instead of failing with SQLITE_BUSY.
+func TestConcurrentImportsFromSeparateConnections(t *testing.T) {
+	projects := t.TempDir()
+	for p := range 4 {
+		dir := filepath.Join(projects, "project-"+string(rune('a'+p)))
+		os.MkdirAll(dir, 0o755)
+		for s := range 15 {
+			var lines []string
+			for m := range 200 {
+				lines = append(lines, userLine(strings.Repeat("words ", 50), "u"+string(rune('A'+m%26))+strings.Repeat("x", m), "2026-01-01T00:00:00Z"))
+			}
+			id := "sess-" + string(rune('a'+p)) + "-" + string(rune('a'+s))
+			body := strings.ReplaceAll(strings.Join(lines, "\n"), "sess-001", id)
+			os.WriteFile(filepath.Join(dir, id+".jsonl"), []byte(body+"\n"), 0o644)
+		}
+	}
+	path := filepath.Join(t.TempDir(), "vault.db")
+	if d, err := db.Open(path, db.Options{}); err != nil {
+		t.Fatal(err)
+	} else {
+		d.Close()
+	}
+
+	const workers = 8
+	errs := make(chan error, workers)
+	for range workers {
+		go func() {
+			d, err := db.Open(path, db.Options{})
+			if err != nil {
+				errs <- err
+				return
+			}
+			defer d.Close()
+			errs <- Run(d, Options{ProjectsDir: projects}, io.Discard)
+		}()
+	}
+	for range workers {
+		if err := <-errs; err != nil {
+			t.Fatalf("concurrent import failed: %v", err)
+		}
+	}
+	d, _ := db.Open(path, db.Options{})
+	defer d.Close()
+	s, err := d.Sessions()
+	if err != nil || len(s) != 60 {
+		t.Fatalf("sessions %d %v", len(s), err)
 	}
 }

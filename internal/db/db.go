@@ -27,11 +27,20 @@ type Options struct {
 // schema, then any pending migrations.
 func Open(path string, opts Options) (*DB, error) {
 	q := url.Values{}
-	q.Add("_pragma", "busy_timeout(5000)")
 	if opts.ReadOnly {
+		q.Add("_pragma", "busy_timeout(5000)")
 		q.Set("mode", "ro")
 	} else {
+		// Every Claude Code session runs its own `recall mcp`, and each one
+		// imports on startup and on every transcript change, so writers
+		// queue up. Taking the write lock at BEGIN (not at the first write)
+		// lets them wait for each other through busy_timeout, instead of a
+		// transaction failing at once when another writer committed since it
+		// began reading. A full import from many processes at once can keep
+		// a writer waiting for a while, hence the long timeout.
+		q.Add("_pragma", "busy_timeout(60000)")
 		q.Add("_pragma", "journal_mode(WAL)")
+		q.Set("_txlock", "immediate")
 	}
 	dsn := "file:" + path + "?" + q.Encode()
 

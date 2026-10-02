@@ -207,17 +207,33 @@ func openRead(o *options) (*db.DB, error) { return db.Open(o.db, db.Options{Read
 
 func openWrite(o *options) (*db.DB, error) { return db.Open(o.db, db.Options{}) }
 
-func importAll(o *options, w io.Writer) error {
-	return importer.Run(func() (*db.DB, error) { return openWrite(o) }, importer.Options{ProjectsDir: config.ProjectsDir()}, w)
+// catchUp imports what changed while no server ran. It runs beside the
+// server, which answers right away: a first import after an upgrade can
+// take a while, and Claude Code gives an MCP server 30 seconds to start. A
+// failed import is reported and the server keeps running; the watcher
+// imports the session again when it changes.
+func catchUp(d *db.DB, w io.Writer) {
+	if err := importer.Run(d, importer.Options{ProjectsDir: config.ProjectsDir()}, w); err != nil {
+		fmt.Fprintln(os.Stderr, "recall: import:", err)
+	}
 }
 
 func runImport(o *options, stdout io.Writer) error {
-	return importer.Run(func() (*db.DB, error) { return openWrite(o) }, importer.Options{
+	opts := importer.Options{
 		ProjectsDir: config.ProjectsDir(),
 		Session:     o.session,
 		Project:     o.project,
 		DryRun:      o.dryRun,
-	}, stdout)
+	}
+	if o.dryRun {
+		return importer.Run(nil, opts, stdout)
+	}
+	d, err := openWrite(o)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return importer.Run(d, opts, stdout)
 }
 
 func runSearch(o *options, stdout, stderr io.Writer) error {
@@ -333,11 +349,6 @@ func runStats(o *options, stdout io.Writer) error {
 }
 
 func runMCP(o *options) error {
-	// Catch up on sessions written while no server ran. The summary goes to
-	// stderr: stdout carries the protocol.
-	if err := importAll(o, os.Stderr); err != nil {
-		return err
-	}
 	d, err := openWrite(o)
 	if err != nil {
 		return err
@@ -348,6 +359,8 @@ func runMCP(o *options) error {
 	defer stop()
 	w := &watcher.Watcher{DB: d, ProjectsDir: config.ProjectsDir()}
 	go w.Run(ctx)
+	// The import summary goes to stderr: stdout carries the protocol.
+	go catchUp(d, os.Stderr)
 	return mcp.Run(ctx, d)
 }
 
@@ -406,9 +419,6 @@ func getStatus(addr string, v any) error {
 }
 
 func serveUI(o *options, port int, stdout io.Writer) error {
-	if err := importAll(o, stdout); err != nil {
-		return err
-	}
 	d, err := openWrite(o)
 	if err != nil {
 		return err
@@ -427,6 +437,7 @@ func serveUI(o *options, port int, stdout io.Writer) error {
 	defer stop()
 	s := web.New(d, config.ProjectsDir())
 	s.Shutdown = stop
+	go catchUp(d, stdout)
 	return s.Serve(ctx, ln)
 }
 
