@@ -348,9 +348,17 @@ func TestDetailPaneShowsThreeFrames(t *testing.T) {
 	m, _ := newTestModel(t, config.Default().TUI, 140, 40)
 	s := screen(m)
 	for _, want := range []string{"Conversation", "What was done", "Details", "please also add docs", "done, docs added",
-		"Bash 6", "a.go", "$ go test ./...", "2.1.287", "bbbbbbbb-2222"} {
+		"Bash 6", "a.go", "Claude Code 2.1.287", "WHEN", "HOW MUCH", "WHERE", "FILES", "bbbbbbbb-2222"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("pane lacks %q:\n%s", want, s)
+		}
+	}
+	// Commands come after the files; scroll the frame to its end.
+	m = press(t, m, "]", "]", "G")
+	s = screen(m)
+	for _, want := range []string{"COMMANDS", "go test ./...", "git status"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("scrolled What was done lacks %q:\n%s", want, s)
 		}
 	}
 }

@@ -52,7 +52,7 @@ func (m Model) paneRects() ([numFocus]rect, bool) {
 	if r == nil || !m.detailOpen {
 		return out, false
 	}
-	content := m.frameContent(r)
+	content := m.frameContent(r, 0)
 	need := func(f focus) int { return len(content[f].pinned) + len(content[f].scroll) + 2 }
 
 	if m.detailRight() {
@@ -106,11 +106,13 @@ type frameLines struct {
 	keep int
 }
 
-func (m Model) frameContent(r *row) [numFocus]frameLines {
+// frameContent builds each frame's lines; inner is the What was done
+// frame's inner width for aligning columns, 0 to only count lines.
+func (m Model) frameContent(r *row, inner int) [numFocus]frameLines {
 	d := m.details[r.s.ID]
 	var out [numFocus]frameLines
 	out[focusConv] = m.conversationContent(r, d)
-	out[focusDone] = m.doneContent(r, d)
+	out[focusDone] = m.doneContent(r, d, inner)
 	out[focusDetails] = frameLines{scroll: m.detailsLines(r, d), keep: -1}
 	return out
 }
@@ -182,16 +184,23 @@ func durationText(d time.Duration) string {
 	return fmt.Sprintf("%dh %dm", h, mins)
 }
 
+func (m Model) section(s string) string { return m.st.subtle.Bold(true).Render(strings.ToUpper(s)) }
+
+// messageLine is one message of the conversation: time, a colored dot for
+// the speaker, the text. The user's own words are bold.
 func (m Model) messageLine(msg db.Message) string {
-	who := m.st.claude.Render("claude")
-	if msg.Role == "user" {
-		who = m.st.user.Render("you   ")
-	}
-	when := "-"
+	when := "     "
 	if !msg.Timestamp.IsZero() {
-		when = msg.Timestamp.Local().Format("01-02 15:04")
+		when = msg.Timestamp.Local().Format("15:04")
 	}
-	return who + " " + m.st.muted.Render(when) + " " + m.st.strong.Render(collapse(msg.Content))
+	if msg.Role == "user" {
+		return m.st.dim.Render(when) + " " + m.st.user.Render("●") + " " + m.st.strong.Bold(true).Render(collapse(msg.Content))
+	}
+	return m.st.dim.Render(when) + " " + m.st.claude.Render("●") + " " + m.st.subtle.Render(collapse(msg.Content))
+}
+
+func (m Model) dayLine(t time.Time) string {
+	return m.st.dim.Render("── " + t.Local().Format("Mon Jan 2") + " ──")
 }
 
 func (m Model) headLine(r *row) string {
@@ -199,8 +208,9 @@ func (m Model) headLine(r *row) string {
 		durationText(r.s.EndedAt.Sub(r.s.StartedAt)), r.s.MessageCount, formatSize(r.s.FileSize)))
 }
 
-// conversationContent pins the head line and the first request; the rest of
-// the conversation scrolls, starting at its newest messages.
+// conversationContent pins the title and the first request; the rest of the
+// conversation scrolls, starting at its newest messages, with a line where
+// the day changes.
 func (m Model) conversationContent(r *row, d *db.Detail) frameLines {
 	c := frameLines{pinned: []string{m.headLine(r)}, fromBottom: true, keep: -1}
 	if d == nil || d.First == nil {
@@ -209,9 +219,16 @@ func (m Model) conversationContent(r *row, d *db.Detail) frameLines {
 	}
 	c.pinned = append(c.pinned, m.messageLine(*d.First))
 	if d.Hidden > 0 {
-		c.scroll = append(c.scroll, strings.Repeat(" ", 18)+m.st.muted.Render(fmt.Sprintf("··· %d earlier messages ···", d.Hidden)))
+		c.scroll = append(c.scroll, m.st.muted.Render(fmt.Sprintf("      ⋮  %d earlier messages", d.Hidden)))
 	}
+	day := d.First.Timestamp.Local().Format(time.DateOnly)
 	for _, msg := range d.Tail {
+		if !msg.Timestamp.IsZero() {
+			if dd := msg.Timestamp.Local().Format(time.DateOnly); dd != day {
+				c.scroll = append(c.scroll, m.dayLine(msg.Timestamp))
+				day = dd
+			}
+		}
 		if msg.Role == "user" {
 			c.keep = len(c.scroll)
 		}
@@ -220,7 +237,9 @@ func (m Model) conversationContent(r *row, d *db.Detail) frameLines {
 	return c
 }
 
-func spark(buckets []int) string {
+// spark draws counts as bars; empty stretches show as a faint baseline so
+// the line still reads as one.
+func (m Model) spark(buckets []int) string {
 	top := 1
 	for _, v := range buckets {
 		top = max(top, v)
@@ -228,25 +247,24 @@ func spark(buckets []int) string {
 	var b strings.Builder
 	for _, v := range buckets {
 		if v == 0 {
-			b.WriteByte(' ')
+			b.WriteString(m.st.rule.Render("▁"))
 			continue
 		}
-		b.WriteString(string([]rune(sparkChars)[min(7, v*8/(top+1))]))
+		b.WriteString(m.st.id.Render(string([]rune(sparkChars)[min(7, v*8/(top+1))])))
 	}
 	return b.String()
 }
 
-func (m Model) label(s string) string { return m.st.subtle.Render(fmt.Sprintf("%-*s", labelWidth, s)) }
-
-// doneContent pins activity and tools; edited files and commands scroll.
-func (m Model) doneContent(r *row, d *db.Detail) frameLines {
+// doneContent pins activity and tools; edited files, grouped by where they
+// live, and commands scroll. inner is the frame's width, for aligning file
+// counts; 0 when only the number of lines matters.
+func (m Model) doneContent(r *row, d *db.Detail, inner int) frameLines {
 	c := frameLines{keep: -1}
 	if d == nil {
 		return c
 	}
-	hm := func(t time.Time) string { return t.Local().Format("15:04") }
-	c.pinned = append(c.pinned, m.label("Activity")+m.st.muted.Render(hm(r.s.StartedAt)+" ")+m.st.id.Render(spark(d.Activity))+
-		m.st.muted.Render(" "+hm(r.s.EndedAt)+"  "+durationText(r.s.EndedAt.Sub(r.s.StartedAt))))
+	c.pinned = append(c.pinned, m.section("Activity")+"  "+m.spark(d.Activity)+
+		m.st.muted.Render(fmt.Sprintf("  %s · %d msgs", durationText(r.s.EndedAt.Sub(r.s.StartedAt)), r.s.MessageCount)))
 	var tools []string
 	for _, t := range d.TopTools {
 		tools = append(tools, m.st.strong.Render(t.Name)+" "+m.st.title.UnsetBold().Render(fmt.Sprint(t.N)))
@@ -254,56 +272,90 @@ func (m Model) doneContent(r *row, d *db.Detail) frameLines {
 	if len(tools) == 0 {
 		tools = []string{m.st.muted.Render("none")}
 	}
-	c.pinned = append(c.pinned, m.label("Tools")+strings.Join(tools, m.st.helpSep.Render(" · ")))
+	c.pinned = append(c.pinned, m.section("Tools")+"     "+strings.Join(tools, "   "))
 
-	if d.FileCount == 0 {
-		c.scroll = append(c.scroll, m.label("Edited")+m.st.muted.Render("no files"))
+	groups, temps := groupFiles(d.Files, r.s.ProjectPath, m.home)
+	places := ""
+	if len(groups)+boolInt(temps > 0) > 1 {
+		places = fmt.Sprintf(" in %d places", len(groups)+boolInt(temps > 0))
 	}
-	for i, f := range d.Files {
-		l := m.label("")
-		if i == 0 {
-			l = m.label("Edited")
+	c.scroll = append(c.scroll, "", m.section("Files")+m.st.muted.Render(fmt.Sprintf("  %d edited%s", d.FileCount, places)))
+	if d.FileCount == 0 {
+		c.scroll = append(c.scroll, "  "+m.st.muted.Render("none"))
+	}
+	nameW := max(20, inner-10)
+	for _, g := range groups {
+		name := g.name
+		if name == "" {
+			name = "this folder"
 		}
-		c.scroll = append(c.scroll, l+m.st.strong.Render(shortPath(f.Name, m.home))+m.st.muted.Render(fmt.Sprintf(" ×%d", f.N)))
+		c.scroll = append(c.scroll, "  "+m.st.muted.Render(name))
+		for _, f := range g.files {
+			rel := middleEllipsis(f.Name, nameW)
+			count := ""
+			if f.N > 1 {
+				count = fmt.Sprintf("×%d", f.N)
+			}
+			pad := " "
+			if inner > 0 {
+				pad = strings.Repeat(" ", max(1, nameW-len([]rune(rel))+1))
+			}
+			c.scroll = append(c.scroll, "    "+m.st.strong.Render(rel)+pad+m.st.muted.Render(count))
+		}
+	}
+	if temps > 0 {
+		c.scroll = append(c.scroll, "  "+m.st.muted.Render(fmt.Sprintf("+%d temp files", temps)))
 	}
 	if extra := d.FileCount - len(d.Files); extra > 0 {
-		c.scroll = append(c.scroll, m.label("")+m.st.muted.Render(fmt.Sprintf("+%d more", extra)))
+		c.scroll = append(c.scroll, "  "+m.st.muted.Render(fmt.Sprintf("+%d more", extra)))
 	}
-	for i, cmd := range d.Commands {
-		l := m.label("")
-		if i == 0 {
-			l = m.label("Commands")
+
+	if len(d.Commands) > 0 {
+		c.scroll = append(c.scroll, "", m.section("Commands")+m.st.muted.Render("  latest first"))
+		for _, cmd := range d.Commands {
+			prog, args, rest := commandParts(cmd)
+			l := "  " + m.st.strong.Bold(true).Render(prog)
+			if args != "" {
+				l += " " + m.st.subtle.Render(args)
+			}
+			if rest != "" {
+				l += " " + m.st.dim.Render(rest)
+			}
+			c.scroll = append(c.scroll, l)
 		}
-		c.scroll = append(c.scroll, l+m.st.muted.Render("$ ")+m.st.strong.Render(collapse(cmd)))
 	}
 	return c
 }
 
-// detailsLines is the Details frame, most useful first so a short frame
-// keeps what matters.
+// detailsLines is the Details frame in three groups: when, how much, where.
 func (m Model) detailsLines(r *row, d *db.Detail) []string {
 	kv := func(k, v string) string { return m.label(k) + v }
 	stamp := func(t time.Time) string { return t.Local().Format("2006-01-02 15:04") }
 	lines := []string{
+		m.section("When"),
 		kv("Started", m.st.strong.Render(stamp(r.s.StartedAt))),
-		kv("Ended", m.st.strong.Render(stamp(r.s.EndedAt))+m.st.muted.Render(" ("+durationText(r.s.EndedAt.Sub(r.s.StartedAt))+")")),
-		kv("Messages", m.st.strong.Render(fmt.Sprint(r.s.MessageCount))),
-		kv("ID", m.st.id.Render(r.s.ID)),
+		kv("Ended", m.st.strong.Render(stamp(r.s.EndedAt))+m.st.muted.Render("  "+durationText(r.s.EndedAt.Sub(r.s.StartedAt)))),
+		"",
+		m.section("How much"),
 	}
+	msgs := m.st.strong.Render(fmt.Sprint(r.s.MessageCount))
 	if d != nil {
-		lines = append(lines,
-			kv("", m.st.muted.Render(fmt.Sprintf("you %d · claude %d", d.You, d.Claude))),
-			kv("", m.st.muted.Render(fmt.Sprintf("tools %d · thinking %d", d.Tools, d.Thinking))))
+		msgs += m.st.muted.Render(fmt.Sprintf("  you %d · claude %d", d.You, d.Claude))
+	}
+	lines = append(lines, kv("Messages", msgs))
+	if d != nil {
+		lines = append(lines, kv("Calls", m.st.strong.Render(fmt.Sprint(d.Tools))+m.st.muted.Render(fmt.Sprintf("  thinking %d", d.Thinking))),
+			kv("Files", m.st.strong.Render(fmt.Sprintf("%d edited", d.FileCount))))
 	}
 	size := m.st.strong.Render(formatSize(r.s.FileSize))
 	if d != nil && d.Images > 0 {
-		size += m.st.muted.Render(fmt.Sprintf(" · %d images", d.Images))
+		size += m.st.muted.Render(fmt.Sprintf("  %d images", d.Images))
 	}
-	lines = append(lines, kv("Size", size), kv("Branch", m.st.dim.Render(r.s.GitBranch)))
-	if d != nil {
-		lines = append(lines, kv("Files", m.st.strong.Render(fmt.Sprintf("%d edited", d.FileCount))),
-			kv("Version", m.st.muted.Render(d.Version)))
+	lines = append(lines, kv("Size", size))
+	if d != nil && d.Version != "" {
+		lines = append(lines, kv("Version", m.st.muted.Render("Claude Code "+d.Version)))
 	}
+
 	name, badge := m.st.strong, m.st.worktree
 	if r.gone {
 		name, badge = m.st.gone, m.st.gone
@@ -312,16 +364,19 @@ func (m Model) detailsLines(r *row, d *db.Detail) []string {
 	if r.worktree != "" {
 		folder += " " + badge.Render(worktreeM+" "+r.worktree)
 	}
-	lines = append(lines, kv("Folder", folder))
+	lines = append(lines, "", m.section("Where"), kv("ID", m.st.id.Render(r.s.ID)), kv("Folder", folder))
 	if r.mainRoot != "" {
-		lines = append(lines, kv("Worktree", m.st.muted.Render("of "+tildePath(r.mainRoot, m.home))))
+		lines = append(lines, kv("", m.st.muted.Render("worktree of "+tildePath(r.mainRoot, m.home))))
 	}
+	lines = append(lines, kv("Branch", m.st.dim.Render(r.s.GitBranch)))
 	path := tildePath(r.s.ProjectPath, m.home)
 	if r.gone {
 		path += ", removed"
 	}
 	return append(lines, kv("Path", m.st.muted.Render(path)))
 }
+
+func (m Model) label(s string) string { return m.st.subtle.Render(fmt.Sprintf("%-*s", labelWidth, s)) }
 
 // renderPane draws the three frames: below the list as two columns, or
 // beside it as one.
@@ -331,7 +386,7 @@ func (m Model) renderPane() string {
 	if !ok || r == nil {
 		return ""
 	}
-	content := m.frameContent(r)
+	content := m.frameContent(r, rects[focusDone].w-4)
 	frame := func(f focus) string { return m.renderFrame(f, content[f], rects[f]) }
 	if m.detailRight() {
 		return strings.Join([]string{frame(focusConv), frame(focusDone), frame(focusDetails)}, "\n")
@@ -347,7 +402,7 @@ func (m *Model) scrollFrame(f focus, delta int) {
 	if r == nil || !ok || f == focusList {
 		return
 	}
-	c := m.frameContent(r)[f]
+	c := m.frameContent(r, rects[focusDone].w-4)[f]
 	if c.fromBottom {
 		delta = -delta
 	}
