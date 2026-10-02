@@ -139,7 +139,7 @@ recall version
 | `/` | Filter by title, folder, branch or ID; `in:<folder>` keeps the sessions of folders whose name contains it, over the folder the list is narrowed to (while the folder suggestions show, `↑` `↓` and `Enter` pick one, `Tab` completes the highlighted one, `Esc` closes them; the mouse clicks and scrolls them too); `Esc` clears the filter |
 | `s` | Sort by ended, started, message count or size |
 | `.` | Switch between the folder `recall` was started in and all folders |
-| `←` `→` | Show or hide the folder list. `←` opens it and, pressed again, moves into it; `↑` `↓` there pick a folder; `→` (or `Enter`) returns to the sessions, and `→` again closes it. The focused side has accent rules and the selection bar |
+| `←` `→` | Show or hide the folder list. `←` opens it and, pressed again, moves into it; `↑` `↓` there pick a folder and `/` searches the folders by fuzzy match (`bdot` finds babarot/dotfiles; `Enter` keeps the search, `Esc` clears it); `→` (or `Enter`) returns to the sessions, and `→` again closes it. The focused side has accent rules and the selection bar |
 | `Tab` | Show or hide the detail pane |
 | `+` `-` | Make the detail pane taller or shorter |
 | `]` `[` | Move focus to the next or previous frame of the detail pane (and the folder list when it is shown); `↑` `↓`, `j` `k`, PgUp, PgDn, `g` and `G` then scroll it, `Esc` returns to the list |

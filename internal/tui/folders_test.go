@@ -288,3 +288,81 @@ func TestFocusedSideStandsOut(t *testing.T) {
 		t.Error("the sessions should show the selection bar")
 	}
 }
+
+// namedFolders is a model with folders named after real projects, newest
+// first: dotfiles, infrastructure, stailer, stailer-server.
+func namedFolders(t *testing.T) Model {
+	t.Helper()
+	base, _ := filepath.EvalSymlinks(t.TempDir())
+	t.Setenv("HOME", base) // folder names read ~/dotfiles and so on
+	var ss []db.Session
+	for i, name := range []string{"dotfiles", "infrastructure", "stailer", "stailer-server"} {
+		dir := filepath.Join(base, name)
+		os.MkdirAll(dir, 0o755)
+		ss = append(ss, db.Session{ID: name, ProjectPath: dir, Title: name, EndedAt: now.Add(time.Duration(-i) * time.Hour)})
+	}
+	m := New(ss, &fakePreview{}, config.Default().TUI)
+	m.now = func() time.Time { return now }
+	m = update(t, m, tea.WindowSizeMsg{Width: 140, Height: 40})
+	left := tea.KeyPressMsg{Code: tea.KeyLeft}
+	return update(t, update(t, m, left), left)
+}
+
+func typeKeys(t *testing.T, m Model, s string) Model {
+	t.Helper()
+	for _, r := range s {
+		m = update(t, m, tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+	return m
+}
+
+func TestSidebarSearch(t *testing.T) {
+	m := typeKeys(t, namedFolders(t), "/srv")
+	if got := visibleIDs(m); got != "stailer-server" {
+		t.Fatalf("/srv should pick stailer-server and narrow the list to it, got %s", got)
+	}
+	s := screen(m)
+	if !strings.Contains(s, "/ srv") || !strings.Contains(s, "1/4") || strings.Contains(s, "dotfiles  ") {
+		t.Fatalf("the search should show in the title and hide the rest:\n%s", s)
+	}
+	// Typing goes to the search, not to the keys it would otherwise be.
+	m = typeKeys(t, namedFolders(t), "/st.")
+	if m.sideSearch.Value() != "st." || m.scope == "" {
+		t.Fatalf("got %q, scope %q", m.sideSearch.Value(), m.scope)
+	}
+	m = typeKeys(t, namedFolders(t), "/stai")
+	es := m.sideEntries()
+	if len(es) != 2 || es[0].name != "~/stailer" {
+		t.Fatalf("stai: %+v", es)
+	}
+	m = press(t, m, "down")
+	if !strings.HasSuffix(m.folderName(m.scope), "stailer-server") {
+		t.Fatalf("down should pick the next match, got %s", m.folderName(m.scope))
+	}
+	// Enter keeps the search; the arrows then move through the matches.
+	m = press(t, m, "enter")
+	if m.sideTyping || m.sideSearch.Value() != "stai" || len(m.sideEntries()) != 2 {
+		t.Fatal("enter should keep the search")
+	}
+	// Esc clears it, then a second Esc returns to the sessions.
+	m = press(t, m, "esc")
+	if m.sideSearch.Value() != "" || len(m.sideEntries()) != 5 || m.focus != focusFolders {
+		t.Fatalf("esc should clear the search: %q", m.sideSearch.Value())
+	}
+	if m = press(t, m, "esc"); m.focus != focusList {
+		t.Fatal("a second esc returns to the sessions")
+	}
+	// Nothing matches: the list stays as it was.
+	m = typeKeys(t, namedFolders(t), "/zzz")
+	if len(m.visible) != 4 || !strings.Contains(screen(m), "No folder matches") {
+		t.Fatalf("got %s:\n%s", visibleIDs(m), screen(m))
+	}
+}
+
+func TestSidebarHighlightsMatches(t *testing.T) {
+	m := typeKeys(t, namedFolders(t), "/dot")
+	out := m.render()
+	if !strings.Contains(out, m.st.on(m.st.filter.Bold(true), true).Render("d")) {
+		t.Fatalf("the matched runes should be highlighted:\n%q", out)
+	}
+}

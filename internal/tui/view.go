@@ -292,8 +292,15 @@ func (m Model) renderHelp() string {
 	case modePreview:
 		pairs = [][2]string{{"space", "back"}, {"↑↓", "scroll"}, {"enter", "resume"}, {"y", "copy id"}, {"Y", "copy cmd"}}
 	case modeList:
+		if m.focus == focusFolders && m.sideTyping {
+			pairs = [][2]string{{"↑↓", "folder"}, {"enter", "done"}, {"esc", "clear"}}
+			break
+		}
 		if m.focus == focusFolders {
-			pairs = [][2]string{{"↑↓", "folder"}, {"→", "sessions"}, {"[ ]", "next frame"}, {".", "this folder"}, {"q", "quit"}}
+			pairs = [][2]string{{"↑↓", "folder"}, {"/", "search"}, {"→", "sessions"}, {"[ ]", "next frame"}, {".", "this folder"}, {"q", "quit"}}
+			if m.sideSearch.Value() != "" {
+				pairs[1] = [2]string{"esc", "clear search"}
+			}
 			break
 		}
 		if m.focus != focusList {

@@ -88,6 +88,10 @@ type Model struct {
 	startFolder string
 	sidebar     bool // the folder list is open
 	sideOffset  int
+	// sideSearch narrows the folder list; sideTyping is set while it has
+	// the keys.
+	sideSearch textinput.Model
+	sideTyping bool
 
 	cursor, offset int
 	width, height  int
@@ -141,7 +145,13 @@ func New(sessions []db.Session, source Source, cfg config.TUI) Model {
 	fi.Prompt = "/ "
 	fi.Placeholder = "filter by title, folder, branch or ID · in:folder"
 
+	ss := textinput.New()
+	ss.Prompt = "/ "
+	ss.Placeholder = "search folders"
+	ss.SetWidth(sidebarWidth - 12)
+
 	m := Model{
+		sideSearch: ss,
 		resolver:   resolver,
 		folders:    groupRows(rows),
 		cfg:        cfg,
@@ -428,6 +438,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.focus == focusFolders && m.sideTyping {
+		return m.updateSideSearch(msg)
+	}
 	key := msg.String()
 	switch key {
 	case "]":
@@ -454,7 +467,15 @@ func (m Model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.moveFolder(-len(m.folders) - 1)
 		case "end", "G":
 			m.moveFolder(len(m.folders) + 1)
-		case "enter", "right", "l", "esc":
+		case "/":
+			return m, m.searchFolders()
+		case "esc":
+			if m.sideSearch.Value() != "" {
+				m.clearSideSearch()
+				break
+			}
+			m.focus = focusList
+		case "enter", "right", "l":
 			m.focus = focusList
 		case "q", "ctrl+c":
 			return m, tea.Quit
@@ -710,6 +731,9 @@ func (m *Model) click(x, y int) {
 		m.focus = focusFolders
 		return
 	}
+	// Anywhere else, a search being typed in the folder list stops.
+	m.sideTyping = false
+	m.sideSearch.Blur()
 	if f := m.frameAt(x, y); f != focusList {
 		m.focus = f
 		return

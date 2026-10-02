@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/babarot/claude-recall/internal/config"
@@ -176,17 +177,47 @@ func (m *Model) closeSidebar() tea.Cmd {
 	return m.saveState()
 }
 
-// sidebarIndex is the selected entry: 0 for All, then the folders.
-func (m Model) sidebarIndex() int {
-	if m.scope == "" {
-		return 0
+// sideEntry is a line of the sidebar: All (key "") or a folder, with the
+// runes of its name the search matched.
+type sideEntry struct {
+	key, name string
+	count     int
+	hits      []int
+}
+
+// sideEntries are the sidebar's lines: All and every folder, or the
+// folders the search matches, best first.
+func (m Model) sideEntries() []sideEntry {
+	q := strings.TrimSpace(m.sideSearch.Value())
+	if q == "" {
+		out := []sideEntry{{name: "All", count: len(m.rows)}}
+		for _, f := range m.folders {
+			out = append(out, sideEntry{key: f.key, name: f.name, count: f.count})
+		}
+		return out
 	}
+	type scored struct {
+		sideEntry
+		score, order int
+	}
+	var found []scored
 	for i, f := range m.folders {
-		if f.key == m.scope {
-			return i + 1
+		if score, hits, ok := fuzzyMatch(q, f.name); ok {
+			found = append(found, scored{sideEntry{f.key, f.name, f.count, hits}, score, i})
 		}
 	}
-	return 0
+	// Best match first; among equals, the most recent folder.
+	slices.SortStableFunc(found, func(a, b scored) int { return cmp.Or(cmp.Compare(b.score, a.score), cmp.Compare(a.order, b.order)) })
+	out := make([]sideEntry, len(found))
+	for i, f := range found {
+		out[i] = f.sideEntry
+	}
+	return out
+}
+
+// sidebarIndex is the selected entry, or -1 when the search hides it.
+func (m Model) sidebarIndex() int {
+	return slices.IndexFunc(m.sideEntries(), func(e sideEntry) bool { return e.key == m.scope })
 }
 
 // sidebarRows is how many entries the sidebar shows at once.
@@ -194,29 +225,35 @@ func (m Model) sidebarRows() int { return max(1, m.listHeight()+tableChrome-3) }
 
 // moveFolder selects the entry delta away and narrows the list to it.
 func (m *Model) moveFolder(delta int) {
-	i := max(0, min(m.sidebarIndex()+delta, len(m.folders)))
-	key := ""
-	if i > 0 {
-		key = m.folders[i-1].key
+	es := m.sideEntries()
+	if len(es) == 0 {
+		return
 	}
-	m.setScope(key)
+	i := m.sidebarIndex()
+	if i < 0 { // the search hides it: start from the top
+		i = 0
+		if delta > 0 {
+			i = -1
+		}
+	}
+	m.setScope(es[max(0, min(i+delta, len(es)-1))].key)
 }
 
 // revealFolder scrolls the sidebar to its selected entry.
 func (m *Model) revealFolder() {
-	i, h := m.sidebarIndex(), m.sidebarRows()
+	i, h, n := max(0, m.sidebarIndex()), m.sidebarRows(), len(m.sideEntries())
 	if i < m.sideOffset {
 		m.sideOffset = i
 	}
 	if i >= m.sideOffset+h {
 		m.sideOffset = i - h + 1
 	}
-	m.sideOffset = max(0, min(m.sideOffset, len(m.folders)+1-h))
+	m.sideOffset = max(0, min(m.sideOffset, n-h))
 }
 
 // scrollSidebar moves the sidebar's view without changing the selection.
 func (m *Model) scrollSidebar(delta int) {
-	m.sideOffset = max(0, min(m.sideOffset+delta, len(m.folders)+1-m.sidebarRows()))
+	m.sideOffset = max(0, min(m.sideOffset+delta, len(m.sideEntries())-m.sidebarRows()))
 }
 
 // sidebarAt returns the sidebar entry under a screen cell, or -1.
@@ -225,22 +262,67 @@ func (m Model) sidebarAt(x, y int) int {
 		return -1
 	}
 	i := y - m.listTop() // entries line up with the session rows
-	if i < 0 || i >= m.sidebarRows() || m.sideOffset+i > len(m.folders) {
+	if i < 0 || i >= m.sidebarRows() || m.sideOffset+i >= len(m.sideEntries()) {
 		return -1
 	}
 	return m.sideOffset + i
 }
 
 func (m *Model) pickFolder(i int) {
-	key := ""
-	if i > 0 {
-		key = m.folders[i-1].key
+	if es := m.sideEntries(); i >= 0 && i < len(es) {
+		m.setScope(es[i].key)
 	}
-	m.setScope(key)
 }
 
-// renderSidebar returns n lines, sidebarWidth cells wide: a title between
-// rules, level with the column headers, then the entries.
+// searchFolders starts typing a search in the sidebar.
+func (m *Model) searchFolders() tea.Cmd {
+	m.sideTyping = true
+	return m.sideSearch.Focus()
+}
+
+// updateSideSearch handles a key while the sidebar search is typed: the
+// arrows pick among the matches, Enter keeps the search, Esc drops it.
+func (m Model) updateSideSearch(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "down", "ctrl+n":
+		m.moveFolder(1)
+		return m, nil
+	case "up", "ctrl+p":
+		m.moveFolder(-1)
+		return m, nil
+	case "enter":
+		m.sideTyping = false
+		m.sideSearch.Blur()
+		return m, nil
+	case "esc":
+		m.clearSideSearch()
+		return m, nil
+	case "ctrl+c":
+		return m, tea.Quit
+	}
+	before := m.sideSearch.Value()
+	var cmd tea.Cmd
+	m.sideSearch, cmd = m.sideSearch.Update(msg)
+	if m.sideSearch.Value() != before {
+		// The best match is selected, and the list follows it.
+		m.sideOffset = 0
+		if es := m.sideEntries(); len(es) > 0 {
+			m.setScope(es[0].key)
+		}
+	}
+	return m, cmd
+}
+
+// clearSideSearch drops the search and shows every folder again.
+func (m *Model) clearSideSearch() {
+	m.sideTyping = false
+	m.sideSearch.Blur()
+	m.sideSearch.SetValue("")
+	m.revealFolder()
+}
+
+// renderSidebar returns n lines, sidebarWidth cells wide: a title (or the
+// search) between rules, level with the column headers, then the entries.
 func (m Model) renderSidebar(n int) []string {
 	w := sidebarWidth
 	focused := m.focus == focusFolders
@@ -250,31 +332,76 @@ func (m Model) renderSidebar(n int) []string {
 	if focused {
 		rule, name = m.st.id, m.st.key
 	}
+	es := m.sideEntries()
 	title := name.Render("  Folders") + m.st.muted.Render(fmt.Sprintf(" %d", len(m.folders)))
+	if m.sideTyping || m.sideSearch.Value() != "" {
+		count := m.st.muted.Render(fmt.Sprintf(" %d/%d", len(es), len(m.folders)))
+		box := m.sideSearch.View()
+		if !m.sideTyping {
+			box = m.st.filter.Render("/ " + m.sideSearch.Value())
+		}
+		title = " " + ansi.Truncate(box, w-1-ansi.StringWidth(count), ellipsis)
+		title += strings.Repeat(" ", max(0, w-ansi.StringWidth(title)-ansi.StringWidth(count))) + count
+	}
 	lines := []string{rule.Render(strings.Repeat("╌", w)), title, rule.Render(strings.Repeat("╌", w))}
 	sel := m.sidebarIndex()
-	for i := m.sideOffset; i <= len(m.folders) && len(lines) < n; i++ {
-		name, count := "All", len(m.rows)
-		if i > 0 {
-			name, count = m.folders[i-1].name, m.folders[i-1].count
-		}
-		num := fmt.Sprint(count)
-		name = middleEllipsis(name, w-3-len(num)-1) // the end names the repository
-		gap := strings.Repeat(" ", max(1, w-2-ansi.StringWidth(name)-len(num)-1))
+	if len(es) == 0 {
+		lines = append(lines, m.st.muted.Render("  No folder matches"))
+	}
+	for i := m.sideOffset; i < len(es) && len(lines) < n; i++ {
+		e := es[i]
+		num := fmt.Sprint(e.count)
+		label := middleEllipsis(e.name, w-3-len(num)-1) // the end names the repository
+		gap := strings.Repeat(" ", max(1, w-2-ansi.StringWidth(label)-len(num)-1))
 		if i != sel {
 			style := m.st.text
-			if i == 0 {
+			if e.key == "" {
 				style = m.st.subtle
 			}
-			lines = append(lines, "  "+style.Render(name)+gap+m.st.muted.Render(num)+" ")
+			lines = append(lines, "  "+m.highlight(e.name, label, e.hits, style, m.st.filter.Bold(true))+gap+m.st.muted.Render(num)+" ")
 			continue
 		}
 		bar := m.st.selected.Render(" ")
 		if focused {
 			bar = m.st.bar.Render("▎")
 		}
-		lines = append(lines, bar+m.st.selected.Render(" ")+m.st.on(m.st.key, true).Render(name)+
+		lines = append(lines, bar+m.st.selected.Render(" ")+m.highlight(e.name, label, e.hits, m.st.on(m.st.key, true), m.st.on(m.st.filter.Bold(true), true))+
 			m.st.selected.Render(gap)+m.st.on(m.st.muted, true).Render(num)+m.st.selected.Render(" "))
 	}
 	return fit(lines, n)
+}
+
+// highlight renders label, a shortened name, with the runes of name at hits
+// in the hit style. Shortening keeps the start and the end of the name with
+// an ellipsis between, so hits map to either side of it.
+func (m Model) highlight(name, label string, hits []int, base, hit lipgloss.Style) string {
+	if len(hits) == 0 {
+		return base.Render(label)
+	}
+	n, l := []rune(name), []rune(label)
+	at := map[int]bool{}
+	if string(n) == label {
+		for _, h := range hits {
+			at[h] = true
+		}
+	} else if cut := slices.Index(l, []rune(ellipsis)[0]); cut >= 0 {
+		tail := len(l) - cut - 1 // runes after the ellipsis, the end of name
+		for _, h := range hits {
+			switch {
+			case h < cut && n[h] == l[h]:
+				at[h] = true
+			case h >= len(n)-tail:
+				at[h-(len(n)-tail)+cut+1] = true
+			}
+		}
+	}
+	var b strings.Builder
+	for i, c := range l {
+		if at[i] {
+			b.WriteString(hit.Render(string(c)))
+		} else {
+			b.WriteString(base.Render(string(c)))
+		}
+	}
+	return b.String()
 }
