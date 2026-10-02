@@ -129,6 +129,9 @@ type Model struct {
 	scrollFor string
 
 	helpOpen bool // the key list is showing
+	// sortMenu is set while the sort menu shows, sortSel its highlight.
+	sortMenu bool
+	sortSel  int
 
 	toast     string
 	toastKind toastKind
@@ -394,6 +397,14 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.helpOpen = false
 			return m, nil
 		}
+		if m.sortMenu {
+			if i := m.sortMenuAt(msg.X, msg.Y); i >= 0 {
+				m.applySort(i)
+			} else {
+				m.sortMenu = false
+			}
+			return m, nil
+		}
 		if msg.Button == tea.MouseLeft && m.mode == modeList {
 			m.click(msg.X, msg.Y)
 		}
@@ -447,6 +458,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.KeyPressMsg:
+		if m.sortMenu {
+			return m.updateSortMenu(msg)
+		}
 		if m.helpOpen {
 			switch msg.String() {
 			case "?", "esc", "q":
@@ -570,9 +584,10 @@ list:
 		m.resizeDetail(m.paneHeight() - 2)
 		return m, m.saveState()
 	case "s":
-		m.sortIdx = (m.sortIdx + 1) % len(sorts)
-		m.refresh()
-		m.cursor, m.offset = 0, 0
+		// The list's own key: not while a frame is being read.
+		if m.focus == focusList {
+			m.openSortMenu()
+		}
 	case "/":
 		m.mode = modeFilter
 		return m, m.filter.Focus()

@@ -131,11 +131,46 @@ func TestListIsSortedByEndedFirst(t *testing.T) {
 	}
 }
 
-func TestSortCycles(t *testing.T) {
+func TestSortMenu(t *testing.T) {
 	m, _ := newTestModel(t, config.Default().TUI, 140, 30)
-	m = press(t, m, "s", "s") // Ended -> Started -> Msgs
-	if sorts[m.sortIdx].name != "Msgs" || m.current().s.MessageCount != 50 {
-		t.Fatalf("sort %s, first %+v", sorts[m.sortIdx].name, m.current().s)
+	m = press(t, m, "s")
+	s := screen(m)
+	for _, want := range []string{"Sort by", "● Ended", "Started", "Msgs", "most messages first", "Size"} {
+		if !m.sortMenu || !strings.Contains(s, want) {
+			t.Fatalf("menu lacks %q:\n%s", want, s)
+		}
+	}
+	// Moving picks nothing until Enter.
+	m = press(t, m, "j", "j")
+	if sorts[m.sortIdx].name != "Ended" || m.sortSel != 2 {
+		t.Fatalf("j j: sort %s, highlight %d", sorts[m.sortIdx].name, m.sortSel)
+	}
+	m = press(t, m, "enter")
+	if m.sortMenu || sorts[m.sortIdx].name != "Msgs" || m.current().s.MessageCount != 50 {
+		t.Fatalf("enter: menu %v sort %s first %+v", m.sortMenu, sorts[m.sortIdx].name, m.current().s)
+	}
+	// A number applies its order; Esc leaves things as they were.
+	if m = press(t, m, "s", "4"); sorts[m.sortIdx].name != "Size" || m.sortMenu {
+		t.Fatalf("4: sort %s", sorts[m.sortIdx].name)
+	}
+	if m = press(t, m, "s", "j", "esc"); sorts[m.sortIdx].name != "Size" || m.sortMenu {
+		t.Fatalf("esc: sort %s", sorts[m.sortIdx].name)
+	}
+	// A click on an order applies it.
+	m = press(t, m, "s")
+	r := m.sortMenuRect()
+	m = update(t, m, tea.MouseClickMsg{X: r.x + 4, Y: r.y + 2, Button: tea.MouseLeft})
+	if sorts[m.sortIdx].name != "Started" || m.sortMenu {
+		t.Fatalf("click: sort %s", sorts[m.sortIdx].name)
+	}
+	// Reading a frame, s does nothing.
+	m = press(t, m, "space")
+	if m = press(t, m, "s"); m.sortMenu {
+		t.Fatal("s should not open the menu while reading")
+	}
+	m = press(t, m, "tab")
+	if m = press(t, m, "s"); !m.sortMenu {
+		t.Fatal("back on the list, s opens the menu")
 	}
 }
 

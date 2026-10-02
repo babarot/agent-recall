@@ -21,7 +21,7 @@ var helpGroups = []helpGroup{
 		{"space", "read the conversation over the pane"},
 		{"y  Y", "copy the session ID, the resume command"},
 		{"/", "filter (see below)"},
-		{"s", "sort by ended, started, messages, size"},
+		{"s", "choose the sort order"},
 		{".", "this folder or all folders"},
 		{"← h", "open the folder list, then move into it"},
 		{"→ l", "close the folder list"},

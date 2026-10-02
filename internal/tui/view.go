@@ -88,6 +88,9 @@ func (m Model) render() string {
 	if m.helpOpen {
 		return m.withHelp(m.renderScreen())
 	}
+	if m.sortMenu {
+		return m.withSortMenu(m.renderScreen())
+	}
 	return m.renderScreen()
 }
 
