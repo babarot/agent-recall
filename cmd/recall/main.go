@@ -484,7 +484,7 @@ func runTUI(o *options) error {
 		return err
 	}
 
-	final, err := tea.NewProgram(tui.New(sessions, d, cfg.TUI)).Run()
+	final, err := tea.NewProgram(tui.New(sessions, d, cfg.TUI).RememberIn(config.StatePath())).Run()
 	if err != nil {
 		return err
 	}

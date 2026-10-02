@@ -15,10 +15,9 @@ import (
 const (
 	tableChrome   = 4  // rule, column headers, rule, the row count line
 	footerLines   = 2  // status line, key help
-	detailContent = 7  // lines inside the bottom detail pane
-	detailFrame   = 2  // its top and bottom border
-	detailWidth   = 52 // the pane on the right, border included
+	detailWidth   = 56 // the pane on the right
 	minRightWidth = 100
+	minListRows   = 3 // the pane below never squeezes the list further
 	previewChrome = 5 // header bar, rule, folder line, status, help
 )
 
@@ -46,22 +45,35 @@ func (m Model) listWidth() int {
 
 func (m Model) filterShown() bool { return m.mode == modeFilter || m.filter.Value() != "" }
 
+// chromeLines is everything but the list rows and the pane below.
+func (m Model) chromeLines() int {
+	n := 1 + tableChrome + footerLines
+	if m.filterShown() {
+		n++
+	}
+	return n
+}
+
+// paneHeight is the height of the detail pane below the list: the chosen
+// height, cut so the list keeps a few rows.
+func (m Model) paneHeight() int {
+	if !m.detailOpen || m.detailRight() {
+		return 0
+	}
+	return max(0, min(m.detailH, m.height-m.chromeLines()-minListRows))
+}
+
 // listHeight is the number of session rows that fit.
 func (m Model) listHeight() int {
-	h := m.height - 1 - tableChrome - footerLines
-	if m.filterShown() {
-		h--
-	}
-	if m.detailOpen && !m.detailRight() {
-		h -= detailContent + detailFrame
-	}
-	return max(1, h)
+	return max(1, m.height-m.chromeLines()-m.paneHeight())
 }
 
 func (m Model) View() tea.View {
 	v := tea.NewView(m.render())
 	v.AltScreen = true
 	v.WindowTitle = "recall"
+	// Mouse: drag the detail pane's top edge to resize it, wheel to scroll.
+	v.MouseMode = tea.MouseModeCellMotion
 	return v
 }
 
@@ -80,11 +92,11 @@ func (m Model) render() string {
 	table := m.renderTable()
 	switch {
 	case m.detailRight():
-		pane := m.renderDetail(detailWidth, len(table)-detailFrame)
-		lines = append(lines, lipgloss.JoinHorizontal(lipgloss.Top, strings.Join(table, "\n"), pane))
-	case m.detailOpen:
+		pane := m.renderDetailBeside(detailWidth-1, len(table))
+		lines = append(lines, joinColumns(strings.Join(table, "\n"), pane, m.listWidth(), " "))
+	case m.paneHeight() > 0:
 		lines = append(lines, table...)
-		lines = append(lines, m.renderDetail(m.width, detailContent))
+		lines = append(lines, m.renderDetailBelow(m.width, m.paneHeight()))
 	default:
 		lines = append(lines, table...)
 	}
@@ -153,57 +165,6 @@ func wrap(s string, w int) []string {
 	return strings.Split(lipgloss.NewStyle().Width(w).Render(s), "\n")
 }
 
-// renderDetail draws the selected session in a rounded pane width cells wide
-// with exactly content lines inside.
-func (m Model) renderDetail(width, content int) string {
-	inner := max(10, width-m.st.border.GetHorizontalFrameSize())
-	var lines []string
-	if r := m.current(); r != nil {
-		lines = append(lines, m.st.title.Render(ansi.Truncate(r.title, inner, ellipsis)))
-
-		// The first prompt gets what the fixed lines below leave.
-		promptLines := max(1, content-4)
-		if first := cleanPrompt(r.s.FirstPrompt); first != r.title {
-			wrapped := wrap(first, inner)
-			if len(wrapped) > promptLines {
-				wrapped = wrapped[:promptLines]
-				wrapped[promptLines-1] = ansi.Truncate(wrapped[promptLines-1]+ellipsis, inner, ellipsis)
-			}
-			for _, l := range wrapped {
-				lines = append(lines, m.st.strong.Render(l))
-			}
-		}
-		for len(lines) < 1+promptLines {
-			lines = append(lines, "")
-		}
-
-		name, badge := m.st.strong, m.st.worktree
-		if r.gone {
-			name, badge = m.st.gone, m.st.gone
-		}
-		folder := m.st.subtle.Render("Folder: ") + name.Render(r.folder)
-		if r.worktree != "" {
-			folder += " " + badge.Render(worktreeM+" "+r.worktree)
-		}
-		path := tildePath(r.s.ProjectPath, m.home)
-		if r.gone {
-			path += ", removed"
-		}
-		folder += m.st.muted.Render("  (" + path + ")")
-		if r.mainRoot != "" {
-			folder += m.st.muted.Render("  worktree of " + tildePath(r.mainRoot, m.home))
-		}
-		lines = append(lines, ansi.Truncate(folder, inner, ellipsis))
-
-		meta := fmt.Sprintf("Branch: %s  Msgs: %d  Size: %s  Started: %s  Ended: %s", r.s.GitBranch, r.s.MessageCount,
-			formatSize(r.s.FileSize), r.s.StartedAt.Local().Format("2006-01-02 15:04"), r.s.EndedAt.Local().Format("2006-01-02 15:04"))
-		lines = append(lines, ansi.Truncate(m.st.muted.Render(meta), inner, ellipsis))
-		lines = append(lines, m.st.muted.Render("ID: ")+m.st.id.Render(r.s.ID))
-	}
-	lines = fit(lines, content)
-	return m.st.border.Width(width).Render(strings.Join(lines, "\n"))
-}
-
 // fit pads or cuts lines to exactly n.
 func fit(lines []string, n int) []string {
 	if len(lines) > n {
@@ -238,7 +199,7 @@ func (m Model) renderHelp() string {
 		pairs = [][2]string{{"space", "back"}, {"↑↓", "scroll"}, {"enter", "resume"}, {"y", "copy id"}, {"Y", "copy cmd"}}
 	default:
 		pairs = [][2]string{{"enter", "resume"}, {"space", "preview"}, {"y", "copy id"}, {"Y", "copy cmd"},
-			{"tab", "detail"}, {"/", "filter"}, {"s", "sort"}, {"q", "quit"}}
+			{"tab", "detail"}, {"+/-", "resize"}, {"/", "filter"}, {"s", "sort"}, {"q", "quit"}}
 	}
 	parts := make([]string, len(pairs))
 	for i, p := range pairs {

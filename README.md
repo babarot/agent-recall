@@ -139,9 +139,12 @@ recall version
 | `/` | Filter by title, folder, branch or ID; `Esc` clears it |
 | `s` | Sort by ended, started, message count or size |
 | `Tab` | Show or hide the detail pane |
+| `+` `-` | Make the detail pane taller or shorter (or drag its top edge with the mouse) |
 | `q` | Quit |
 
 The title is the session's `/rename` name, or else the title Claude Code generated, or else its first prompt.
+
+The detail pane has three frames: Conversation (the first request and the latest messages, always including the last thing you said), What was done (activity over the session, the tools used most, edited files, recent commands) and Details (times, message counts, size, branch, version, the full session ID, folder and path). A taller pane shows more of the conversation, files and commands. The height you pick is remembered in `~/.local/state/claude-recall/state.json`.
 
 `~/.config/claude-recall/config.toml` (or `$XDG_CONFIG_HOME/claude-recall/config.toml`):
 
@@ -151,6 +154,8 @@ The title is the session's `/rename` name, or else the title Claude Code generat
 # on the right when the terminal is at least detail_auto_width columns wide.
 detail_position = "bottom"
 detail_auto_width = 160
+# Initial height of the detail pane below the list, in lines (at least 10).
+detail_height = 16
 # Color scheme: "auto" (default) picks catppuccin-mocha on a dark terminal and
 # catppuccin-latte on a light one. Also: tokyo-night, dracula, nord,
 # gruvbox-dark, and ansi (the terminal's own 16 colors).

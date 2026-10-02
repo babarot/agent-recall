@@ -28,6 +28,21 @@ func (f *fakePreview) SessionPreview(id string, head, tail int) (db.Preview, err
 	}, nil
 }
 
+func (f *fakePreview) SessionDetail(id string) (*db.Detail, error) {
+	first := db.Message{Role: "user", Content: "first question about " + id, Timestamp: now}
+	return &db.Detail{
+		You: 3, Claude: 4, Tools: 9,
+		TopTools: []db.Count{{Name: "Bash", N: 6}, {Name: "Edit", N: 3}},
+		Files:    []db.Count{{Name: "/repo/a.go", N: 2}, {Name: "/repo/b.go", N: 1}}, FileCount: 2,
+		Commands: []string{"go test ./...", "git status"},
+		Activity: make([]int, 24), Version: "2.1.287",
+		First: &first,
+		Tail: []db.Message{{Role: "user", Content: "please also add docs", Timestamp: now},
+			{Role: "assistant", Content: "done, docs added", Timestamp: now}},
+		Hidden: 5,
+	}, nil
+}
+
 func testSessions(t *testing.T) []db.Session {
 	t.Helper()
 	dir := t.TempDir()
@@ -315,5 +330,77 @@ func TestEveryThemeRenders(t *testing.T) {
 		if !strings.Contains(screen(m), "sessions") {
 			t.Errorf("%s: nothing rendered", name)
 		}
+	}
+}
+
+func TestDetailPaneShowsThreeFrames(t *testing.T) {
+	m, _ := newTestModel(t, config.Default().TUI, 140, 40)
+	s := screen(m)
+	for _, want := range []string{"Conversation", "What was done", "Details", "please also add docs", "done, docs added",
+		"Bash 6", "a.go", "$ go test ./...", "2.1.287", "bbbbbbbb-2222"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("pane lacks %q:\n%s", want, s)
+		}
+	}
+}
+
+func TestResizeDetailPane(t *testing.T) {
+	m, _ := newTestModel(t, config.Default().TUI, 120, 40)
+	h := m.paneHeight()
+	m = press(t, m, "+")
+	if m.paneHeight() != h+2 {
+		t.Fatalf("+ gave %d, want %d", m.paneHeight(), h+2)
+	}
+	for range 20 {
+		m = press(t, m, "-")
+	}
+	if m.paneHeight() != config.MinDetailHeight {
+		t.Fatalf("shrunk to %d, want the minimum %d", m.paneHeight(), config.MinDetailHeight)
+	}
+	for range 40 {
+		m = press(t, m, "+")
+	}
+	if m.listHeight() < minListRows {
+		t.Fatalf("the list kept %d rows", m.listHeight())
+	}
+}
+
+func TestDragDetailPane(t *testing.T) {
+	m, _ := newTestModel(t, config.Default().TUI, 120, 40)
+	top := m.paneTop()
+	m = update(t, m, tea.MouseClickMsg{X: 10, Y: top, Button: tea.MouseLeft})
+	m = update(t, m, tea.MouseMotionMsg{X: 10, Y: top - 5, Button: tea.MouseLeft})
+	m = update(t, m, tea.MouseReleaseMsg{X: 10, Y: top - 5, Button: tea.MouseLeft})
+	if m.paneTop() != top-5 || m.dragging {
+		t.Fatalf("pane top %d, want %d (dragging %v)", m.paneTop(), top-5, m.dragging)
+	}
+}
+
+func TestDetailHeightIsRemembered(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	m, _ := newTestModel(t, config.Default().TUI, 120, 40)
+	m = m.RememberIn(path)
+	next, cmd := m.Update(tea.KeyPressMsg{Code: '+', Text: "+"})
+	m = next.(Model)
+	if cmd == nil {
+		t.Fatal("resizing should save the state")
+	}
+	cmd()
+	if got := config.LoadState(path).DetailHeight; got != m.detailH {
+		t.Fatalf("saved %d, want %d", got, m.detailH)
+	}
+	again := New(testSessions(t), &fakePreview{}, config.Default().TUI).RememberIn(path)
+	if again.detailH != m.detailH {
+		t.Fatalf("restored %d, want %d", again.detailH, m.detailH)
+	}
+}
+
+func TestAllocate(t *testing.T) {
+	got := allocate(10, block{3, 8}, block{1, 4}, block{0, 2})
+	if got[0]+got[1]+got[2] != 10 || got[0] < 3 || got[1] < 1 {
+		t.Fatalf("allocate %v", got)
+	}
+	if got := allocate(2, block{3, 8}, block{1, 4}); got[0] != 2 || got[1] != 0 {
+		t.Fatalf("short allocate %v", got)
 	}
 }

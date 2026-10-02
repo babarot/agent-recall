@@ -28,9 +28,10 @@ type Resume struct {
 	SessionID string
 }
 
-// PreviewSource loads the conversation shown by the preview.
-type PreviewSource interface {
+// Source loads what the preview and the detail pane show about a session.
+type Source interface {
 	SessionPreview(sessionID string, head, tail int) (db.Preview, error)
+	SessionDetail(sessionID string) (*db.Detail, error)
 }
 
 type mode int
@@ -72,7 +73,7 @@ const (
 // Model is the Bubble Tea model of the session list.
 type Model struct {
 	cfg     config.TUI
-	source  PreviewSource
+	source  Source
 	home    string
 	now     func() time.Time
 	st      styles
@@ -90,6 +91,14 @@ type Model struct {
 	preview    viewport.Model
 	previewFor string // session ID the preview shows
 
+	// details caches the detail pane's data per session ID.
+	details map[string]*db.Detail
+	// detailH is the height of the detail pane below the list; statePath
+	// is where a changed height is remembered.
+	detailH   int
+	statePath string
+	dragging  bool
+
 	toast     string
 	toastKind toastKind
 	toastID   int
@@ -99,7 +108,7 @@ type Model struct {
 }
 
 // New builds the model from the archived sessions.
-func New(sessions []db.Session, source PreviewSource, cfg config.TUI) Model {
+func New(sessions []db.Session, source Source, cfg config.TUI) Model {
 	home, _ := os.UserHomeDir()
 	resolver := worktree.NewResolver()
 	rows := make([]row, len(sessions))
@@ -121,9 +130,67 @@ func New(sessions []db.Session, source PreviewSource, cfg config.TUI) Model {
 		detailOpen: true,
 		filter:     fi,
 		preview:    viewport.New(),
+		details:    map[string]*db.Detail{},
+		detailH:    max(config.MinDetailHeight, cfg.DetailHeight),
 	}
 	m.refresh()
 	return m
+}
+
+// RememberIn makes the model keep its state (the detail pane height) in the
+// state file at path, starting from what is saved there.
+func (m Model) RememberIn(path string) Model {
+	m.statePath = path
+	if st := config.LoadState(path); st.DetailHeight >= config.MinDetailHeight {
+		m.detailH = st.DetailHeight
+	}
+	return m
+}
+
+func (m *Model) saveState() tea.Cmd {
+	if m.statePath == "" {
+		return nil
+	}
+	path, st := m.statePath, config.State{DetailHeight: m.detailH}
+	return func() tea.Msg {
+		_ = config.SaveState(path, st)
+		return nil
+	}
+}
+
+// maxDetailH is the tallest pane that leaves the list a few rows.
+func (m Model) maxDetailH() int {
+	return max(config.MinDetailHeight, m.height-m.chromeLines()-minListRows)
+}
+
+func (m *Model) resizeDetail(h int) {
+	m.detailH = max(config.MinDetailHeight, min(h, m.maxDetailH()))
+	m.clamp()
+}
+
+// paneTop is the screen row of the detail pane's top edge, or -1.
+func (m Model) paneTop() int {
+	if m.paneHeight() == 0 {
+		return -1
+	}
+	return m.height - footerLines - m.paneHeight()
+}
+
+// loadDetail fetches the detail pane's data for the selected session the
+// first time it is shown.
+func (m *Model) loadDetail() {
+	r := m.current()
+	if !m.detailOpen || r == nil {
+		return
+	}
+	if _, ok := m.details[r.s.ID]; ok {
+		return
+	}
+	d, err := m.source.SessionDetail(r.s.ID)
+	if err != nil {
+		d = nil
+	}
+	m.details[r.s.ID] = d
 }
 
 func (m Model) Init() tea.Cmd { return tea.RequestBackgroundColor }
@@ -255,7 +322,44 @@ func (m *Model) action(key string) (tea.Cmd, bool) {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.update(msg)
+	if nm, ok := next.(Model); ok {
+		nm.loadDetail()
+		return nm, cmd
+	}
+	return next, cmd
+}
+
+func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.MouseClickMsg:
+		if msg.Button == tea.MouseLeft && m.mode == modeList && msg.Y == m.paneTop() {
+			m.dragging = true
+		}
+		return m, nil
+	case tea.MouseMotionMsg:
+		if m.dragging {
+			m.resizeDetail(m.height - footerLines - msg.Y)
+		}
+		return m, nil
+	case tea.MouseReleaseMsg:
+		if m.dragging {
+			m.dragging = false
+			return m, m.saveState()
+		}
+		return m, nil
+	case tea.MouseWheelMsg:
+		switch {
+		case m.mode == modePreview:
+			var cmd tea.Cmd
+			m.preview, cmd = m.preview.Update(msg)
+			return m, cmd
+		case msg.Button == tea.MouseWheelUp:
+			m.move(-1)
+		case msg.Button == tea.MouseWheelDown:
+			m.move(1)
+		}
+		return m, nil
 	case tea.BackgroundColorMsg:
 		m.st = newStyles(theme.Get(m.cfg.Theme, msg.IsDark()))
 		return m, nil
@@ -306,6 +410,12 @@ func (m Model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "tab":
 		m.detailOpen = !m.detailOpen
 		m.clamp()
+	case "+", "=":
+		m.resizeDetail(m.detailH + 2)
+		return m, m.saveState()
+	case "-":
+		m.resizeDetail(m.detailH - 2)
+		return m, m.saveState()
 	case "s":
 		m.sortIdx = (m.sortIdx + 1) % len(sorts)
 		m.refresh()
