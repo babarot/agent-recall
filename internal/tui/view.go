@@ -92,11 +92,10 @@ func (m Model) render() string {
 	table := m.renderTable()
 	switch {
 	case m.detailRight():
-		pane := m.renderDetailBeside(detailWidth-1, len(table))
-		lines = append(lines, joinColumns(strings.Join(table, "\n"), pane, m.listWidth(), " "))
+		lines = append(lines, joinColumns(strings.Join(table, "\n"), m.renderPane(), m.listWidth(), " "))
 	case m.paneHeight() > 0:
 		lines = append(lines, table...)
-		lines = append(lines, m.renderDetailBelow(m.width, m.paneHeight()))
+		lines = append(lines, m.renderPane())
 	default:
 		lines = append(lines, table...)
 	}
@@ -197,6 +196,13 @@ func (m Model) renderHelp() string {
 		pairs = [][2]string{{"enter", "apply"}, {"esc", "clear"}, {"↑↓", "move"}}
 	case modePreview:
 		pairs = [][2]string{{"space", "back"}, {"↑↓", "scroll"}, {"enter", "resume"}, {"y", "copy id"}, {"Y", "copy cmd"}}
+	case modeList:
+		if m.focus != focusList {
+			pairs = [][2]string{{"↑↓", "scroll " + strings.ToLower(frameTitles[m.focus])}, {"[ ]", "next frame"},
+				{"esc", "back to list"}, {"enter", "resume"}, {"y", "copy id"}, {"q", "quit"}}
+			break
+		}
+		fallthrough
 	default:
 		pairs = [][2]string{{"enter", "resume"}, {"space", "preview"}, {"y", "copy id"}, {"Y", "copy cmd"},
 			{"tab", "detail"}, {"+/-", "resize"}, {"/", "filter"}, {"s", "sort"}, {"q", "quit"}}

@@ -39,10 +39,11 @@ type Count struct {
 }
 
 const (
+	// Enough for the frames to scroll through; a session rarely has more.
 	detailTools    = 6
-	detailFiles    = 10
-	detailCommands = 5
-	detailTail     = 16
+	detailFiles    = 200
+	detailCommands = 50
+	detailTail     = 200
 	detailBuckets  = 24
 )
 

@@ -139,12 +139,15 @@ recall version
 | `/` | Filter by title, folder, branch or ID; `Esc` clears it |
 | `s` | Sort by ended, started, message count or size |
 | `Tab` | Show or hide the detail pane |
-| `+` `-` | Make the detail pane taller or shorter (or drag its top edge with the mouse) |
+| `+` `-` | Make the detail pane taller or shorter |
+| `]` `[` | Move focus to the next or previous frame of the detail pane; `↑` `↓`, `j` `k`, PgUp, PgDn, `g` and `G` then scroll it, `Esc` returns to the list |
 | `q` | Quit |
 
 The title is the session's `/rename` name, or else the title Claude Code generated, or else its first prompt.
 
 The detail pane has three frames: Conversation (the first request and the latest messages, always including the last thing you said), What was done (activity over the session, the tools used most, edited files, recent commands) and Details (times, message counts, size, branch, version, the full session ID, folder and path). A taller pane shows more of the conversation, files and commands. The height you pick is remembered in `~/.local/state/claude-recall/state.json`.
+
+With the mouse: click a session to select it, click a frame to focus it, scroll the wheel over the list or over a frame, and drag the pane's top edge (or the row count line just above it) to resize the pane. While the TUI has the mouse, most terminals still select text when you hold Shift (Option in iTerm2) while dragging.
 
 `~/.config/claude-recall/config.toml` (or `$XDG_CONFIG_HOME/claude-recall/config.toml`):
 

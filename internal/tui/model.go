@@ -99,6 +99,12 @@ type Model struct {
 	statePath string
 	dragging  bool
 
+	// focus is the session list or a frame of the detail pane; scroll is
+	// each frame's offset, reset when another session is selected.
+	focus     focus
+	scroll    [numFocus]int
+	scrollFor string
+
 	toast     string
 	toastKind toastKind
 	toastID   int
@@ -181,7 +187,11 @@ func (m Model) paneTop() int {
 func (m *Model) loadDetail() {
 	r := m.current()
 	if !m.detailOpen || r == nil {
+		m.focus = focusList
 		return
+	}
+	if r.s.ID != m.scrollFor {
+		m.scroll, m.scrollFor = [numFocus]int{}, r.s.ID
 	}
 	if _, ok := m.details[r.s.ID]; ok {
 		return
@@ -333,8 +343,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.MouseClickMsg:
-		if msg.Button == tea.MouseLeft && m.mode == modeList && msg.Y == m.paneTop() {
-			m.dragging = true
+		if msg.Button == tea.MouseLeft && m.mode == modeList {
+			m.click(msg.X, msg.Y)
 		}
 		return m, nil
 	case tea.MouseMotionMsg:
@@ -349,15 +359,19 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.MouseWheelMsg:
-		switch {
-		case m.mode == modePreview:
+		if m.mode == modePreview {
 			var cmd tea.Cmd
 			m.preview, cmd = m.preview.Update(msg)
 			return m, cmd
-		case msg.Button == tea.MouseWheelUp:
-			m.move(-1)
-		case msg.Button == tea.MouseWheelDown:
-			m.move(1)
+		}
+		step := 1
+		if msg.Button == tea.MouseWheelUp {
+			step = -1
+		}
+		if f := m.frameAt(msg.X, msg.Y); f != focusList {
+			m.scrollFrame(f, 3*step)
+		} else {
+			m.move(step)
 		}
 		return m, nil
 	case tea.BackgroundColorMsg:
@@ -393,6 +407,46 @@ func (m Model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	switch key {
+	case "]":
+		m.focus = (m.focus + 1) % numFocus
+		if !m.detailOpen {
+			m.focus = focusList
+		}
+		return m, nil
+	case "[":
+		m.focus = (m.focus + numFocus - 1) % numFocus
+		if !m.detailOpen {
+			m.focus = focusList
+		}
+		return m, nil
+	}
+	if m.focus != focusList {
+		if rects, ok := m.paneRects(); ok {
+			page := max(1, rects[m.focus].h-4)
+			switch key {
+			case "esc":
+				m.focus = focusList
+			case "down", "j", "ctrl+n":
+				m.scrollFrame(m.focus, 1)
+			case "up", "k", "ctrl+p":
+				m.scrollFrame(m.focus, -1)
+			case "pgdown", "ctrl+f", "ctrl+d":
+				m.scrollFrame(m.focus, page)
+			case "pgup", "ctrl+b", "ctrl+u":
+				m.scrollFrame(m.focus, -page)
+			case "home", "g":
+				m.scrollFrame(m.focus, -1<<20)
+			case "end", "G":
+				m.scrollFrame(m.focus, 1<<20)
+			default:
+				goto list
+			}
+			return m, nil
+		}
+		m.focus = focusList
+	}
+list:
+	switch key {
 	case "q", "ctrl+c":
 		return m, tea.Quit
 	case "down", "j", "ctrl+n":
@@ -409,6 +463,7 @@ func (m Model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.move(len(m.visible))
 	case "tab":
 		m.detailOpen = !m.detailOpen
+		m.focus = focusList
 		m.clamp()
 	case "+", "=":
 		m.resizeDetail(m.detailH + 2)
@@ -507,4 +562,44 @@ func (m *Model) openPreview() tea.Cmd {
 func (m *Model) sizePreview() {
 	m.preview.SetWidth(m.width)
 	m.preview.SetHeight(max(1, m.height-previewChrome))
+}
+
+// listTop is the screen row of the first session row.
+func (m Model) listTop() int {
+	top := 1 + 3 // header bar, rule, column headers, rule
+	if m.filterShown() {
+		top++
+	}
+	return top
+}
+
+// frameAt returns the frame under a screen cell, or focusList.
+func (m Model) frameAt(x, y int) focus {
+	if rects, ok := m.paneRects(); ok {
+		for f := focusConv; f < numFocus; f++ {
+			if rects[f].contains(x, y) {
+				return f
+			}
+		}
+	}
+	return focusList
+}
+
+// click handles a left click in the list: the pane's top edge (or the row
+// count line just above it) starts a resize, a frame takes focus, a session
+// row is selected.
+func (m *Model) click(x, y int) {
+	if top := m.paneTop(); top >= 0 && (y == top || y == top-1) {
+		m.dragging = true
+		return
+	}
+	if f := m.frameAt(x, y); f != focusList {
+		m.focus = f
+		return
+	}
+	if i := y - m.listTop(); x < m.listWidth() && i >= 0 && i < m.listHeight() && m.offset+i < len(m.visible) {
+		m.cursor = m.offset + i
+		m.focus = focusList
+		m.clamp()
+	}
 }

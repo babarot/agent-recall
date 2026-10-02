@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,11 +37,21 @@ func (f *fakePreview) SessionDetail(id string) (*db.Detail, error) {
 		Files:    []db.Count{{Name: "/repo/a.go", N: 2}, {Name: "/repo/b.go", N: 1}}, FileCount: 2,
 		Commands: []string{"go test ./...", "git status"},
 		Activity: make([]int, 24), Version: "2.1.287",
-		First: &first,
-		Tail: []db.Message{{Role: "user", Content: "please also add docs", Timestamp: now},
-			{Role: "assistant", Content: "done, docs added", Timestamp: now}},
+		First:  &first,
+		Tail:   longTail(),
 		Hidden: 5,
 	}, nil
+}
+
+// longTail is more conversation than any frame shows at once, ending with
+// the two messages the tests look for.
+func longTail() []db.Message {
+	var out []db.Message
+	for i := range 40 {
+		out = append(out, db.Message{Role: "assistant", Content: fmt.Sprintf("older message %02d", i), Timestamp: now})
+	}
+	return append(out, db.Message{Role: "user", Content: "please also add docs", Timestamp: now},
+		db.Message{Role: "assistant", Content: "done, docs added", Timestamp: now})
 }
 
 func testSessions(t *testing.T) []db.Session {
@@ -395,12 +406,124 @@ func TestDetailHeightIsRemembered(t *testing.T) {
 	}
 }
 
-func TestAllocate(t *testing.T) {
-	got := allocate(10, block{3, 8}, block{1, 4}, block{0, 2})
-	if got[0]+got[1]+got[2] != 10 || got[0] < 3 || got[1] < 1 {
-		t.Fatalf("allocate %v", got)
+func TestSplit(t *testing.T) {
+	if a, b := split(20, 8, 6); a != 14 || b != 6 {
+		t.Errorf("roomy split %d %d", a, b)
 	}
-	if got := allocate(2, block{3, 8}, block{1, 4}); got[0] != 2 || got[1] != 0 {
-		t.Fatalf("short allocate %v", got)
+	if a, b := split(16, 30, 30); a+b != 16 || b < minFrame || a < b {
+		t.Errorf("tight split %d %d", a, b)
+	}
+}
+
+func TestClickSelectsRow(t *testing.T) {
+	m, _ := newTestModel(t, config.Default().TUI, 120, 40)
+	m = update(t, m, tea.MouseClickMsg{X: 20, Y: m.listTop() + 2, Button: tea.MouseLeft})
+	if m.cursor != 2 || m.focus != focusList {
+		t.Fatalf("cursor %d focus %v", m.cursor, m.focus)
+	}
+}
+
+func TestClickFocusesFrameAndWheelScrollsIt(t *testing.T) {
+	m, _ := newTestModel(t, config.Default().TUI, 120, 40)
+	rects, _ := m.paneRects()
+	conv := rects[focusConv]
+	m = update(t, m, tea.MouseClickMsg{X: conv.x + 3, Y: conv.y + 2, Button: tea.MouseLeft})
+	if m.focus != focusConv {
+		t.Fatalf("focus %v", m.focus)
+	}
+	if !strings.Contains(screen(m), "done, docs added") {
+		t.Fatal("conversation should start at its newest message")
+	}
+	m = update(t, m, tea.MouseWheelMsg{X: conv.x + 3, Y: conv.y + 2, Button: tea.MouseWheelUp})
+	if m.scroll[focusConv] != 3 {
+		t.Fatalf("wheel up scrolled to %d", m.scroll[focusConv])
+	}
+	m = press(t, m, "g")
+	if !strings.Contains(screen(m), "older message 00") {
+		t.Fatalf("g should show the oldest messages:\n%s", screen(m))
+	}
+	m = press(t, m, "G")
+	if m.scroll[focusConv] != 0 {
+		t.Fatalf("G should return to the newest, offset %d", m.scroll[focusConv])
+	}
+	m = press(t, m, "esc")
+	if m.focus != focusList {
+		t.Fatalf("esc should return to the list, focus %v", m.focus)
+	}
+}
+
+func TestWheelOverListMovesSelection(t *testing.T) {
+	m, _ := newTestModel(t, config.Default().TUI, 120, 40)
+	m = update(t, m, tea.MouseWheelMsg{X: 10, Y: m.listTop(), Button: tea.MouseWheelDown})
+	if m.cursor != 1 {
+		t.Fatalf("cursor %d", m.cursor)
+	}
+}
+
+func TestBracketsCycleFocusAndJKScroll(t *testing.T) {
+	m, _ := newTestModel(t, config.Default().TUI, 120, 40)
+	m = press(t, m, "]", "]")
+	if m.focus != focusDone {
+		t.Fatalf("focus %v", m.focus)
+	}
+	m = press(t, m, "[", "[", "[")
+	if m.focus != focusDetails {
+		t.Fatalf("focus %v", m.focus)
+	}
+	m = press(t, m, "]") // back to the list
+	before := m.cursor
+	m = press(t, m, "]", "k", "k")
+	if m.focus != focusConv || m.cursor != before || m.scroll[focusConv] != 2 {
+		t.Fatalf("focus %v cursor %d scroll %d", m.focus, m.cursor, m.scroll[focusConv])
+	}
+}
+
+func TestScrollResetsOnNewSelection(t *testing.T) {
+	m, _ := newTestModel(t, config.Default().TUI, 120, 40)
+	m = press(t, m, "]", "k", "esc", "j")
+	if m.scroll[focusConv] != 0 {
+		t.Fatalf("scroll kept across sessions: %d", m.scroll[focusConv])
+	}
+}
+
+func TestDragFromRowCountLine(t *testing.T) {
+	m, _ := newTestModel(t, config.Default().TUI, 120, 40)
+	top := m.paneTop()
+	m = update(t, m, tea.MouseClickMsg{X: 5, Y: top - 1, Button: tea.MouseLeft})
+	m = update(t, m, tea.MouseMotionMsg{X: 5, Y: top - 4, Button: tea.MouseLeft})
+	m = update(t, m, tea.MouseReleaseMsg{X: 5, Y: top - 4, Button: tea.MouseLeft})
+	if m.paneTop() != top-4 {
+		t.Fatalf("pane top %d, want %d", m.paneTop(), top-4)
+	}
+}
+
+func TestRightLayoutFramesAndClicks(t *testing.T) {
+	cfg := config.Default().TUI
+	cfg.DetailPosition = config.DetailRight
+	m, _ := newTestModel(t, cfg, 170, 40)
+	rects, ok := m.paneRects()
+	if !ok || rects[focusDetails].x < m.listWidth() {
+		t.Fatalf("rects %+v", rects)
+	}
+	m = update(t, m, tea.MouseClickMsg{X: rects[focusDone].x + 2, Y: rects[focusDone].y + 1, Button: tea.MouseLeft})
+	if m.focus != focusDone {
+		t.Fatalf("focus %v", m.focus)
+	}
+}
+
+func TestConversationKeepsLastUserMessage(t *testing.T) {
+	src := &fakePreview{}
+	m := New(testSessions(t), src, config.Default().TUI)
+	m.now = func() time.Time { return now }
+	m = update(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	r := m.current()
+	d := m.details[r.s.ID]
+	// Claude spoke last, many times: the user's last message is far above.
+	for i := range 10 {
+		d.Tail = append(d.Tail, db.Message{Role: "assistant", Content: fmt.Sprintf("later reply %d", i), Timestamp: now})
+	}
+	s := screen(m)
+	if !strings.Contains(s, "please also add docs") || !strings.Contains(s, "later reply 9") {
+		t.Fatalf("pane should keep the last user message and the newest reply:\n%s", s)
 	}
 }

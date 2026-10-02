@@ -14,56 +14,161 @@ import (
 // where it left off), What was done (activity, tools, edited files,
 // commands) and Details (times, counts, IDs). Below the list, the first two
 // share the left column and Details runs down the right; beside the list,
-// all three stack.
+// all three stack. Each frame scrolls on its own, with the mouse wheel over
+// it or the keys once it has focus.
+
+// focus is what keys and the wheel act on: the session list or a frame.
+type focus int
+
+const (
+	focusList focus = iota
+	focusConv
+	focusDone
+	focusDetails
+	numFocus
+)
+
+var frameTitles = [numFocus]string{"", "Conversation", "What was done", "Details"}
 
 const (
 	// The Details frame below the list, border included: wide enough for a
 	// full session ID after its label.
 	detailsWidth = 4 + labelWidth + 36
-	labelWidth   = 9  // "Commands " and friends
+	labelWidth   = 9 // "Commands " and friends
+	minFrame     = 5 // smallest frame: borders plus three lines
 	sparkChars   = "▁▂▃▄▅▆▇█"
 )
 
+// rect is a frame's place on the screen.
+type rect struct{ x, y, w, h int }
+
+func (r rect) contains(x, y int) bool { return x >= r.x && x < r.x+r.w && y >= r.y && y < r.y+r.h }
+
+// paneRects returns where the three frames are drawn, indexed by focus, or
+// false when the pane is hidden. Drawing and mouse hit tests both use it.
+func (m Model) paneRects() ([numFocus]rect, bool) {
+	var out [numFocus]rect
+	r := m.current()
+	if r == nil || !m.detailOpen {
+		return out, false
+	}
+	content := m.frameContent(r)
+	need := func(f focus) int { return len(content[f].pinned) + len(content[f].scroll) + 2 }
+
+	if m.detailRight() {
+		x, w := m.listWidth()+1, detailWidth-1
+		top := 1
+		if m.filterShown() {
+			top++
+		}
+		h := m.listHeight() + tableChrome
+		detailsH := min(need(focusDetails), max(minFrame, h/3))
+		convH, doneH := split(h-detailsH, need(focusConv), need(focusDone))
+		out[focusConv] = rect{x, top, w, convH}
+		out[focusDone] = rect{x, top + convH, w, doneH}
+		out[focusDetails] = rect{x, top + convH + doneH, w, detailsH}
+		return out, true
+	}
+
+	h := m.paneHeight()
+	if h == 0 {
+		return out, false
+	}
+	top := m.paneTop()
+	rightW := max(30, min(detailsWidth, m.width-70))
+	leftW := m.width - rightW - 1
+	convH, doneH := split(h, need(focusConv), need(focusDone))
+	out[focusConv] = rect{0, top, leftW, convH}
+	out[focusDone] = rect{0, top + convH, leftW, doneH}
+	out[focusDetails] = rect{leftW + 1, top, rightW, h}
+	return out, true
+}
+
+// split shares h lines between two stacked frames that would like a and b
+// lines: each gets what it needs if that fits, else the second gets what it
+// needs up to half and the first, Conversation, the rest.
+func split(h, a, b int) (int, int) {
+	if a+b <= h {
+		return h - b, b
+	}
+	second := max(minFrame, min(b, h/2))
+	return max(0, h-second), second
+}
+
+// frameLines is a frame's content: pinned lines stay at the top, the rest
+// scrolls. fromBottom frames start scrolled to their end.
+type frameLines struct {
+	pinned, scroll []string
+	fromBottom     bool
+	// keep is a scrolling line to show even when it is above the newest
+	// ones, as long as the frame is not scrolled: the last thing the user
+	// said. -1 for none.
+	keep int
+}
+
+func (m Model) frameContent(r *row) [numFocus]frameLines {
+	d := m.details[r.s.ID]
+	var out [numFocus]frameLines
+	out[focusConv] = m.conversationContent(r, d)
+	out[focusDone] = m.doneContent(r, d)
+	out[focusDetails] = frameLines{scroll: m.detailsLines(r, d), keep: -1}
+	return out
+}
+
+// window returns the visible lines of a frame with n lines of room, the
+// clamped scroll offset, the index of the first visible scrolling line and
+// how many there are. The offset counts from the top, or from the bottom for
+// fromBottom frames.
+func window(c frameLines, n, offset int) (lines []string, off, first, total int) {
+	room := max(0, n-len(c.pinned))
+	total = len(c.scroll)
+	off = max(0, min(offset, total-room))
+	start := off
+	if c.fromBottom {
+		start = max(0, total-room-off)
+	}
+	end := min(total, start+room)
+	visible := c.scroll[start:end]
+	if c.fromBottom && off == 0 && c.keep >= 0 && c.keep < start && room >= 2 {
+		visible = append([]string{c.scroll[c.keep]}, c.scroll[start+1:end]...)
+	}
+	return append(append([]string{}, c.pinned...), visible...), off, start, total
+}
+
 // frame draws lines inside a rounded border w cells wide and h lines tall,
-// with title set into the top edge.
-func (m Model) frame(title string, lines []string, w, h int) string {
+// with title set into the top edge and, when the content scrolls, the
+// visible range in the bottom edge.
+func (m Model) frame(title string, lines []string, w, h int, focused bool, scrollInfo string) string {
 	if w < 6 || h < 2 {
 		return ""
 	}
+	border, name := m.st.rule, m.st.subtle.Bold(true)
+	if focused {
+		border, name = m.st.id, m.st.key
+	}
 	inner := w - 4
-	titleW := ansi.StringWidth(title)
-	fill := max(0, w-5-titleW)
-	out := []string{m.st.rule.Render("╭─ ") + m.st.subtle.Bold(true).Render(title) + m.st.rule.Render(" "+strings.Repeat("─", fill)+"╮")}
+	fill := max(0, w-5-ansi.StringWidth(title))
+	out := []string{border.Render("╭─ ") + name.Render(title) + border.Render(" "+strings.Repeat("─", fill)+"╮")}
 	for _, l := range fit(lines, h-2) {
 		l = ansi.Truncate(l, inner, ellipsis)
 		pad := strings.Repeat(" ", max(0, inner-ansi.StringWidth(l)))
-		out = append(out, m.st.rule.Render("│")+" "+l+pad+" "+m.st.rule.Render("│"))
+		out = append(out, border.Render("│")+" "+l+pad+" "+border.Render("│"))
 	}
-	out = append(out, m.st.rule.Render("╰"+strings.Repeat("─", w-2)+"╯"))
-	return strings.Join(out, "\n")
+	bottom := border.Render("╰" + strings.Repeat("─", w-2) + "╯")
+	if iw := ansi.StringWidth(scrollInfo); scrollInfo != "" && w > iw+6 {
+		bottom = border.Render("╰"+strings.Repeat("─", w-5-iw)+" ") + m.st.muted.Render(scrollInfo) + border.Render(" ─╯")
+	}
+	return strings.Join(append(out, bottom), "\n")
 }
 
-// block is a part of a frame that can grow: it gets min lines first, then
-// one more at a time up to max while space is left, in priority order.
-type block struct{ min, max int }
-
-func allocate(n int, blocks ...block) []int {
-	got := make([]int, len(blocks))
-	for i, b := range blocks {
-		g := min(b.min, n)
-		got[i], n = g, n-g
+// renderFrame draws frame f of the selected session at r.
+func (m Model) renderFrame(f focus, c frameLines, r rect) string {
+	lines, _, first, total := window(c, r.h-2, m.scroll[f])
+	info := ""
+	if room := r.h - 2 - len(c.pinned); total > room && room > 0 {
+		info = fmt.Sprintf("%d-%d/%d", first+1, min(total, first+room), total)
 	}
-	for moved := true; moved && n > 0; {
-		moved = false
-		for i, b := range blocks {
-			if n > 0 && got[i] < b.max {
-				got[i]++
-				n--
-				moved = true
-			}
-		}
-	}
-	return got
+	return m.frame(frameTitles[f], lines, r.w, r.h, m.focus == f, info)
 }
 
 func durationText(d time.Duration) string {
@@ -77,8 +182,6 @@ func durationText(d time.Duration) string {
 	return fmt.Sprintf("%dh %dm", h, mins)
 }
 
-func oneLine(s string) string { return collapse(s) }
-
 func (m Model) messageLine(msg db.Message) string {
 	who := m.st.claude.Render("claude")
 	if msg.Role == "user" {
@@ -88,37 +191,33 @@ func (m Model) messageLine(msg db.Message) string {
 	if !msg.Timestamp.IsZero() {
 		when = msg.Timestamp.Local().Format("01-02 15:04")
 	}
-	return who + " " + m.st.muted.Render(when) + " " + m.st.strong.Render(oneLine(msg.Content))
+	return who + " " + m.st.muted.Render(when) + " " + m.st.strong.Render(collapse(msg.Content))
 }
 
-// conversationLines is the first request, then as many of the latest
-// messages as fit, always keeping the last thing the user said.
-func (m Model) conversationLines(d *db.Detail, n int) []string {
-	if d == nil || d.First == nil || n <= 0 {
-		return []string{m.st.muted.Render("No text messages.")}
+func (m Model) headLine(r *row) string {
+	return m.st.title.Render(r.title) + m.st.muted.Render(fmt.Sprintf("  %s · %d msgs · %s",
+		durationText(r.s.EndedAt.Sub(r.s.StartedAt)), r.s.MessageCount, formatSize(r.s.FileSize)))
+}
+
+// conversationContent pins the head line and the first request; the rest of
+// the conversation scrolls, starting at its newest messages.
+func (m Model) conversationContent(r *row, d *db.Detail) frameLines {
+	c := frameLines{pinned: []string{m.headLine(r)}, fromBottom: true, keep: -1}
+	if d == nil || d.First == nil {
+		c.pinned = append(c.pinned, m.st.muted.Render("No text messages."))
+		return c
 	}
-	lines := []string{m.messageLine(*d.First)}
-	room := n - 2
-	if room <= 0 || len(d.Tail) == 0 {
-		return lines
+	c.pinned = append(c.pinned, m.messageLine(*d.First))
+	if d.Hidden > 0 {
+		c.scroll = append(c.scroll, strings.Repeat(" ", 18)+m.st.muted.Render(fmt.Sprintf("··· %d earlier messages ···", d.Hidden)))
 	}
-	shown := d.Tail[max(0, len(d.Tail)-room):]
-	lastUser := -1
-	for i := len(d.Tail) - 1; i >= 0; i-- {
-		if d.Tail[i].Role == "user" {
-			lastUser = i
-			break
+	for _, msg := range d.Tail {
+		if msg.Role == "user" {
+			c.keep = len(c.scroll)
 		}
+		c.scroll = append(c.scroll, m.messageLine(msg))
 	}
-	if start := len(d.Tail) - len(shown); lastUser >= 0 && lastUser < start {
-		shown = append([]db.Message{d.Tail[lastUser]}, d.Tail[len(d.Tail)-room+1:]...)
-	}
-	hidden := d.Hidden + len(d.Tail) - len(shown)
-	lines = append(lines, strings.Repeat(" ", 18)+m.st.muted.Render(fmt.Sprintf("··· %d messages ···", hidden)))
-	for _, msg := range shown {
-		lines = append(lines, m.messageLine(msg))
-	}
-	return lines
+	return c
 }
 
 func spark(buckets []int) string {
@@ -132,24 +231,22 @@ func spark(buckets []int) string {
 			b.WriteByte(' ')
 			continue
 		}
-		i := min(7, v*8/(top+1))
-		b.WriteString(string([]rune(sparkChars)[i]))
+		b.WriteString(string([]rune(sparkChars)[min(7, v*8/(top+1))]))
 	}
 	return b.String()
 }
 
 func (m Model) label(s string) string { return m.st.subtle.Render(fmt.Sprintf("%-*s", labelWidth, s)) }
 
-// doneLines is the What was done frame: activity and tools, then files and
-// commands with fileN and cmdN lines each.
-func (m Model) doneLines(r *row, d *db.Detail, fileN, cmdN int) []string {
+// doneContent pins activity and tools; edited files and commands scroll.
+func (m Model) doneContent(r *row, d *db.Detail) frameLines {
+	c := frameLines{keep: -1}
 	if d == nil {
-		return nil
+		return c
 	}
 	hm := func(t time.Time) string { return t.Local().Format("15:04") }
-	lines := []string{m.label("Activity") + m.st.muted.Render(hm(r.s.StartedAt)+" ") + m.st.id.Render(spark(d.Activity)) +
-		m.st.muted.Render(" "+hm(r.s.EndedAt)+"  "+durationText(r.s.EndedAt.Sub(r.s.StartedAt)))}
-
+	c.pinned = append(c.pinned, m.label("Activity")+m.st.muted.Render(hm(r.s.StartedAt)+" ")+m.st.id.Render(spark(d.Activity))+
+		m.st.muted.Render(" "+hm(r.s.EndedAt)+"  "+durationText(r.s.EndedAt.Sub(r.s.StartedAt))))
 	var tools []string
 	for _, t := range d.TopTools {
 		tools = append(tools, m.st.strong.Render(t.Name)+" "+m.st.title.UnsetBold().Render(fmt.Sprint(t.N)))
@@ -157,41 +254,29 @@ func (m Model) doneLines(r *row, d *db.Detail, fileN, cmdN int) []string {
 	if len(tools) == 0 {
 		tools = []string{m.st.muted.Render("none")}
 	}
-	lines = append(lines, m.label("Tools")+strings.Join(tools, m.st.helpSep.Render(" · ")))
+	c.pinned = append(c.pinned, m.label("Tools")+strings.Join(tools, m.st.helpSep.Render(" · ")))
 
-	switch {
-	case d.FileCount == 0:
-		lines = append(lines, m.label("Edited")+m.st.muted.Render("no files"))
-	case fileN <= 1:
-		var names []string
-		for _, f := range d.Files[:min(4, len(d.Files))] {
-			names = append(names, m.st.strong.Render(shortPath(f.Name, m.home)))
-		}
-		more := ""
-		if d.FileCount > len(names) {
-			more = m.st.muted.Render(fmt.Sprintf("  +%d", d.FileCount-len(names)))
-		}
-		lines = append(lines, m.label("Edited")+strings.Join(names, "  ")+more)
-	default:
-		for i, f := range d.Files[:min(fileN, len(d.Files))] {
-			l := m.label("")
-			if i == 0 {
-				l = m.label("Edited")
-			}
-			lines = append(lines, l+m.st.strong.Render(shortPath(f.Name, m.home))+m.st.muted.Render(fmt.Sprintf(" ×%d", f.N)))
-		}
-		if extra := d.FileCount - min(fileN, len(d.Files)); extra > 0 && fileN >= len(d.Files) {
-			lines = append(lines, m.label("")+m.st.muted.Render(fmt.Sprintf("+%d more", extra)))
-		}
+	if d.FileCount == 0 {
+		c.scroll = append(c.scroll, m.label("Edited")+m.st.muted.Render("no files"))
 	}
-	for i, c := range d.Commands[:min(cmdN, len(d.Commands))] {
+	for i, f := range d.Files {
+		l := m.label("")
+		if i == 0 {
+			l = m.label("Edited")
+		}
+		c.scroll = append(c.scroll, l+m.st.strong.Render(shortPath(f.Name, m.home))+m.st.muted.Render(fmt.Sprintf(" ×%d", f.N)))
+	}
+	if extra := d.FileCount - len(d.Files); extra > 0 {
+		c.scroll = append(c.scroll, m.label("")+m.st.muted.Render(fmt.Sprintf("+%d more", extra)))
+	}
+	for i, cmd := range d.Commands {
 		l := m.label("")
 		if i == 0 {
 			l = m.label("Commands")
 		}
-		lines = append(lines, l+m.st.muted.Render("$ ")+m.st.strong.Render(oneLine(c)))
+		c.scroll = append(c.scroll, l+m.st.muted.Render("$ ")+m.st.strong.Render(collapse(cmd)))
 	}
-	return lines
+	return c
 }
 
 // detailsLines is the Details frame, most useful first so a short frame
@@ -219,7 +304,6 @@ func (m Model) detailsLines(r *row, d *db.Detail) []string {
 		lines = append(lines, kv("Files", m.st.strong.Render(fmt.Sprintf("%d edited", d.FileCount))),
 			kv("Version", m.st.muted.Render(d.Version)))
 	}
-
 	name, badge := m.st.strong, m.st.worktree
 	if r.gone {
 		name, badge = m.st.gone, m.st.gone
@@ -239,62 +323,36 @@ func (m Model) detailsLines(r *row, d *db.Detail) []string {
 	return append(lines, kv("Path", m.st.muted.Render(path)))
 }
 
-func (m Model) headLine(r *row) string {
-	return m.st.title.Render(r.title) + m.st.muted.Render(fmt.Sprintf("  %s · %d msgs · %s",
-		durationText(r.s.EndedAt.Sub(r.s.StartedAt)), r.s.MessageCount, formatSize(r.s.FileSize)))
+// renderPane draws the three frames: below the list as two columns, or
+// beside it as one.
+func (m Model) renderPane() string {
+	rects, ok := m.paneRects()
+	r := m.current()
+	if !ok || r == nil {
+		return ""
+	}
+	content := m.frameContent(r)
+	frame := func(f focus) string { return m.renderFrame(f, content[f], rects[f]) }
+	if m.detailRight() {
+		return strings.Join([]string{frame(focusConv), frame(focusDone), frame(focusDetails)}, "\n")
+	}
+	return joinColumns(frame(focusConv)+"\n"+frame(focusDone), frame(focusDetails), rects[focusConv].w, " ")
 }
 
-// renderDetailBelow draws the pane under the list: width cells, height lines.
-func (m Model) renderDetailBelow(width, height int) string {
+// scrollFrame moves frame f by delta lines; positive scrolls toward later
+// content.
+func (m *Model) scrollFrame(f focus, delta int) {
 	r := m.current()
-	if r == nil {
-		return m.frame("Details", nil, width, height)
+	rects, ok := m.paneRects()
+	if r == nil || !ok || f == focusList {
+		return
 	}
-	d := m.details[r.s.ID]
-	rightW := max(30, min(detailsWidth, width-70))
-	leftW := width - rightW - 1
-
-	// The two left frames cost four border lines; the head line, activity
-	// and tools take three; conversation, files and commands share the rest.
-	var cmds, files, tail int
-	if d != nil {
-		cmds, files, tail = len(d.Commands), max(1, len(d.Files)), len(d.Tail)+2
+	c := m.frameContent(r)[f]
+	if c.fromBottom {
+		delta = -delta
 	}
-	got := allocate(max(0, height-4-3), block{3, max(3, tail)}, block{1, max(1, files)}, block{0, cmds})
-	conv := append([]string{m.headLine(r)}, m.conversationLines(d, got[0])...)
-	done := m.doneLines(r, d, got[1], got[2])
-	topH := len(conv) + 2
-	if d == nil {
-		topH = 1 + 3 + 2
-	}
-	topH = min(topH, height-3)
-	botH := height - topH
-
-	left := m.frame("Conversation", conv, leftW, topH) + "\n" + m.frame("What was done", done, leftW, botH)
-	right := m.frame("Details", m.detailsLines(r, d), rightW, height)
-	return joinColumns(left, right, leftW, " ")
-}
-
-// renderDetailBeside draws the pane right of the list, the frames stacked.
-func (m Model) renderDetailBeside(width, height int) string {
-	r := m.current()
-	if r == nil {
-		return m.frame("Details", nil, width, height)
-	}
-	d := m.details[r.s.ID]
-	details := m.detailsLines(r, d)
-	detailsH := min(len(details)+2, max(4, height/3))
-	var cmds, files, tail int
-	if d != nil {
-		cmds, files, tail = len(d.Commands), max(1, len(d.Files)), len(d.Tail)+2
-	}
-	got := allocate(max(0, height-detailsH-4-3), block{3, max(3, tail)}, block{1, max(1, files)}, block{0, cmds})
-	conv := append([]string{m.headLine(r)}, m.conversationLines(d, got[0])...)
-	done := m.doneLines(r, d, got[1], got[2])
-	convH := min(len(conv)+2, height-detailsH-3)
-	doneH := height - detailsH - convH
-	return strings.Join([]string{m.frame("Conversation", conv, width, convH), m.frame("What was done", done, width, doneH),
-		m.frame("Details", details, width, detailsH)}, "\n")
+	_, off, _, _ := window(c, rects[f].h-2, m.scroll[f]+delta)
+	m.scroll[f] = off
 }
 
 // joinColumns puts two blocks of lines side by side; left is padded to
