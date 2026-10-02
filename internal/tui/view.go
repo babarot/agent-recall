@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -159,9 +160,52 @@ func (m Model) renderTable() []string {
 	return append(lines[:3+h], m.st.muted.Render(info))
 }
 
-// wrap breaks s into lines at most w cells wide.
+// wrap breaks s into lines at most w cells wide, at spaces where it can,
+// mid-word where it must; wide characters count as two cells.
 func wrap(s string, w int) []string {
-	return strings.Split(lipgloss.NewStyle().Width(w).Render(s), "\n")
+	w = max(1, w)
+	var out []string
+	for _, l := range strings.Split(ansi.Wrap(s, w, ""), "\n") {
+		// Wrap can leave the space it broke at on the line, and a break at
+		// a hyphen can overshoot; trim, then hard-wrap what is still wide.
+		l = strings.TrimRight(l, " ")
+		if ansi.StringWidth(l) > w {
+			out = append(out, strings.Split(ansi.Hardwrap(l, w, true), "\n")...)
+			continue
+		}
+		out = append(out, l)
+	}
+	return out
+}
+
+var listMarker = regexp.MustCompile(`^(\s*)([-*+]|\d+[.)])\s+`)
+
+// wrapText wraps text line by line, keeping indentation: a line that
+// wraps continues under where its text starts, past any list marker.
+func wrapText(s string, w int) []string {
+	var out []string
+	for _, line := range strings.Split(s, "\n") {
+		indent := len(line) - len(strings.TrimLeft(line, " \t"))
+		if m := listMarker.FindString(line); m != "" {
+			indent = len(m)
+		}
+		if indent >= w/2 {
+			indent = 0
+		}
+		if ansi.StringWidth(line) <= w {
+			out = append(out, line)
+			continue
+		}
+		parts := wrap(line, w)
+		out = append(out, parts[0])
+		if len(parts) > 1 {
+			rest := strings.TrimSpace(strings.Join(parts[1:], " "))
+			for _, l := range wrap(rest, w-indent) {
+				out = append(out, strings.Repeat(" ", indent)+l)
+			}
+		}
+	}
+	return out
 }
 
 // fit pads or cuts lines to exactly n.
@@ -240,27 +284,37 @@ func (m Model) renderPreview() string {
 }
 
 // renderConversation formats preview messages for a terminal w cells wide.
+// The user's messages sit in a box with the speaker and time on its top
+// edge, in bold; Claude's carry a rail down their left side, in a softer
+// color, so long replies read as one block.
 func (m Model) renderConversation(p db.Preview, w int) string {
-	// "claude 10/02 17:11" is the widest label.
-	whoW := ansi.StringWidth("claude ") + ansi.StringWidth(formatEnded(m.now().AddDate(0, 0, -1), m.now())) + 1
-	textW := max(20, w-whoW-2)
 	var b strings.Builder
-	one := func(msg db.Message) {
-		// As in the Conversation frame: the user's words bold, Claude's
-		// softer.
-		who, text := m.st.claude.Render("claude"), m.st.subtle
-		if msg.Role == "user" {
-			who, text = m.st.user.Render("you"), m.st.strong.Bold(true)
+	when := func(msg db.Message) string { return m.st.dim.Render(formatEnded(msg.Timestamp, m.now())) }
+	user := func(msg db.Message) {
+		bw := max(20, w-2) // box width, one cell of margin each side
+		inner := bw - 4
+		title := m.st.user.Render("you") + " " + when(msg)
+		fill := max(0, bw-5-ansi.StringWidth(title))
+		border := m.st.filter
+		fmt.Fprintf(&b, " %s%s%s\n", border.Render("╭─ "), title, border.Render(" "+strings.Repeat("─", fill)+"╮"))
+		for _, l := range wrapText(strings.TrimSpace(msg.Content), inner) {
+			pad := strings.Repeat(" ", max(0, inner-ansi.StringWidth(l)))
+			fmt.Fprintf(&b, " %s %s%s %s\n", border.Render("│"), m.st.strong.Bold(true).Render(l), pad, border.Render("│"))
 		}
-		label := who + " " + m.st.dim.Render(formatEnded(msg.Timestamp, m.now()))
-		labelPad := strings.Repeat(" ", max(0, whoW-ansi.StringWidth(label)))
-		for i, l := range wrap(strings.TrimSpace(msg.Content), textW) {
-			l = text.Render(l)
-			if i == 0 {
-				fmt.Fprintf(&b, " %s%s %s\n", label, labelPad, l)
-			} else {
-				fmt.Fprintf(&b, " %*s %s\n", whoW, "", l)
-			}
+		fmt.Fprintf(&b, " %s\n", border.Render("╰"+strings.Repeat("─", bw-2)+"╯"))
+	}
+	claude := func(msg db.Message) {
+		rail := m.st.claude.UnsetBold().Render("▎")
+		fmt.Fprintf(&b, " %s %s %s\n", rail, m.st.claude.Render("claude"), when(msg))
+		for _, l := range wrapText(strings.TrimSpace(msg.Content), max(20, w-4)) {
+			fmt.Fprintf(&b, " %s %s\n", rail, m.st.subtle.Render(l))
+		}
+	}
+	one := func(msg db.Message) {
+		if msg.Role == "user" {
+			user(msg)
+		} else {
+			claude(msg)
 		}
 		b.WriteString("\n")
 	}
@@ -268,7 +322,7 @@ func (m Model) renderConversation(p db.Preview, w int) string {
 		one(msg)
 	}
 	if p.Skipped > 0 {
-		fmt.Fprintf(&b, " %s\n\n", m.st.muted.Render(fmt.Sprintf("··· %d messages skipped ···", p.Skipped)))
+		fmt.Fprintf(&b, "   %s\n\n", m.st.muted.Render(fmt.Sprintf("··· %d messages skipped ···", p.Skipped)))
 	}
 	for _, msg := range p.Tail {
 		one(msg)

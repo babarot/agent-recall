@@ -598,3 +598,49 @@ func TestPreviewBoldsTheUser(t *testing.T) {
 		t.Error("Claude's message should not be bold")
 	}
 }
+
+func TestPreviewBoxesUserAndRailsClaude(t *testing.T) {
+	m, _ := newTestModel(t, config.Default().TUI, 100, 30)
+	m = press(t, m, "space")
+	lines := strings.Split(screen(m), "\n")
+	var boxTop, boxBody, rail bool
+	for _, l := range lines {
+		switch {
+		case strings.Contains(l, "╭─ you"):
+			boxTop = true
+		case strings.Contains(l, "│ first question about"):
+			boxBody = true
+		case strings.Contains(l, "▎ last answer"):
+			rail = true
+		}
+		if w := ansi.StringWidth(l); w > 100 {
+			t.Errorf("line %d wide: %q", w, l)
+		}
+	}
+	if !boxTop || !boxBody || !rail {
+		t.Fatalf("box top %v, box body %v, rail %v:\n%s", boxTop, boxBody, rail, strings.Join(lines, "\n"))
+	}
+}
+
+func TestWrapTextKeepsListIndent(t *testing.T) {
+	got := wrapText("intro\n   - a list item that is long enough to wrap onto the next line", 30)
+	if len(got) < 3 || got[0] != "intro" || !strings.HasPrefix(got[2], "     ") {
+		t.Fatalf("got %q", got)
+	}
+	for _, l := range got {
+		if ansi.StringWidth(l) > 30 {
+			t.Errorf("too wide: %q", l)
+		}
+	}
+}
+
+func TestWrapStaysWithinWidth(t *testing.T) {
+	s := "だけして push していないうちに、仕事用の Mac が push したケースです。main が分岐しているので、1 の `pull --ff-only` が失敗します。"
+	for _, w := range []int{20, 37, 50, 102, 104, 106} {
+		for _, l := range wrap(s, w) {
+			if ansi.StringWidth(l) > w {
+				t.Errorf("w=%d: %d wide: %q", w, ansi.StringWidth(l), l)
+			}
+		}
+	}
+}
