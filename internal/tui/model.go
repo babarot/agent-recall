@@ -104,9 +104,6 @@ type Model struct {
 	focus     focus
 	scroll    [numFocus]int
 	scrollFor string
-	// expanded records the sessions whose What was done frame shows all
-	// files and commands.
-	expanded map[string]bool
 
 	toast     string
 	toastKind toastKind
@@ -140,7 +137,6 @@ func New(sessions []db.Session, source Source, cfg config.TUI) Model {
 		filter:     fi,
 		preview:    viewport.New(),
 		details:    map[string]*db.Detail{},
-		expanded:   map[string]bool{},
 		detailH:    max(config.MinDetailHeight, cfg.DetailHeight),
 	}
 	m.refresh()
@@ -442,11 +438,6 @@ func (m Model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.scrollFrame(m.focus, -1<<20)
 			case "end", "G":
 				m.scrollFrame(m.focus, 1<<20)
-			case "e":
-				if m.focus != focusDone {
-					goto list
-				}
-				m.toggleDone()
 			default:
 				goto list
 			}
@@ -604,9 +595,6 @@ func (m *Model) click(x, y int) {
 	}
 	if f := m.frameAt(x, y); f != focusList {
 		m.focus = f
-		if f == focusDone && m.toggleAt(y) {
-			m.toggleDone()
-		}
 		return
 	}
 	if i := y - m.listTop(); x < m.listWidth() && i >= 0 && i < m.listHeight() && m.offset+i < len(m.visible) {

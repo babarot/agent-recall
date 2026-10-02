@@ -353,15 +353,10 @@ func TestDetailPaneShowsThreeFrames(t *testing.T) {
 			t.Errorf("pane lacks %q:\n%s", want, s)
 		}
 	}
-	// The latest command shows collapsed; e expands the frame to all of them.
-	if !strings.Contains(s, "COMMANDS") || !strings.Contains(s, "go test ./...") {
-		t.Errorf("collapsed What was done lacks the latest command:\n%s", s)
-	}
-	m = press(t, m, "]", "]", "e", "G")
-	s = screen(m)
-	for _, want := range []string{"COMMANDS", "git status", "show less"} {
+	// Commands show as how often each ran, not one by one.
+	for _, want := range []string{"COMMANDS", "go test ▇▇▇▇▇▇ 1", "git status ▇▇▇▇▇▇ 1"} {
 		if !strings.Contains(s, want) {
-			t.Errorf("scrolled What was done lacks %q:\n%s", want, s)
+			t.Errorf("What was done lacks %q:\n%s", want, s)
 		}
 	}
 }
@@ -421,7 +416,7 @@ func TestSplit(t *testing.T) {
 	if a, b := split(20, 8, 6); a != 14 || b != 6 {
 		t.Errorf("roomy split %d %d", a, b)
 	}
-	if a, b := split(16, 30, 30); a+b != 16 || b < minFrame || a < minConversation {
+	if a, b := split(16, 30, 30); a+b != 16 || b < minFrame || a < b {
 		t.Errorf("tight split %d %d", a, b)
 	}
 }
@@ -553,44 +548,29 @@ func manyFiles(m Model) {
 	}
 }
 
-func TestCommandsStayVisibleWithManyFiles(t *testing.T) {
-	for _, h := range []int{40, 50, 60} {
-		m, _ := newTestModel(t, config.Default().TUI, 140, h)
-		manyFiles(m)
-		s := screen(m)
-		for _, want := range []string{"COMMANDS", "go test ./...", "more files", "more commands"} {
-			if !strings.Contains(s, want) {
-				t.Errorf("height %d: pane lacks %q:\n%s", h, want, s)
-			}
+func TestCommandsStayPinnedWithManyFiles(t *testing.T) {
+	m, _ := newTestModel(t, config.Default().TUI, 140, 40)
+	manyFiles(m)
+	s := screen(m)
+	for _, want := range []string{"COMMANDS", "make step", "FILES", "file00.go"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("pane lacks %q:\n%s", want, s)
 		}
 	}
 }
 
-func TestClickMoreExpandsAndShowLessCollapses(t *testing.T) {
-	m, _ := newTestModel(t, config.Default().TUI, 140, 44)
-	manyFiles(m)
-	rects, _ := m.paneRects()
-	lines := strings.Split(screen(m), "\n")
-	y := -1
-	for i, l := range lines {
-		if strings.Contains(l, "more files") {
-			y = i
-		}
-	}
-	if y < 0 {
-		t.Fatal("no +N more files line")
-	}
-	m = update(t, m, tea.MouseClickMsg{X: rects[focusDone].x + 4, Y: y, Button: tea.MouseLeft})
-	if !m.expanded[m.current().s.ID] || m.focus != focusDone {
-		t.Fatalf("click did not expand (focus %v)", m.focus)
-	}
-	m = press(t, m, "G")
+func TestConversationMarksTheGap(t *testing.T) {
+	m, _ := newTestModel(t, config.Default().TUI, 140, 40)
 	s := screen(m)
-	if !strings.Contains(s, "show less") || !strings.Contains(s, "make step7") {
-		t.Fatalf("expanded frame should end with every command and show less:\n%s", s)
+	if !strings.Contains(s, "⋮") {
+		t.Fatalf("a marker should separate the first request from the latest messages:\n%s", s)
 	}
-	m = press(t, m, "e")
-	if m.expanded[m.current().s.ID] {
-		t.Fatal("e should collapse again")
+	rects, _ := m.paneRects()
+	conv := rects[focusConv]
+	m = update(t, m, tea.MouseClickMsg{X: conv.x + 3, Y: conv.y + 2, Button: tea.MouseLeft})
+	m = press(t, m, "g")
+	// Scrolled to the top, only the 5 messages not loaded remain hidden.
+	if s = screen(m); !strings.Contains(s, "⋮  5 messages") || !strings.Contains(s, "older message 00") {
+		t.Fatalf("at the top the marker counts what was not loaded:\n%s", s)
 	}
 }

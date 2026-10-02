@@ -15,10 +15,11 @@ import (
 // turn them into something to read at a glance.
 
 var (
-	tempPath      = regexp.MustCompile(`^(/private)?/tmp/|/scratchpad/`)
-	herdrFile     = regexp.MustCompile(`/\.herdr/worktrees/([^/]+)/(?:worktree-)?([^/]+)/(.+)$`)
-	leadingCd     = regexp.MustCompile(`^\s*cd\s+\S+\s*(&&|;)\s*`)
-	leadingAssign = regexp.MustCompile(`^\s*[A-Za-z_][A-Za-z0-9_]*=\S*\s*(&&|;)?\s*`)
+	tempPath       = regexp.MustCompile(`^(/private)?/tmp/|/scratchpad/`)
+	herdrFile      = regexp.MustCompile(`/\.herdr/worktrees/([^/]+)/(?:worktree-)?([^/]+)/(.+)$`)
+	leadingCd      = regexp.MustCompile(`^\s*cd\s+\S+\s*(&&|;)\s*`)
+	leadingAssign  = regexp.MustCompile(`^\s*[A-Za-z_][A-Za-z0-9_]*=\S*\s*(&&|;)?\s*`)
+	subcommandWord = regexp.MustCompile(`^[a-z][a-z0-9_:-]*$`)
 )
 
 // fileGroup is the edited files under one place: the session's own folder,
@@ -122,4 +123,48 @@ func commandParts(cmd string) (prog, args, rest string) {
 	}
 	prog, args, _ = strings.Cut(main, " ")
 	return prog, args, rest
+}
+
+// subcommandTools are counted by subcommand ("git commit", "go test"),
+// since the program alone says little.
+var subcommandTools = map[string]bool{
+	"git": true, "go": true, "gh": true, "npm": true, "pnpm": true, "yarn": true, "bun": true,
+	"deno": true, "cargo": true, "docker": true, "kubectl": true, "nix": true, "make": true,
+	"terraform": true, "uv": true, "pip": true, "brew": true, "mise": true,
+}
+
+// programOf names what a command runs, for counting: the program, plus the
+// subcommand for tools like git and go.
+func programOf(cmd string) string {
+	prog, args, _ := commandParts(cmd)
+	if prog == "" {
+		return ""
+	}
+	prog = filepath.Base(prog)
+	if subcommandTools[prog] {
+		// The subcommand is the first plain word: not a flag, and not a
+		// flag's value such as the path in `git -C /repo status`.
+		for _, a := range strings.Fields(args) {
+			if subcommandWord.MatchString(a) {
+				return prog + " " + a
+			}
+		}
+	}
+	return prog
+}
+
+// commandCounts counts commands by program, most used first.
+func commandCounts(cmds []string) []db.Count {
+	n := map[string]int{}
+	for _, c := range cmds {
+		if p := programOf(c); p != "" {
+			n[p]++
+		}
+	}
+	out := make([]db.Count, 0, len(n))
+	for name, c := range n {
+		out = append(out, db.Count{Name: name, N: c})
+	}
+	slices.SortFunc(out, func(a, b db.Count) int { return cmp.Or(cmp.Compare(b.N, a.N), cmp.Compare(a.Name, b.Name)) })
+	return out
 }

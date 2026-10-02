@@ -31,16 +31,12 @@ const (
 var frameTitles = [numFocus]string{"", "Conversation", "What was done", "Details"}
 
 const (
-	collapsedFiles    = 6 // files shown when the frame's height is not known yet
-	collapsedCommands = 3
-
 	// The Details frame below the list, border included: wide enough for a
 	// full session ID after its label.
-	detailsWidth    = 4 + labelWidth + 36
-	labelWidth      = 9 // "Commands " and friends
-	minFrame        = 5 // smallest frame: borders plus three lines
-	minConversation = 6 // title, first request and two messages
-	sparkChars      = "▁▂▃▄▅▆▇█"
+	detailsWidth = 4 + labelWidth + 36
+	labelWidth   = 9 // "Commands " and friends
+	minFrame     = 5 // smallest frame: borders plus three lines
+	sparkChars   = "▁▂▃▄▅▆▇█"
 )
 
 // rect is a frame's place on the screen.
@@ -56,7 +52,7 @@ func (m Model) paneRects() ([numFocus]rect, bool) {
 	if r == nil || !m.detailOpen {
 		return out, false
 	}
-	content := m.frameContent(r, 0, 0)
+	content := m.frameContent(r, 0)
 	need := func(f focus) int { return len(content[f].pinned) + len(content[f].scroll) + 2 }
 
 	if m.detailRight() {
@@ -89,14 +85,13 @@ func (m Model) paneRects() ([numFocus]rect, bool) {
 }
 
 // split shares h lines between two stacked frames that would like a and b
-// lines: each gets what it needs if that fits, else the second gets what it
-// needs as long as the first, Conversation, which scrolls, keeps
-// minConversation lines.
+// lines: each gets what it needs if that fits, else the second, What was
+// done, gets what it needs up to half and Conversation the rest.
 func split(h, a, b int) (int, int) {
 	if a+b <= h {
 		return h - b, b
 	}
-	second := max(minFrame, min(b, h-minConversation))
+	second := max(minFrame, min(b, h/2))
 	return max(0, h-second), second
 }
 
@@ -109,19 +104,34 @@ type frameLines struct {
 	// ones, as long as the frame is not scrolled: the last thing the user
 	// said. -1 for none.
 	keep int
-	// toggles are the scrolling lines that expand or collapse the frame
-	// when clicked ("+3 more files", "− show less").
-	toggles map[int]bool
+	// gap, when set, marks the messages skipped between the pinned lines
+	// and the visible ones: before is how many come before the first
+	// scrolling line, and gap renders the marker for a count.
+	gap    func(n int) string
+	before int
+	// notMessages are scrolling lines that are not messages (day lines),
+	// left out of the skipped count.
+	notMessages map[int]bool
 }
 
-// frameContent builds each frame's lines. inner and room are the What was
-// done frame's inner width and height, for aligning columns and deciding
-// how many files and commands to show; 0 when only counting lines.
-func (m Model) frameContent(r *row, inner, room int) [numFocus]frameLines {
+// messagesBefore counts the messages before scrolling line i.
+func (c frameLines) messagesBefore(i int) int {
+	n := c.before + i
+	for j := range c.notMessages {
+		if j < i {
+			n--
+		}
+	}
+	return n
+}
+
+// frameContent builds each frame's lines. inner is the What was done
+// frame's inner width, for aligning columns; 0 when only counting lines.
+func (m Model) frameContent(r *row, inner int) [numFocus]frameLines {
 	d := m.details[r.s.ID]
 	var out [numFocus]frameLines
 	out[focusConv] = m.conversationContent(r, d)
-	out[focusDone] = m.doneContent(r, d, inner, room, m.expanded[r.s.ID])
+	out[focusDone] = m.doneContent(r, d, inner)
 	out[focusDetails] = frameLines{scroll: m.detailsLines(r, d), keep: -1}
 	return out
 }
@@ -139,9 +149,25 @@ func window(c frameLines, n, offset int) (lines []string, off, first, total int)
 		start = max(0, total-room-off)
 	}
 	end := min(total, start+room)
-	visible := c.scroll[start:end]
-	if c.fromBottom && off == 0 && c.keep >= 0 && c.keep < start && room >= 2 {
-		visible = append([]string{c.scroll[c.keep]}, c.scroll[start+1:end]...)
+	from := start // first scrolling line shown after any gap marker
+	if c.gap != nil && room >= 2 && c.messagesBefore(start) > 0 && end-start == room {
+		// Give a row to the marker: the oldest shown line, unless that is
+		// the very first one, then the newest.
+		if start > 0 {
+			from++
+		} else {
+			end--
+		}
+	}
+	visible := c.scroll[from:end]
+	skipped := c.messagesBefore(from)
+	if c.fromBottom && off == 0 && c.keep >= 0 && c.keep < from && len(visible) >= 2 {
+		// Show the last user message even though newer ones fill the frame.
+		visible = append([]string{c.scroll[c.keep]}, visible[1:]...)
+		skipped = c.messagesBefore(c.keep)
+	}
+	if c.gap != nil && skipped > 0 && room >= 2 {
+		visible = append([]string{c.gap(skipped)}, visible...)
 	}
 	return append(append([]string{}, c.pinned...), visible...), off, start, total
 }
@@ -227,13 +253,16 @@ func (m Model) conversationContent(r *row, d *db.Detail) frameLines {
 		return c
 	}
 	c.pinned = append(c.pinned, m.messageLine(*d.First))
-	if d.Hidden > 0 {
-		c.scroll = append(c.scroll, m.st.muted.Render(fmt.Sprintf("      ⋮  %d earlier messages", d.Hidden)))
-	}
+	c.before = d.Hidden
+	c.gap = func(n int) string { return m.st.muted.Render(fmt.Sprintf("      ⋮  %d messages", n)) }
 	day := d.First.Timestamp.Local().Format(time.DateOnly)
 	for _, msg := range d.Tail {
 		if !msg.Timestamp.IsZero() {
 			if dd := msg.Timestamp.Local().Format(time.DateOnly); dd != day {
+				if c.notMessages == nil {
+					c.notMessages = map[int]bool{}
+				}
+				c.notMessages[len(c.scroll)] = true
 				c.scroll = append(c.scroll, m.dayLine(msg.Timestamp))
 				day = dd
 			}
@@ -264,12 +293,10 @@ func (m Model) spark(buckets []int) string {
 	return b.String()
 }
 
-// doneContent pins activity and tools; edited files, grouped by where they
-// live, and commands follow. Collapsed, it shows as many files as fit while
-// keeping a few commands in view, and "+N more" lines expand it; expanded,
-// everything is there to scroll through. inner and room are the frame's
-// inner width and height, 0 when only the number of lines matters.
-func (m Model) doneContent(r *row, d *db.Detail, inner, room int, expanded bool) frameLines {
+// doneContent pins activity, tools and commands, one line each; the edited
+// files, grouped by where they live, scroll below. inner is the frame's
+// inner width, 0 when only the number of lines matters.
+func (m Model) doneContent(r *row, d *db.Detail, inner int) frameLines {
 	c := frameLines{keep: -1}
 	if d == nil {
 		return c
@@ -284,92 +311,25 @@ func (m Model) doneContent(r *row, d *db.Detail, inner, room int, expanded bool)
 		tools = []string{m.st.muted.Render("none")}
 	}
 	c.pinned = append(c.pinned, m.section("Tools")+"     "+strings.Join(tools, "   "))
+	c.pinned = append(c.pinned, m.section("Commands")+"  "+m.commandBars(commandCounts(d.Commands), inner-labelWidth-1))
 
 	groups, temps := groupFiles(d.Files, r.s.ProjectPath, m.home)
-	shownFiles := len(d.Files)
-	shownCmds := len(d.Commands)
-	gap := true // blank lines before FILES and COMMANDS
-	if !expanded {
-		// Collapsed: keep the COMMANDS heading and the latest commands in
-		// view and fill what remains with files. When the frame is short,
-		// show fewer commands, then drop the blank lines.
-		shownCmds = min(len(d.Commands), collapsedCommands)
-		shownFiles = collapsedFiles
-		if room > 0 {
-			cmdLines := func(n int, gap bool) int {
-				if len(d.Commands) == 0 {
-					return 0
-				}
-				return boolInt(gap) + 1 + n
-			}
-			minFiles := 1 // "none"
-			if len(groups) > 0 {
-				minFiles = 2 // a group heading and one file
-			}
-			// The last line says what is hidden and expands the frame.
-			const moreLine = 1
-			for _, try := range []struct {
-				cmds int
-				gap  bool
-			}{{shownCmds, true}, {min(1, shownCmds), true}, {min(1, shownCmds), false}} {
-				shownCmds, gap = try.cmds, try.gap
-				if len(c.pinned)+boolInt(gap)+1+minFiles+cmdLines(shownCmds, gap)+moreLine <= room {
-					break
-				}
-			}
-			// Lines left for files; each group shown costs a heading.
-			left := room - len(c.pinned) - boolInt(gap) - 1 - cmdLines(shownCmds, gap) - moreLine
-			shownFiles = 0
-			for _, g := range groups {
-				if left < 2 {
-					break
-				}
-				left--
-				take := min(len(g.files), left)
-				shownFiles += take
-				left -= take
-				if take < len(g.files) {
-					break
-				}
-			}
-		}
-		shownFiles = max(1, shownFiles)
-	}
-
 	places := ""
 	if len(groups)+boolInt(temps > 0) > 1 {
 		places = fmt.Sprintf(" in %d places", len(groups)+boolInt(temps > 0))
-	}
-	if gap {
-		c.scroll = append(c.scroll, "")
 	}
 	c.scroll = append(c.scroll, m.section("Files")+m.st.muted.Render(fmt.Sprintf("  %d edited%s", d.FileCount, places)))
 	if d.FileCount == 0 {
 		c.scroll = append(c.scroll, "  "+m.st.muted.Render("none"))
 	}
-	toggle := func(text string) {
-		if c.toggles == nil {
-			c.toggles = map[int]bool{}
-		}
-		c.toggles[len(c.scroll)] = true
-		c.scroll = append(c.scroll, "  "+m.st.id.Render(text))
-	}
 	nameW := max(20, inner-10)
-	shown := 0
 	for _, g := range groups {
-		if shown >= shownFiles {
-			break
-		}
 		name := g.name
 		if name == "" {
 			name = "this folder"
 		}
 		c.scroll = append(c.scroll, "  "+m.st.muted.Render(name))
 		for _, f := range g.files {
-			if shown >= shownFiles {
-				break
-			}
-			shown++
 			rel := middleEllipsis(f.Name, nameW)
 			count := ""
 			if f.N > 1 {
@@ -382,46 +342,41 @@ func (m Model) doneContent(r *row, d *db.Detail, inner, room int, expanded bool)
 			c.scroll = append(c.scroll, "    "+m.st.strong.Render(rel)+pad+m.st.muted.Render(count))
 		}
 	}
-	hiddenFiles := d.FileCount - shown
-	if temps > 0 && expanded {
+	if temps > 0 {
 		c.scroll = append(c.scroll, "  "+m.st.muted.Render(fmt.Sprintf("+%d temp files", temps)))
-		hiddenFiles -= temps
 	}
-	if hiddenFiles > 0 && expanded {
-		c.scroll = append(c.scroll, "  "+m.st.muted.Render(fmt.Sprintf("+%d more not loaded", hiddenFiles)))
-	}
-
-	if len(d.Commands) > 0 {
-		if gap {
-			c.scroll = append(c.scroll, "")
-		}
-		c.scroll = append(c.scroll, m.section("Commands")+m.st.muted.Render("  latest first"))
-		for _, cmd := range d.Commands[:shownCmds] {
-			prog, args, rest := commandParts(cmd)
-			l := "  " + m.st.strong.Bold(true).Render(prog)
-			if args != "" {
-				l += " " + m.st.subtle.Render(args)
-			}
-			if rest != "" {
-				l += " " + m.st.dim.Render(rest)
-			}
-			c.scroll = append(c.scroll, l)
-		}
-	}
-	var hidden []string
-	if !expanded && hiddenFiles > 0 {
-		hidden = append(hidden, fmt.Sprintf("+%d more files", hiddenFiles))
-	}
-	if more := len(d.Commands) - shownCmds; more > 0 {
-		hidden = append(hidden, fmt.Sprintf("+%d more commands", more))
-	}
-	switch {
-	case expanded:
-		toggle("− show less")
-	case len(hidden) > 0:
-		toggle(strings.Join(hidden, " · "))
+	if extra := d.FileCount - len(d.Files); extra > 0 {
+		c.scroll = append(c.scroll, "  "+m.st.muted.Render(fmt.Sprintf("+%d more", extra)))
 	}
 	return c
+}
+
+// commandBars draws how often each program ran as short bars on one line,
+// most used first, as many as fit in w cells.
+func (m Model) commandBars(counts []db.Count, w int) string {
+	if len(counts) == 0 {
+		return m.st.muted.Render("none")
+	}
+	const barMax = 6
+	top := counts[0].N
+	var parts []string
+	used := 0
+	for i, c := range counts {
+		bar := strings.Repeat("▇", max(1, c.N*barMax/top))
+		part := m.st.strong.Bold(true).Render(c.Name) + " " + m.st.id.Render(bar) + " " + m.st.title.UnsetBold().Render(fmt.Sprint(c.N))
+		pw := ansi.StringWidth(part) + 2
+		more := ""
+		if rest := len(counts) - i - 1; rest > 0 {
+			more = fmt.Sprintf("+%d", rest)
+		}
+		if w > 0 && used+pw+len(more) > w && len(parts) > 0 {
+			parts = append(parts, m.st.muted.Render(fmt.Sprintf("+%d", len(counts)-i)))
+			break
+		}
+		parts = append(parts, part)
+		used += pw
+	}
+	return strings.Join(parts, "  ")
 }
 
 // detailsLines is the Details frame in three groups: when, how much, where.
@@ -483,7 +438,7 @@ func (m Model) renderPane() string {
 	if !ok || r == nil {
 		return ""
 	}
-	content := m.doneSized(r, rects)
+	content := m.sizedContent(r, rects)
 	frame := func(f focus) string { return m.renderFrame(f, content[f], rects[f]) }
 	if m.detailRight() {
 		return strings.Join([]string{frame(focusConv), frame(focusDone), frame(focusDetails)}, "\n")
@@ -499,7 +454,7 @@ func (m *Model) scrollFrame(f focus, delta int) {
 	if r == nil || !ok || f == focusList {
 		return
 	}
-	c := m.doneSized(r, rects)[f]
+	c := m.sizedContent(r, rects)[f]
 	if c.fromBottom {
 		delta = -delta
 	}
@@ -526,34 +481,7 @@ func joinColumns(left, right string, leftW int, gap string) string {
 	return strings.Join(out, "\n")
 }
 
-// doneSized builds the frames' content for the frames' actual size.
-func (m Model) doneSized(r *row, rects [numFocus]rect) [numFocus]frameLines {
-	return m.frameContent(r, rects[focusDone].w-4, rects[focusDone].h-2)
-}
-
-// toggleAt reports whether a click at screen row y hits an expand or
-// collapse line of the What was done frame.
-func (m Model) toggleAt(y int) bool {
-	r := m.current()
-	rects, ok := m.paneRects()
-	if r == nil || !ok {
-		return false
-	}
-	rc := rects[focusDone]
-	c := m.doneSized(r, rects)[focusDone]
-	row := y - rc.y - 1
-	if row < len(c.pinned) || row >= rc.h-2 {
-		return false
-	}
-	_, _, first, _ := window(c, rc.h-2, m.scroll[focusDone])
-	return c.toggles[first+row-len(c.pinned)]
-}
-
-// toggleDone expands or collapses the What was done frame of the selected
-// session.
-func (m *Model) toggleDone() {
-	if r := m.current(); r != nil {
-		m.expanded[r.s.ID] = !m.expanded[r.s.ID]
-		m.scroll[focusDone] = 0
-	}
+// sizedContent builds the frames' content for their actual size.
+func (m Model) sizedContent(r *row, rects [numFocus]rect) [numFocus]frameLines {
+	return m.frameContent(r, rects[focusDone].w-4)
 }

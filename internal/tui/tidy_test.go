@@ -63,3 +63,19 @@ func TestCommandParts(t *testing.T) {
 		}
 	}
 }
+
+func TestCommandCounts(t *testing.T) {
+	got := commandCounts([]string{
+		"cd /x && go test ./...", "go test ./internal/...", "go vet ./...",
+		"git -C /repo status", "git commit -m x", "/usr/bin/python3 a.py", "python3 b.py", "",
+	})
+	want := []db.Count{{Name: "go test", N: 2}, {Name: "python3", N: 2}, {Name: "git commit", N: 1}, {Name: "git status", N: 1}, {Name: "go vet", N: 1}}
+	if len(got) != len(want) {
+		t.Fatalf("got %+v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("%d: got %+v want %+v", i, got[i], want[i])
+		}
+	}
+}

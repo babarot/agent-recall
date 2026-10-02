@@ -18,7 +18,7 @@ type Detail struct {
 	// most edited first; FileCount is how many distinct files there were.
 	Files     []Count
 	FileCount int
-	// Commands are the last Bash commands, newest first.
+	// Commands are the session's Bash commands, newest first.
 	Commands []string
 	// Activity is the number of messages in each of 24 equal slices of the
 	// session, from its first message to its last.
@@ -42,7 +42,7 @@ const (
 	// Enough for the frames to scroll through; a session rarely has more.
 	detailTools    = 6
 	detailFiles    = 200
-	detailCommands = 50
+	detailCommands = 2000
 	detailTail     = 200
 	detailBuckets  = 24
 )
