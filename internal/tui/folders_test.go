@@ -367,3 +367,20 @@ func TestSidebarHighlightsMatches(t *testing.T) {
 		t.Fatalf("the matched runes should be highlighted:\n%q", out)
 	}
 }
+
+func TestHLWorkLikeTheArrows(t *testing.T) {
+	f := newFolderFixture(t)
+	m := press(t, folderModel(t, config.Default().TUI, f, 140, 40), "h")
+	if !m.sidebarShown() || m.focus != focusList {
+		t.Fatal("h opens the folder list")
+	}
+	if m = press(t, m, "h"); m.focus != focusFolders {
+		t.Fatal("h again moves into it")
+	}
+	if m = press(t, m, "l"); m.focus != focusList || !m.sidebarShown() {
+		t.Fatal("l returns to the sessions")
+	}
+	if m = press(t, m, "l"); m.sidebarShown() {
+		t.Fatal("l again closes the folder list")
+	}
+}
