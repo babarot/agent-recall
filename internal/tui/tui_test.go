@@ -353,10 +353,13 @@ func TestDetailPaneShowsThreeFrames(t *testing.T) {
 			t.Errorf("pane lacks %q:\n%s", want, s)
 		}
 	}
-	// Commands come after the files; scroll the frame to its end.
-	m = press(t, m, "]", "]", "G")
+	// The latest command shows collapsed; e expands the frame to all of them.
+	if !strings.Contains(s, "COMMANDS") || !strings.Contains(s, "go test ./...") {
+		t.Errorf("collapsed What was done lacks the latest command:\n%s", s)
+	}
+	m = press(t, m, "]", "]", "e", "G")
 	s = screen(m)
-	for _, want := range []string{"COMMANDS", "go test ./...", "git status"} {
+	for _, want := range []string{"COMMANDS", "git status", "show less"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("scrolled What was done lacks %q:\n%s", want, s)
 		}
@@ -418,7 +421,7 @@ func TestSplit(t *testing.T) {
 	if a, b := split(20, 8, 6); a != 14 || b != 6 {
 		t.Errorf("roomy split %d %d", a, b)
 	}
-	if a, b := split(16, 30, 30); a+b != 16 || b < minFrame || a < b {
+	if a, b := split(16, 30, 30); a+b != 16 || b < minFrame || a < minConversation {
 		t.Errorf("tight split %d %d", a, b)
 	}
 }
@@ -533,5 +536,61 @@ func TestConversationKeepsLastUserMessage(t *testing.T) {
 	s := screen(m)
 	if !strings.Contains(s, "please also add docs") || !strings.Contains(s, "later reply 9") {
 		t.Fatalf("pane should keep the last user message and the newest reply:\n%s", s)
+	}
+}
+
+// manyFiles makes the fake session edit more files than fit, in two places.
+func manyFiles(m Model) {
+	d := m.details[m.current().s.ID]
+	d.Files = nil
+	for i := range 30 {
+		d.Files = append(d.Files, db.Count{Name: fmt.Sprintf("/repo/pkg/file%02d.go", i), N: 1})
+	}
+	d.Files = append(d.Files, db.Count{Name: "/private/tmp/scratch.py", N: 1})
+	d.FileCount = len(d.Files)
+	for i := range 8 {
+		d.Commands = append(d.Commands, fmt.Sprintf("make step%d", i))
+	}
+}
+
+func TestCommandsStayVisibleWithManyFiles(t *testing.T) {
+	for _, h := range []int{40, 50, 60} {
+		m, _ := newTestModel(t, config.Default().TUI, 140, h)
+		manyFiles(m)
+		s := screen(m)
+		for _, want := range []string{"COMMANDS", "go test ./...", "more files", "more commands"} {
+			if !strings.Contains(s, want) {
+				t.Errorf("height %d: pane lacks %q:\n%s", h, want, s)
+			}
+		}
+	}
+}
+
+func TestClickMoreExpandsAndShowLessCollapses(t *testing.T) {
+	m, _ := newTestModel(t, config.Default().TUI, 140, 44)
+	manyFiles(m)
+	rects, _ := m.paneRects()
+	lines := strings.Split(screen(m), "\n")
+	y := -1
+	for i, l := range lines {
+		if strings.Contains(l, "more files") {
+			y = i
+		}
+	}
+	if y < 0 {
+		t.Fatal("no +N more files line")
+	}
+	m = update(t, m, tea.MouseClickMsg{X: rects[focusDone].x + 4, Y: y, Button: tea.MouseLeft})
+	if !m.expanded[m.current().s.ID] || m.focus != focusDone {
+		t.Fatalf("click did not expand (focus %v)", m.focus)
+	}
+	m = press(t, m, "G")
+	s := screen(m)
+	if !strings.Contains(s, "show less") || !strings.Contains(s, "make step7") {
+		t.Fatalf("expanded frame should end with every command and show less:\n%s", s)
+	}
+	m = press(t, m, "e")
+	if m.expanded[m.current().s.ID] {
+		t.Fatal("e should collapse again")
 	}
 }

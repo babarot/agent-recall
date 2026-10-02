@@ -200,6 +200,9 @@ func (m Model) renderHelp() string {
 		if m.focus != focusList {
 			pairs = [][2]string{{"↑↓", "scroll " + strings.ToLower(frameTitles[m.focus])}, {"[ ]", "next frame"},
 				{"esc", "back to list"}, {"enter", "resume"}, {"y", "copy id"}, {"q", "quit"}}
+			if m.focus == focusDone {
+				pairs = append(pairs[:3:3], append([][2]string{{"e", "expand"}}, pairs[3:]...)...)
+			}
 			break
 		}
 		fallthrough
