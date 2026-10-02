@@ -24,9 +24,17 @@ type askHit struct {
 	id, why string
 }
 
+// askAnswer is what an ask found, what it cost as claude reports it (in US
+// dollars), and the model that answered.
+type askAnswer struct {
+	hits  []askHit
+	cost  float64
+	model string
+}
+
 // askRunner asks question and returns what was found; progress hears about
 // each step as it happens.
-type askRunner func(ctx context.Context, question string, progress func(string)) ([]askHit, error)
+type askRunner func(ctx context.Context, question string, progress func(string)) (askAnswer, error)
 
 const askSchema = `{"type":"object","properties":{"sessions":{"type":"array","items":{"type":"object","properties":{"session_id":{"type":"string"},"why":{"type":"string"}},"required":["session_id","why"]}}},"required":["sessions"]}`
 
@@ -35,10 +43,10 @@ const askInstructions = `You find sessions in the user's archive of past Claude 
 // claudeRunner asks with the claude CLI, giving it recall's MCP server as
 // the command line recall (for example recall mcp --db PATH), from dir.
 func claudeRunner(recall []string, model, dir string) askRunner {
-	return func(ctx context.Context, question string, progress func(string)) ([]askHit, error) {
+	return func(ctx context.Context, question string, progress func(string)) (askAnswer, error) {
 		bin, err := exec.LookPath("claude")
 		if err != nil {
-			return nil, errors.New("claude (Claude Code) is not on PATH")
+			return askAnswer{}, errors.New("claude (Claude Code) is not on PATH")
 		}
 		mcp, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{
 			"recall": map[string]any{"command": recall[0], "args": recall[1:]},
@@ -60,36 +68,38 @@ func claudeRunner(recall []string, model, dir string) askRunner {
 		cmd.Stderr = &stderr
 		out, err := cmd.StdoutPipe()
 		if err != nil {
-			return nil, err
+			return askAnswer{}, err
 		}
 		if err := cmd.Start(); err != nil {
-			return nil, err
+			return askAnswer{}, err
 		}
-		hits, readErr := readAskStream(out, progress)
+		answer, readErr := readAskStream(out, progress)
 		waitErr := cmd.Wait()
 		if ctx.Err() != nil {
-			return nil, ctx.Err()
+			return askAnswer{}, ctx.Err()
 		}
 		if readErr != nil {
-			return nil, readErr
+			return askAnswer{}, readErr
 		}
 		if waitErr != nil {
 			msg := strings.TrimSpace(stderr.String())
 			if i := strings.LastIndex(msg, "\n"); i >= 0 {
 				msg = msg[i+1:]
 			}
-			return nil, fmt.Errorf("claude: %v %s", waitErr, msg)
+			return askAnswer{}, fmt.Errorf("claude: %v %s", waitErr, msg)
 		}
-		return hits, nil
+		return answer, nil
 	}
 }
 
 // streamEvent is the part of a stream-json line that asking reads.
 type streamEvent struct {
-	Type    string `json:"type"`
-	IsError bool   `json:"is_error"`
-	Result  string `json:"result"`
-	Message struct {
+	Type       string                     `json:"type"`
+	IsError    bool                       `json:"is_error"`
+	Result     string                     `json:"result"`
+	Cost       float64                    `json:"total_cost_usd"`
+	ModelUsage map[string]json.RawMessage `json:"modelUsage"`
+	Message    struct {
 		Content []struct {
 			Type  string          `json:"type"`
 			Name  string          `json:"name"`
@@ -106,7 +116,7 @@ type streamEvent struct {
 
 // readAskStream follows claude's stream-json output to its result: each
 // recall call is reported to progress, and the structured answer returned.
-func readAskStream(r io.Reader, progress func(string)) ([]askHit, error) {
+func readAskStream(r io.Reader, progress func(string)) (askAnswer, error) {
 	br := bufio.NewReader(r)
 	for {
 		line, err := br.ReadBytes('\n')
@@ -124,24 +134,35 @@ func readAskStream(r io.Reader, progress func(string)) ([]askHit, error) {
 					}
 				case "result":
 					if ev.IsError {
-						return nil, fmt.Errorf("claude: %s", ev.Result)
+						return askAnswer{}, fmt.Errorf("claude: %s", ev.Result)
 					}
 					if ev.Structured == nil {
-						return nil, errors.New("claude gave no structured answer")
+						return askAnswer{}, errors.New("claude gave no structured answer")
 					}
-					var hits []askHit
+					a := askAnswer{cost: ev.Cost}
 					for _, s := range ev.Structured.Sessions {
-						hits = append(hits, askHit{strings.TrimSpace(s.ID), strings.TrimSpace(s.Why)})
+						a.hits = append(a.hits, askHit{strings.TrimSpace(s.ID), strings.TrimSpace(s.Why)})
 					}
-					return hits, nil
+					// The model that cost the most, when several worked on it.
+					top := -1.0
+					for name, raw := range ev.ModelUsage {
+						var u struct {
+							Cost float64 `json:"costUSD"`
+						}
+						_ = json.Unmarshal(raw, &u)
+						if u.Cost > top || u.Cost == top && name < a.model {
+							a.model, top = name, u.Cost
+						}
+					}
+					return a, nil
 				}
 			}
 		}
 		if err != nil {
 			if err == io.EOF {
-				return nil, errors.New("claude ended without an answer")
+				return askAnswer{}, errors.New("claude ended without an answer")
 			}
-			return nil, err
+			return askAnswer{}, err
 		}
 	}
 }

@@ -170,7 +170,7 @@ func New(sessions []db.Session, source Source, cfg config.TUI) Model {
 
 	m := Model{
 		ask:        askState{input: newAskInput()},
-		askRun:     claudeRunner([]string{"recall", "mcp"}, cfg.AskModel, ""),
+		askRun:     claudeRunner([]string{"recall", "mcp"}, config.ModelID(cfg.AskModel), ""),
 		reasons:    map[string]string{},
 		sideSearch: ss,
 		resolver:   resolver,

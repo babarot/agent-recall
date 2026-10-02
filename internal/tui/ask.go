@@ -9,6 +9,8 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/babarot/claude-recall/internal/config"
 )
 
 // a asks Claude to find sessions, in a box over the screen: type a
@@ -40,6 +42,8 @@ type askState struct {
 	started  time.Time
 	took     time.Duration
 	hits     []askHit
+	cost     float64
+	model    string
 	sel      int
 	err      string
 	cancel   context.CancelFunc
@@ -53,9 +57,9 @@ type askStepMsg struct {
 }
 
 type askDoneMsg struct {
-	seq  int
-	hits []askHit
-	err  error
+	seq    int
+	answer askAnswer
+	err    error
 }
 
 type askTickMsg struct{ seq int }
@@ -63,7 +67,7 @@ type askTickMsg struct{ seq int }
 // AskWith makes asking give Claude recall's MCP server as the command line
 // recall (this binary, with its database) and run it from dir.
 func (m Model) AskWith(recall []string, dir string) Model {
-	m.askRun = claudeRunner(recall, m.cfg.AskModel, dir)
+	m.askRun = claudeRunner(recall, config.ModelID(m.cfg.AskModel), dir)
 	return m
 }
 
@@ -98,8 +102,8 @@ func (m *Model) startAsk() tea.Cmd {
 	ch := make(chan tea.Msg, 64)
 	run := m.askRun
 	go func() {
-		hits, err := run(ctx, q, func(step string) { ch <- askStepMsg{seq: seq, step: step} })
-		ch <- askDoneMsg{seq, hits, err}
+		answer, err := run(ctx, q, func(step string) { ch <- askStepMsg{seq: seq, step: step} })
+		ch <- askDoneMsg{seq, answer, err}
 		close(ch)
 	}()
 	return tea.Batch(waitAsk(ch), m.askTick(seq))
@@ -140,7 +144,8 @@ func (m *Model) askMsg(msg tea.Msg) tea.Cmd {
 			return nil
 		}
 		m.ask.stage, m.ask.sel = askAnswered, 0
-		m.ask.hits = m.resolveHits(msg.hits)
+		m.ask.hits = m.resolveHits(msg.answer.hits)
+		m.ask.cost, m.ask.model = msg.answer.cost, msg.answer.model
 		for _, h := range m.ask.hits {
 			m.reasons[h.id] = h.why
 		}
@@ -308,7 +313,7 @@ func (m Model) withAsk(screen string) string {
 		title, hint = "Ask Claude", "enter ask · esc close"
 		body = []string{m.ask.input.View(),
 			m.st.muted.Render(`  e.g. "the session where we fixed the terraform state" · "who looked at PR #7427"`), "",
-			m.st.dim.Render(fmt.Sprintf("  claude -p · %s · searches with recall only (no files, no shell)", m.cfg.AskModel)),
+			m.st.dim.Render(fmt.Sprintf("  claude -p · %s · searches with recall only (no files, no shell)", config.ModelID(m.cfg.AskModel))),
 			m.st.dim.Render("  uses your Claude plan, as Claude Code does")}
 	case askRunning:
 		elapsed := m.now().Sub(m.ask.started)
@@ -325,7 +330,7 @@ func (m Model) withAsk(screen string) string {
 		}
 	case askAnswered:
 		title = fmt.Sprintf("Ask Claude · %d sessions", len(m.ask.hits))
-		hint = fmt.Sprintf("%ds", int(m.ask.took.Seconds()))
+		hint = m.askSummary()
 		body = []string{ansi.Truncate(q, inner, ellipsis), ""}
 		if len(m.ask.hits) == 0 {
 			body = append(body, m.st.muted.Render("  No session matched. r asks again."))
@@ -370,6 +375,20 @@ func (m Model) withAsk(screen string) string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// askSummary says how an answer came: the model, how long it took and,
+// with tui.ask_show_cost, what claude says it cost.
+func (m Model) askSummary() string {
+	parts := []string{}
+	if m.ask.model != "" {
+		parts = append(parts, m.ask.model)
+	}
+	parts = append(parts, fmt.Sprintf("%ds", int(m.ask.took.Seconds())))
+	if m.cfg.AskShowCost && m.ask.cost > 0 {
+		parts = append(parts, fmt.Sprintf("$%.2f", m.ask.cost))
+	}
+	return strings.Join(parts, " · ")
 }
 
 // askItem is a found session in the box: its title and where it is, then

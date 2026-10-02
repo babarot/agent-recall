@@ -93,3 +93,19 @@ func TestTemplateLoadsAsTheDefaults(t *testing.T) {
 		t.Error("README.md should show the config template as written")
 	}
 }
+
+func TestModelID(t *testing.T) {
+	cases := map[string]string{
+		"sonnet-5.5":        "claude-sonnet-5-5",
+		"Opus-5.5":          "claude-opus-5-5",
+		"haiku-4.5":         "claude-haiku-4-5",
+		"fable-5.1":         "claude-fable-5-1",
+		"claude-sonnet-5-5": "claude-sonnet-5-5",
+		"sonnet":            "sonnet",
+	}
+	for in, want := range cases {
+		if got := ModelID(in); got != want {
+			t.Errorf("ModelID(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

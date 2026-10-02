@@ -15,22 +15,23 @@ import (
 // fails with err; it records what it was asked.
 type fakeAsk struct {
 	hits  []askHit
+	cost  float64
 	err   error
 	asked []string
 	block chan struct{} // when set, waits for it or the cancel
 }
 
-func (f *fakeAsk) run(ctx context.Context, q string, progress func(string)) ([]askHit, error) {
+func (f *fakeAsk) run(ctx context.Context, q string, progress func(string)) (askAnswer, error) {
 	f.asked = append(f.asked, q)
 	progress(`search "` + q + `"`)
 	if f.block != nil {
 		select {
 		case <-f.block:
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return askAnswer{}, ctx.Err()
 		}
 	}
-	return f.hits, f.err
+	return askAnswer{hits: f.hits, cost: f.cost, model: "claude-sonnet-5-5"}, f.err
 }
 
 // settleAsk runs what a key started until the answer is in, leaving out
@@ -78,7 +79,7 @@ func TestAskFindsSessions(t *testing.T) {
 	f := &fakeAsk{hits: []askHit{{"cccccccc", "talked about the parser"}, {"made-up1", "not a session"}, {"aaaa", "the login bug"}, {"cccc", "again"}}}
 	m := askModel(t, f, config.Default().TUI)
 	m = press(t, m, "a")
-	if m.ask.stage != askTyping || !strings.Contains(screen(m), "Ask Claude") || !strings.Contains(screen(m), "claude -p · sonnet") {
+	if m.ask.stage != askTyping || !strings.Contains(screen(m), "Ask Claude") || !strings.Contains(screen(m), "claude -p · claude-sonnet-5-5") {
 		t.Fatalf("a should open the box:\n%s", screen(m))
 	}
 	m = press(t, m, "esc")
@@ -187,12 +188,12 @@ func TestReadAskStream(t *testing.T) {
 		`{"type":"user","message":{"content":[{"type":"tool_result","content":"..."}]}}`,
 		`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"mcp__recall__recall_list","input":{"project":"dotfiles","limit":5}}]}}`,
 		`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"StructuredOutput","input":{}}]}}`,
-		`{"type":"result","subtype":"success","is_error":false,"structured_output":{"sessions":[{"session_id":"4683157c","why":" herdr layouts "}]}}`,
+		`{"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.1075,"modelUsage":{"claude-haiku-4-5":{"costUSD":0.002},"claude-sonnet-5-5":{"costUSD":0.105}},"structured_output":{"sessions":[{"session_id":"4683157c","why":" herdr layouts "}]}}`,
 	}, "\n") + "\n"
 	var steps []string
-	hits, err := readAskStream(strings.NewReader(stream), func(s string) { steps = append(steps, s) })
-	if err != nil || len(hits) != 1 || hits[0] != (askHit{"4683157c", "herdr layouts"}) {
-		t.Fatalf("hits %+v err %v", hits, err)
+	a, err := readAskStream(strings.NewReader(stream), func(s string) { steps = append(steps, s) })
+	if err != nil || len(a.hits) != 1 || a.hits[0] != (askHit{"4683157c", "herdr layouts"}) || a.cost != 0.1075 || a.model != "claude-sonnet-5-5" {
+		t.Fatalf("answer %+v err %v", a, err)
 	}
 	if strings.Join(steps, "|") != `search "herdr layout"|list project:dotfiles limit:5` {
 		t.Fatalf("steps %q", steps)
@@ -202,5 +203,23 @@ func TestReadAskStream(t *testing.T) {
 	}
 	if _, err := readAskStream(strings.NewReader(`{"type":"system"}`+"\n"), func(string) {}); err == nil {
 		t.Fatal("a stream without a result is an error")
+	}
+}
+
+func TestAskShowsModelAndCost(t *testing.T) {
+	f := &fakeAsk{hits: []askHit{{"cccccccc", "the parser"}}, cost: 0.1075}
+	m := ask(t, askModel(t, f, config.Default().TUI), "q")
+	if s := screen(m); !strings.Contains(s, "claude-sonnet-5-5 · ") || !strings.Contains(s, "· $0.11") {
+		t.Fatalf("the answer should say the model and cost:\n%s", s)
+	}
+	cfg := config.Default().TUI
+	cfg.AskShowCost = false
+	m = ask(t, askModel(t, f, cfg), "q")
+	if s := screen(m); strings.Contains(s, "$0.11") || !strings.Contains(s, "claude-sonnet-5-5") {
+		t.Fatalf("with ask_show_cost off, no cost:\n%s", s)
+	}
+	// The box names the model it will use, as claude takes it.
+	if s := screen(press(t, askModel(t, f, config.Default().TUI), "a")); !strings.Contains(s, "claude -p · claude-sonnet-5-5") {
+		t.Fatalf("typing:\n%s", s)
 	}
 }
