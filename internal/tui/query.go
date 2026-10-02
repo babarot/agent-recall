@@ -2,18 +2,27 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/x/ansi"
 )
 
-// The filter is words to find in a session's title, folder, branch or ID,
-// and key:value terms that narrow by one field. in:<folder> is the first
-// such term; new ones get a field in query and a case in parseQuery.
+// The filter is words to find in a session's title, folder, branch, ID or
+// conversation, and key:value terms that look in one field only: in:
+// (folder), text: (conversation), title:, branch:, worktree: and id:. A new
+// one gets a field in query, a line in query.fields and a case in match;
+// one whose values are few enough to list also gets a line in completers.
 
 const (
-	inPrefix   = "in:"
-	maxSuggest = 8
+	inPrefix       = "in:"
+	textPrefix     = "text:"
+	titlePrefix    = "title:"
+	branchPrefix   = "branch:"
+	worktreePrefix = "worktree:"
+	idPrefix       = "id:"
+	maxSuggest     = 8
 	// The suggestion box opens under the filter line, this far in.
 	suggestX, suggestTop = 3, 2
 	maxSuggestW          = 48
@@ -26,29 +35,74 @@ type query struct {
 	// contains any of them. They override the folder the list is narrowed
 	// to.
 	in []string
+	// text are words to find only in the conversation.
+	text []string
+	// title, branch and worktree are parts of those fields, id the start of
+	// the session ID. Several of one key match any of them.
+	title, branch, worktree, id []string
+}
+
+// fields maps each key to where its values go.
+func (q *query) fields() map[string]*[]string {
+	return map[string]*[]string{
+		inPrefix: &q.in, textPrefix: &q.text, titlePrefix: &q.title,
+		branchPrefix: &q.branch, worktreePrefix: &q.worktree, idPrefix: &q.id,
+	}
 }
 
 func parseQuery(s string) query {
 	var q query
+	fields := q.fields()
 	for w := range strings.FieldsSeq(strings.ToLower(s)) {
-		if v, ok := strings.CutPrefix(w, inPrefix); ok {
-			if v != "" {
-				q.in = append(q.in, v)
+		if key, v, ok := strings.Cut(w, ":"); ok {
+			if dst, known := fields[key+":"]; known {
+				if v != "" {
+					*dst = append(*dst, v)
+				}
+				continue
 			}
-			continue
 		}
 		q.words = append(q.words, w)
 	}
 	return q
 }
 
-// match reports whether r passes the query, the folder scope aside.
-func (q query) match(r *row) bool {
+// anyOf reports whether test holds for one of vs, or vs is empty.
+func anyOf(vs []string, test func(v string) bool) bool {
+	if len(vs) == 0 {
+		return true
+	}
+	for _, v := range vs {
+		if test(v) {
+			return true
+		}
+	}
+	return false
+}
+
+// match reports whether r passes the query, the folder scope aside. A
+// plain word may be in the session's fields or its conversation; a text:
+// word only in the conversation. Words still being looked up in the
+// conversation match only the fields until they are found.
+func (m Model) match(q query, r *row) bool {
 	if len(q.in) > 0 && !q.inFolder(r.groupName) {
 		return false
 	}
+	in := func(field string) func(string) bool {
+		field = strings.ToLower(field)
+		return func(v string) bool { return strings.Contains(field, v) }
+	}
+	if !anyOf(q.title, in(r.title)) || !anyOf(q.branch, in(r.s.GitBranch)) || !anyOf(q.worktree, in(r.worktree)) ||
+		!anyOf(q.id, func(v string) bool { return strings.HasPrefix(strings.ToLower(r.s.ID), v) }) {
+		return false
+	}
 	for _, w := range q.words {
-		if !strings.Contains(r.search, w) {
+		if !strings.Contains(r.search, w) && !m.said(w, r.s.ID) {
+			return false
+		}
+	}
+	for _, w := range q.text {
+		if !m.said(w, r.s.ID) {
 			return false
 		}
 	}
@@ -77,8 +131,116 @@ func (q query) inFolder(name string) bool {
 	return false
 }
 
-// completion tracks tab cycling through folder suggestions: base is what
-// was typed before the first tab, idx the suggestion shown and value the
+// keyOrder lists the keys for the key hint.
+var keyOrder = []string{inPrefix, textPrefix, titlePrefix, branchPrefix, worktreePrefix, idPrefix}
+
+// minKeyHint is how much of a key's name brings up its hint: two letters
+// tell every key apart (te for text:, ti for title:).
+const minKeyHint = 2
+
+// keyHint is the rest of the key whose name starts with the word being
+// typed at the end of the filter ("anch:" after "bra"), or "".
+func (m Model) keyHint() string {
+	v := m.filter.Value()
+	if m.filter.Position() != len([]rune(v)) {
+		return ""
+	}
+	word := strings.ToLower(v[strings.LastIndex(v, " ")+1:])
+	if len([]rune(word)) < minKeyHint || strings.Contains(word, ":") {
+		return ""
+	}
+	for _, k := range keyOrder {
+		if strings.HasPrefix(k, word) {
+			return k[len(word):]
+		}
+	}
+	return ""
+}
+
+// keyHintKey is the whole key the hint completes.
+func (m Model) keyHintKey() string {
+	v := m.filter.Value()
+	return strings.ToLower(v[strings.LastIndex(v, " ")+1:]) + m.keyHint()
+}
+
+// acceptKeyHint types the rest of the hinted key.
+func (m *Model) acceptKeyHint() bool {
+	hint := m.keyHint()
+	if hint == "" {
+		return false
+	}
+	m.filter.SetValue(m.filter.Value() + hint)
+	m.filter.CursorEnd()
+	return true
+}
+
+// completers are the keys whose values the filter suggests while one is
+// typed, and how: folders fuzzily, as in: matches; branches and worktrees
+// by the part typed, most recently used first.
+func (m Model) completers() map[string]func(frag string) []sideEntry {
+	return map[string]func(string) []sideEntry{
+		inPrefix:       m.rankFolders,
+		branchPrefix:   func(f string) []sideEntry { return containing(m.branches, f) },
+		worktreePrefix: func(f string) []sideEntry { return containing(m.worktrees, f) },
+	}
+}
+
+// containing lists the values that contain frag, with where it matched.
+func containing(values []sideEntry, frag string) []sideEntry {
+	var out []sideEntry
+	for _, v := range values {
+		i := strings.Index(strings.ToLower(v.name), frag)
+		if i < 0 {
+			continue
+		}
+		start := len([]rune(v.name[:i]))
+		var hits []int
+		for j := range len([]rune(frag)) {
+			hits = append(hits, start+j)
+		}
+		v.hits = hits
+		out = append(out, v)
+	}
+	return out
+}
+
+// values lists the distinct non-empty values of a field over rows, most
+// recently used first, with how many sessions have each.
+func values(rows []row, field func(*row) string) []sideEntry {
+	at := map[string]int{}
+	var out []sideEntry
+	var last []time.Time
+	for i := range rows {
+		v := field(&rows[i])
+		if v == "" {
+			continue
+		}
+		j, ok := at[v]
+		if !ok {
+			j = len(out)
+			at[v] = j
+			out = append(out, sideEntry{key: v, name: v})
+			last = append(last, rows[i].s.EndedAt)
+		}
+		out[j].count++
+		if rows[i].s.EndedAt.After(last[j]) {
+			last[j] = rows[i].s.EndedAt
+		}
+	}
+	order := make([]int, len(out))
+	for i := range order {
+		order[i] = i
+	}
+	slices.SortStableFunc(order, func(a, b int) int { return last[b].Compare(last[a]) })
+	sorted := make([]sideEntry, len(out))
+	for i, j := range order {
+		sorted[i] = out[j]
+	}
+	return sorted
+}
+
+// completion tracks tab cycling through suggestions: base is what was
+// typed before the first tab, idx the suggestion shown and value the
 // filter after it.
 type completion struct {
 	active      bool
@@ -86,9 +248,10 @@ type completion struct {
 	idx         int
 }
 
-// inTerm returns the filter term around the cursor when it is an in: term:
-// where it starts and ends, in runes, and the folder fragment typed so far.
-func (m Model) inTerm() (start, end int, frag string, ok bool) {
+// keyTerm returns the filter term around the cursor when it is a key with
+// suggestions: where it starts and ends, in runes, the key with its colon,
+// and the value typed so far.
+func (m Model) keyTerm() (start, end int, key, frag string, ok bool) {
 	v := []rune(m.filter.Value())
 	pos := min(m.filter.Position(), len(v))
 	start, end = pos, pos
@@ -98,12 +261,15 @@ func (m Model) inTerm() (start, end int, frag string, ok bool) {
 	for end < len(v) && v[end] != ' ' {
 		end++
 	}
-	term := string(v[start:end])
-	if !strings.HasPrefix(strings.ToLower(term), inPrefix) {
-		return 0, 0, "", false
+	k, val, found := strings.Cut(strings.ToLower(string(v[start:end])), ":")
+	if _, ok := m.completers()[k+":"]; !found || !ok {
+		return 0, 0, "", "", false
 	}
-	return start, end, strings.ToLower(term[len(inPrefix):]), true
+	return start, end, k + ":", val, true
 }
+
+// candidates are the suggestions for a key and the value typed so far.
+func (m Model) candidates(key, frag string) []sideEntry { return m.completers()[key](frag) }
 
 // suggestions are the folders for the in: term being typed, and which one
 // is highlighted.
@@ -111,14 +277,14 @@ func (m Model) suggestions() ([]sideEntry, int) {
 	if m.mode != modeFilter || m.sugHidden {
 		return nil, 0
 	}
-	_, _, frag, ok := m.inTerm()
+	_, _, key, frag, ok := m.keyTerm()
 	if !ok {
 		return nil, 0
 	}
 	if m.comp.active && m.comp.value == m.filter.Value() {
-		return m.foldersMatching(m.comp.base), m.comp.idx
+		return m.candidates(key, m.comp.base), m.comp.idx
 	}
-	list := m.foldersMatching(frag)
+	list := m.candidates(key, frag)
 	return list, max(0, min(m.sugSel, len(list)-1))
 }
 
@@ -150,10 +316,10 @@ func (m *Model) acceptSuggestion() {
 	m.pickSuggestion(idx)
 }
 
-// complete replaces the in: term with the next (delta 1) or previous
+// complete replaces the key's term with the next (delta 1) or previous
 // suggestion.
 func (m *Model) complete(delta int) bool {
-	start, end, frag, ok := m.inTerm()
+	start, end, key, frag, ok := m.keyTerm()
 	if !ok {
 		return false
 	}
@@ -165,13 +331,13 @@ func (m *Model) complete(delta int) bool {
 			m.comp.idx = sel + 1
 		}
 	}
-	all := m.foldersMatching(m.comp.base)
+	all := m.candidates(key, m.comp.base)
 	if len(all) == 0 {
 		m.comp.active = false
 		return false
 	}
 	m.comp.idx = (m.comp.idx + delta + len(all)) % len(all)
-	m.comp.value = m.replaceTerm(start, end, inPrefix+all[m.comp.idx].name)
+	m.comp.value = m.replaceTerm(start, end, key+all[m.comp.idx].name)
 	m.sugSel = m.comp.idx
 	m.reveal(m.comp.idx)
 	return true
@@ -211,11 +377,11 @@ func (m Model) suggestionAt(x, y int) int {
 	return -1
 }
 
-// pickSuggestion completes the in: term with suggestion i and a space, so
-// the box closes and the next word can follow.
+// pickSuggestion completes the key's term with suggestion i and a space,
+// so the box closes and the next word can follow.
 func (m *Model) pickSuggestion(i int) {
 	list, _ := m.suggestions()
-	start, end, _, ok := m.inTerm()
+	start, end, key, _, ok := m.keyTerm()
 	if !ok || i < 0 || i >= len(list) {
 		return
 	}
@@ -223,7 +389,7 @@ func (m *Model) pickSuggestion(i int) {
 	if end < len(v) && v[end] == ' ' {
 		end++
 	}
-	m.replaceTerm(start, end, inPrefix+list[i].name+" ")
+	m.replaceTerm(start, end, key+list[i].name+" ")
 	m.comp.active = false
 	m.sugOff, m.sugSel = 0, 0
 }
@@ -233,9 +399,6 @@ func (m *Model) scrollSuggestions(delta int) {
 	list, _ := m.suggestions()
 	m.sugOff = max(0, min(m.sugOff+delta, len(list)-maxSuggest))
 }
-
-// foldersMatching lists the folders an in: fragment matches, best first.
-func (m Model) foldersMatching(frag string) []sideEntry { return m.rankFolders(frag) }
 
 // suggestBox draws up to maxSuggest suggestions from from in a rounded box
 // w cells wide, with how many more lie above and below on its edges.

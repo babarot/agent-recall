@@ -2,6 +2,7 @@ package db
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -267,5 +268,31 @@ func TestSessionDetail(t *testing.T) {
 	}
 	if len(got.Activity) != 24 {
 		t.Errorf("activity %v", got.Activity)
+	}
+}
+
+func TestSessionsWithText(t *testing.T) {
+	d := newTestDB(t)
+	seedSession(t, d, "s1", "p", "/p")
+	seedSession(t, d, "s2", "p", "/p")
+	seedMessage(t, d, "s1", "m1", "user", "ドキュメントを作成して", ts, 0)
+	seedMessage(t, d, "s1", "m2", "assistant", "Created the Worktree", ts, 1)
+	seedMessage(t, d, "s2", "m3", "user", "100% done_now", ts, 0)
+	cases := map[string]string{
+		"ドキュメント":   "s1", // inside a run of Japanese, which FTS cannot split
+		"キュメ":      "s1",
+		"worktree": "s1", // ASCII case is ignored
+		"100%":     "s2",
+		"e_n":      "s2", // _ is literal
+		"0%d":      "",   // % is literal
+	}
+	for q, want := range cases {
+		ids, err := d.SessionsWithText(q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Join(ids, ","); got != want {
+			t.Errorf("SessionsWithText(%q) = %q, want %q", q, got, want)
+		}
 	}
 }

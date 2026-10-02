@@ -136,7 +136,7 @@ recall version
 | `y` | Copy the session ID, to hand it to another agent ("look this session up with claude-recall") |
 | `Y` | Copy the resume command |
 | `Space` | Preview the start and end of the conversation |
-| `/` | Filter by title, folder, branch or ID; `in:<folder>` keeps the sessions of folders whose name matches it fuzzily, as the folder list's search does (`in:bdot` for babarot/dotfiles), over the folder the list is narrowed to (while the folder suggestions show, `↑` `↓` and `Enter` pick one, `Tab` completes the highlighted one, `Esc` closes them; the mouse clicks and scrolls them too); `Esc` clears the filter |
+| `/` | Filter by title, folder, branch, ID or what was said in the conversation (words of two letters or more are looked up there too, in the background); `text:<word>` looks only in the conversation, and `title:`, `branch:`, `worktree:` (parts of those) and `id:` (the start of the ID) only in that field, several of one key matching any of them; `in:<folder>` keeps the sessions of folders whose name matches it fuzzily, as the folder list's search does (`in:bdot` for babarot/dotfiles), over the folder the list is narrowed to (two letters of a key, such as `bra`, show the rest faintly, and `Tab` or `→` types it; `in:`, `branch:` and `worktree:` then suggest their values as you type; while the suggestions show, `↑` `↓` and `Enter` pick one, `Tab` completes the highlighted one, `Esc` closes them; the mouse clicks and scrolls them too); `Esc` clears the filter |
 | `s` | Sort by ended, started, message count or size |
 | `.` | Switch between the folder `recall` was started in and all folders |
 | `←` `→` / `h` `l` | Show or hide the folder list. `←` opens it and, pressed again, moves into it; `↑` `↓` there pick a folder and `/` searches the folders by fuzzy match (`bdot` finds babarot/dotfiles; `Enter` keeps the search, `Esc` clears it); `→` (or `Enter`) returns to the sessions, and `→` again closes it. The focused side has accent rules and the selection bar |
@@ -153,23 +153,25 @@ The detail pane has three frames: Conversation (the first request, a `⋮ N mess
 
 With the mouse: click a session to select it, click a frame to focus it, scroll the wheel over the list or over a frame, and drag the pane's top edge (or the row count line just above it) to resize the pane. While the TUI has the mouse, most terminals still select text when you hold Shift (Option in iTerm2) while dragging.
 
-`~/.config/claude-recall/config.toml` (or `$XDG_CONFIG_HOME/claude-recall/config.toml`):
+`~/.config/claude-recall/config.toml` (or `$XDG_CONFIG_HOME/claude-recall/config.toml`). `recall` writes it the first time it runs, with every setting at its default and commented out; uncomment a line to change it. An unknown key, or a setting outside `[tui]`, is reported instead of ignored.
 
 ```toml
+# claude-recall settings. Uncomment a line to change it.
+
 [tui]
 # Where the detail pane goes: "bottom" (default), "right", or "auto" to put it
 # on the right when the terminal is at least detail_auto_width columns wide.
-detail_position = "bottom"
-detail_auto_width = 160
+# detail_position = "bottom"
+# detail_auto_width = 160
 # Initial height of the detail pane below the list, in lines (at least 10).
-detail_height = 16
+# detail_height = 16
 # Color scheme: "auto" (default) picks catppuccin-mocha on a dark terminal and
 # catppuccin-latte on a light one. Also: tokyo-night, dracula, nord,
 # gruvbox-dark, and ansi (the terminal's own 16 colors).
-theme = "auto"
+# theme = "auto"
 # Which sessions to start with: "folder" (default) for the repository recall is
 # started in, when it has sessions, or "all".
-scope = "folder"
+# scope = "folder"
 ```
 
 The look follows [cc360](https://github.com/achton/cc360). A worktree that has since been removed is shown struck through, with its repository and name guessed from where herdr (`~/.herdr/worktrees/<repo>/worktree-<name>`) or Claude Code (`<repo>/.claude/worktrees/<name>`) put it.

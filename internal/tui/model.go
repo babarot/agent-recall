@@ -32,6 +32,8 @@ type Resume struct {
 type Source interface {
 	SessionPreview(sessionID string, head, tail int) (db.Preview, error)
 	SessionDetail(sessionID string) (*db.Detail, error)
+	// SessionsWithText lists the sessions whose conversation contains text.
+	SessionsWithText(text string) ([]string, error)
 }
 
 type mode int
@@ -83,11 +85,14 @@ type Model struct {
 	resolver *worktree.Resolver
 	// folders are what the list can be narrowed to; scope is the chosen
 	// one's key ("" for all) and startFolder the one the TUI started in.
-	folders     []folderInfo
-	scope       string
-	startFolder string
-	sidebar     bool // the folder list is open
-	sideOffset  int
+	folders []folderInfo
+	// branches and worktrees are the values the filter suggests for
+	// branch: and worktree:.
+	branches, worktrees []sideEntry
+	scope               string
+	startFolder         string
+	sidebar             bool // the folder list is open
+	sideOffset          int
 	// sideSearch narrows the folder list; sideTyping is set while it has
 	// the keys.
 	sideSearch textinput.Model
@@ -100,6 +105,7 @@ type Model struct {
 	sortIdx        int
 
 	filter textinput.Model
+	text   textSearch
 	comp   completion
 	sugOff int // first suggestion shown
 	sugSel int // highlighted suggestion
@@ -143,7 +149,7 @@ func New(sessions []db.Session, source Source, cfg config.TUI) Model {
 
 	fi := textinput.New()
 	fi.Prompt = "/ "
-	fi.Placeholder = "filter by title, folder, branch or ID · in:folder"
+	fi.Placeholder = "filter by title, folder, branch, ID or what was said · in:folder · text:word"
 
 	ss := textinput.New()
 	ss.Prompt = "/ "
@@ -164,8 +170,11 @@ func New(sessions []db.Session, source Source, cfg config.TUI) Model {
 		filter:     fi,
 		preview:    viewport.New(),
 		details:    map[string]*db.Detail{},
+		text:       textSearch{found: map[string]map[string]bool{}, pending: map[string]bool{}, delay: textSearchDelay},
 		detailH:    max(config.MinDetailHeight, cfg.DetailHeight),
 	}
+	m.branches = values(m.rows, func(r *row) string { return r.s.GitBranch })
+	m.worktrees = values(m.rows, func(r *row) string { return r.worktree })
 	m.refresh()
 	return m
 }
@@ -250,7 +259,7 @@ func (m *Model) refresh() {
 		if m.scope != "" && len(q.in) == 0 && m.rows[i].group != m.scope {
 			continue
 		}
-		if q.match(&m.rows[i]) {
+		if m.match(q, &m.rows[i]) {
 			m.visible = append(m.visible, i)
 		}
 	}
@@ -363,7 +372,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			nm.focus = focusList
 		}
 		nm.loadDetail()
-		return nm, cmd
+		return nm, tea.Batch(cmd, nm.scheduleTextSearch())
 	}
 	return next, cmd
 }
@@ -419,6 +428,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sizePreview()
 		m.clamp()
 		return m, nil
+	case textSearchTick:
+		return m, m.startTextSearch(msg)
+	case textSearchDone:
+		return m, m.finishTextSearch(msg)
 	case toastExpired:
 		if msg.id == m.toastID {
 			m.toast = ""
@@ -632,12 +645,21 @@ func (m Model) updateFilter(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "ctrl+c":
 		return m, tea.Quit
-	case "tab", "shift+tab":
-		delta := 1
-		if msg.String() == "shift+tab" {
-			delta = -1
+	case "tab", "right":
+		// The hinted key first; then tab completes a value.
+		if m.acceptKeyHint() {
+			m.refresh()
+			return m, nil
 		}
-		if m.complete(delta) {
+		if msg.String() == "right" {
+			break
+		}
+		if m.complete(1) {
+			m.refresh()
+		}
+		return m, nil
+	case "shift+tab":
+		if m.complete(-1) {
 			m.refresh()
 		}
 		return m, nil

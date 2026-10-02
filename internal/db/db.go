@@ -192,3 +192,29 @@ func (d *DB) Search(query string, opts SearchOptions) ([]SearchResult, error) {
 	}
 	return results, rows.Err()
 }
+
+// SessionsWithText returns the IDs of the sessions whose conversation text
+// (what the user and Claude wrote) contains text, ignoring ASCII case. It
+// matches anywhere in a word, which the FTS index cannot do for Japanese and
+// other unspaced scripts, at the cost of reading every message.
+func (d *DB) SessionsWithText(text string) ([]string, error) {
+	pattern := "%" + likeEscaper.Replace(text) + "%"
+	rows, err := d.sql.Query(`SELECT DISTINCT session_id FROM messages
+        WHERE block_type = 'text' AND content LIKE ? ESCAPE '\'`, pattern)
+	if err != nil {
+		return nil, fmt.Errorf("sessions with text: %w", err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("sessions with text: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// likeEscaper makes % and _ in a LIKE pattern literal.
+var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
