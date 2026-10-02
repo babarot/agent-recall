@@ -10,15 +10,21 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"strings"
+	"syscall"
+
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/babarot/claude-recall/internal/config"
 	"github.com/babarot/claude-recall/internal/db"
+	"github.com/babarot/claude-recall/internal/tui"
 )
 
 const usage = `recall - Archive and search coding agent sessions (Go port, in progress)
 
 Usage:
+  recall [tui]                  Browse sessions interactively
   recall search <query> [opts]  Full-text search across sessions
 
 Global Options:
@@ -40,11 +46,16 @@ func main() {
 }
 
 func run(args []string, stdout io.Writer) error {
-	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" {
+	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
 		fmt.Fprint(stdout, usage)
 		return nil
 	}
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return runTUI(args)
+	}
 	switch args[0] {
+	case "tui":
+		return runTUI(args[1:])
 	case "search":
 		return runSearch(args[1:], stdout)
 	default:
@@ -117,4 +128,50 @@ func writeJSON(w io.Writer, v any) error {
 	}
 	_, err := w.Write(buf.Bytes())
 	return err
+}
+
+func runTUI(args []string) error {
+	fs := flag.NewFlagSet("tui", flag.ContinueOnError)
+	dbPath := fs.String("db", config.DefaultDBPath(), "database path")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	cfg, err := config.Load(config.FilePath())
+	if err != nil {
+		return err
+	}
+
+	d, err := db.Open(*dbPath, db.Options{ReadOnly: true})
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	sessions, err := d.Sessions()
+	if err != nil {
+		return err
+	}
+
+	final, err := tea.NewProgram(tui.New(sessions, d, cfg.TUI)).Run()
+	if err != nil {
+		return err
+	}
+	m, ok := final.(tui.Model)
+	if !ok || m.Result == nil {
+		return nil
+	}
+	d.Close()
+	return resume(*m.Result)
+}
+
+// resume replaces this process with claude -r, run from the session's folder
+// so Claude Code finds the transcript.
+func resume(r tui.Resume) error {
+	claude, err := exec.LookPath("claude")
+	if err != nil {
+		return errors.New("claude is not on PATH")
+	}
+	if err := os.Chdir(r.Dir); err != nil {
+		return fmt.Errorf("cd %s: %w", r.Dir, err)
+	}
+	return syscall.Exec(claude, []string{"claude", "-r", r.SessionID}, os.Environ())
 }
