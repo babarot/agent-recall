@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := build
 
-.PHONY: build install ui test clean demo
+.PHONY: build install ui test clean demo demo-ja
 
 # The web UI is built with npm and embedded into the binary (build tag
 # embedui). A plain `go build ./cmd/recall` works too; it leaves the UI out.
@@ -28,3 +28,10 @@ demo:
 	go build -o demo/.out/bin/recall ./cmd/recall
 	go run ./demo/gen
 	vhs demo/demo.tape
+
+# The same demo in Japanese, to demo/ja/demo.gif (not committed).
+demo-ja:
+	go build -o demo/.out/bin/recall ./cmd/recall
+	go run ./demo/gen -lang ja
+	mkdir -p demo/ja
+	vhs demo/demo-ja.tape
