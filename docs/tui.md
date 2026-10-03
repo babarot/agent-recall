@@ -21,7 +21,7 @@ The title is the session's `/rename` name, or else the title Claude Code generat
 | `+` `-` | Make the detail pane taller or shorter |
 | `Tab` `Shift+Tab` (or `]` `[`) | Move focus along the folder list (when shown), the sessions and the detail pane's frames, in the order they are laid out; `↑` `↓`, `j` `k`, PgUp, PgDn, `g` and `G` then scroll it, `Esc` returns to the list |
 | `?` | Show every key, grouped by where it works; `?`, `Esc` or `q` closes the list |
-| `q` | Quit |
+| `q` | Quit; over the spread conversation, put the pane back |
 
 ## Filter
 
@@ -88,7 +88,7 @@ Below the list, Details sits under Conversation in a few wide lines and What was
 
 ### Reading a conversation
 
-`Space` spreads the conversation over the detail pane, wrapped, and the pane grows to leave the list a few rows (`+` `-` or dragging its edge change how many, and they are remembered). `Tab` back to the list and `j` `k` read the next session in place; `Space` or `Esc` puts the pane back (from the list, `Esc` first clears the filter and Claude's answer, if any).
+`Space` spreads the conversation over the detail pane, wrapped, and the pane grows to leave the list a few rows (`+` `-` or dragging its edge change how many, and they are remembered). `Tab` back to the list and `j` `k` read the next session in place; `Space` or `Esc` puts the pane back, and so does `q` while the conversation has the focus (from the list, `q` quits and `Esc` first clears the filter and Claude's answer, if any).
 
 `/` searches the spread conversation, all of it, the messages the pane skips too. While there is a search, the pane shows the messages that have it, with two on each side and a marker for the ones between; every line with it is highlighted, and the pane scrolls to the first. `Enter` keeps the search, `n` and `N` go to the next and previous match, and `Esc` drops it and shows the conversation as before, from the top (a second `Esc` puts the pane back). The search carries over to the next session read in place. With the list focused, `/` is the list's filter as before.
 

@@ -371,7 +371,7 @@ func (m Model) renderHelp() string {
 		}
 		if m.expanded && m.focus == focusConv {
 			pairs = [][2]string{{"{down.1} {up.1}", "scroll"}, {"{search.0}", "search"}, {"{focus_next.0}", "sessions"},
-				{"{read.0} esc", "close"}, {"{resume.0}", "resume"}, {"{copy_id.0}", "copy id"}, {"{help.0}", "keys"}}
+				{"{read.0} {quit.0} esc", "close"}, {"{resume.0}", "resume"}, {"{copy_id.0}", "copy id"}, {"{help.0}", "keys"}}
 			break
 		}
 		if m.expanded {
