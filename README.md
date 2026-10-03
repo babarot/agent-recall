@@ -102,7 +102,7 @@ claude-recall is a recall tool, not a memory system. The goal is to make `grep ~
 
 [claude-mem](https://github.com/thedotmack/claude-mem) is an excellent project solving a related problem, and if it fits your workflow, you should use it. claude-recall deliberately solves a different one.
 
-claude-mem extends the agent's memory. It captures observations on every tool use, summarizes them with an LLM into structured facts, stores them in a vector DB, and injects the result into the next session's prompt. claude-recall doesn't touch the memory layer. It stores the JSONL files Claude Code already writes and searches them with SQLite FTS5.
+claude-mem extends the agent's memory, for Claude Code and many other agents. It captures observations on every tool use, summarizes them with an LLM into structured facts, stores them in a vector DB, and injects the result into the next session's prompt. claude-recall doesn't touch the memory layer. It stores the JSONL files Claude Code already writes and searches them with SQLite FTS5.
 
 |  | claude-mem | claude-recall |
 |---|---|---|
@@ -110,9 +110,11 @@ claude-mem extends the agent's memory. It captures observations on every tool us
 | Injection | Push (auto-injected at `SessionStart`) | Pull (looked up when needed) |
 | What's stored | LLM-summarized observations | Raw conversation, noise-stripped |
 | Search | FTS5 + Chroma vector hybrid | FTS5 only (deterministic) |
-| LLM calls | During indexing | Never while storing or searching; only when you ask Claude from the TUI (`a`), through your own `claude` |
+| LLM calls | During indexing, through a hosted observer, your own OpenRouter or Gemini key, or your Anthropic plan | Never while storing or searching; only when you ask Claude from the TUI (`a`), through your own `claude` |
+| Where data lives | Local, with optional cloud sync | Local only |
+| Agents | Claude Code, Codex, Gemini, OpenCode and more | Claude Code |
 | Runtime | Node + Bun + Python (uv) + Chroma, resident worker | One static binary, no daemon |
-| License | AGPL-3.0 | MIT |
+| License | Apache-2.0 | MIT |
 
 The tradeoff claude-recall picks:
 
