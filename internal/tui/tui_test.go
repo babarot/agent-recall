@@ -408,9 +408,35 @@ func TestDetailPaneShowsThreeFrames(t *testing.T) {
 			t.Errorf("What was done lacks %q:\n%s", want, s)
 		}
 	}
-	for _, re := range []string{`Bash +▇+ +6 │`, `go test +▇+ +1 │`, `git status +▇+ +1 │`} {
+	for _, re := range []string{`Bash +▇+ +6 [│┃]`, `go test +▇+ +1 [│┃]`, `git status +▇+ +1 [│┃]`} {
 		if !regexp.MustCompile(re).MatchString(s) {
 			t.Errorf("What was done lacks a bar like %s:\n%s", re, s)
+		}
+	}
+}
+
+func TestScrollbarFollowsConfig(t *testing.T) {
+	cfg := config.Default().TUI
+	cfg.ScrollbarThumb = config.ThumbBlock
+	m, _ := newTestModel(t, cfg, 140, 40)
+	if s := screen(m); !regexp.MustCompile(`Bash +▇+ +6 [│█]`).MatchString(s) || !strings.Contains(s, "█") {
+		t.Errorf("no block thumb:\n%s", s)
+	}
+}
+
+func TestScrollbarThumb(t *testing.T) {
+	for _, c := range []struct{ first, room, total, from, to int }{
+		{0, 10, 100, 0, 1},   // top: thumb at the top
+		{90, 10, 100, 9, 10}, // bottom: thumb at the bottom
+		{1, 10, 100, 1, 2},   // just off the top: thumb leaves the top
+		{89, 10, 100, 8, 9},  // just off the bottom: thumb leaves the bottom
+		{0, 10, 20, 0, 5},    // half shown: half the track
+		{10, 10, 20, 5, 10},
+		{3, 10, 13, 2, 10},
+	} {
+		from, to := thumb(c.first, c.room, c.total)
+		if from != c.from || to != c.to {
+			t.Errorf("thumb(%d, %d, %d) = %d, %d, want %d, %d", c.first, c.room, c.total, from, to, c.from, c.to)
 		}
 	}
 }

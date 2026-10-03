@@ -50,6 +50,23 @@ func TestLoadScope(t *testing.T) {
 	}
 }
 
+func TestLoadScrollbar(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	for body, ok := range map[string]bool{
+		"scrollbar_thumb = \"thin\"\nscrollbar_color = \"#f5a3b5\"\n": true,
+		"scrollbar_thumb = \"block\"\nscrollbar_color = \"12\"\n":     true,
+		"scrollbar_thumb = \"fat\"\n":                                 false,
+		"scrollbar_color = \"pink\"\n":                                false,
+		"scrollbar_color = \"256\"\n":                                 false,
+		"scrollbar_color = \"#fff\"\n":                                false,
+	} {
+		os.WriteFile(path, []byte("[tui]\n"+body), 0o644)
+		if _, err := Load(path); (err == nil) != ok {
+			t.Errorf("%q: got %v", body, err)
+		}
+	}
+}
+
 func TestLoadRejectsUnknownKeys(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	cases := map[string]string{

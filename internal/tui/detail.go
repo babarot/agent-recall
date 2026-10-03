@@ -5,8 +5,10 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/babarot/claude-recall/internal/config"
 	"github.com/babarot/claude-recall/internal/db"
 )
 
@@ -223,8 +225,9 @@ func window(c frameLines, n, offset int) (lines []string, off, first, total int)
 
 // frame draws lines inside a rounded border w cells wide and h lines tall,
 // with title set into the top edge and, when the content scrolls, the
-// visible range in the bottom edge.
-func (m Model) frame(title string, lines []string, w, h int, focused bool, scrollInfo string) string {
+// visible range in the bottom edge and a thumb on the right edge over the
+// inner rows [thumbFrom, thumbTo).
+func (m Model) frame(title string, lines []string, w, h int, focused bool, scrollInfo string, thumbFrom, thumbTo int) string {
 	if w < 6 || h < 2 {
 		return ""
 	}
@@ -235,10 +238,14 @@ func (m Model) frame(title string, lines []string, w, h int, focused bool, scrol
 	inner := w - 4
 	fill := max(0, w-5-ansi.StringWidth(title))
 	out := []string{border.Render("╭─ ") + name.Render(title) + border.Render(" "+strings.Repeat("─", fill)+"╮")}
-	for _, l := range fit(lines, h-2) {
+	for i, l := range fit(lines, h-2) {
 		l = ansi.Truncate(l, inner, ellipsis)
 		pad := strings.Repeat(" ", max(0, inner-ansi.StringWidth(l)))
-		out = append(out, border.Render("│")+" "+l+pad+" "+border.Render("│"))
+		right := border.Render("│")
+		if i >= thumbFrom && i < thumbTo {
+			right = m.thumbCell(border)
+		}
+		out = append(out, border.Render("│")+" "+l+pad+" "+right)
 	}
 	bottom := border.Render("╰" + strings.Repeat("─", w-2) + "╯")
 	if iw := ansi.StringWidth(scrollInfo); scrollInfo != "" && w > iw+6 {
@@ -250,11 +257,45 @@ func (m Model) frame(title string, lines []string, w, h int, focused bool, scrol
 // renderFrame draws frame f of the selected session at r.
 func (m Model) renderFrame(f focus, c frameLines, r rect) string {
 	lines, _, first, total := window(c, r.h-2, m.scroll[f])
-	info := ""
+	info, from, to := "", 0, 0
 	if room := r.h - 2 - len(c.pinned); total > room && room > 0 {
 		info = fmt.Sprintf("%d-%d/%d", first+1, min(total, first+room), total)
+		from, to = thumb(first, room, total)
+		from, to = from+len(c.pinned), to+len(c.pinned)
 	}
-	return m.frame(frameTitles[f], lines, r.w, r.h, m.focus == f, info)
+	return m.frame(frameTitles[f], lines, r.w, r.h, m.focus == f, info, from, to)
+}
+
+// thumbGlyphs draws each config.Scrollbar* thumb.
+var thumbGlyphs = map[string]string{config.ThumbThin: "│", config.ThumbHeavy: "┃", config.ThumbBlock: "█"}
+
+// thumbCell is one row of the scrollbar thumb, in the configured color or
+// else the frame's border color.
+func (m Model) thumbCell(border lipgloss.Style) string {
+	glyph, ok := thumbGlyphs[m.cfg.ScrollbarThumb]
+	if !ok {
+		glyph = thumbGlyphs[config.ThumbHeavy]
+	}
+	if c := m.cfg.ScrollbarColor; c != "" {
+		border = fg(c)
+	}
+	return border.Render(glyph)
+}
+
+// thumb places a scrollbar thumb on a track of room rows for a view of room
+// lines starting at first out of total, returning the rows [from, to). The
+// thumb touches an end of the track only when the view is at that end.
+func thumb(first, room, total int) (from, to int) {
+	size := max(1, (room*room+total/2)/total)
+	span, last := room-size, total-room
+	from = (first*span + last/2) / last
+	if first > 0 && from == 0 && span > 1 {
+		from = 1
+	}
+	if first < last && from == span && span > 1 {
+		from = span - 1
+	}
+	return from, from + size
 }
 
 func durationText(d time.Duration) string {
