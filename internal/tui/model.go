@@ -125,8 +125,11 @@ type Model struct {
 	// has the ones being read in the background, when background is set.
 	// programs counts each detail's commands by program, once, since
 	// parsing them is too slow to do on every frame.
-	details       map[string]*db.Detail
-	programs      map[string][]db.Count
+	details  map[string]*db.Detail
+	programs map[string][]db.Count
+	// built keeps the frames' lines last built from a detail, which a
+	// scroll asks for a few times over without changing them.
+	built         *builtFrames
 	detailLoading map[string]bool
 	background    bool
 	// detailH is the height of the detail pane below the list; statePath
@@ -205,6 +208,7 @@ func New(sessions []db.Session, source Source, cfg config.TUI) Model {
 		expandRows:    defaultExpandRows,
 		details:       map[string]*db.Detail{},
 		programs:      map[string][]db.Count{},
+		built:         &builtFrames{},
 		detailLoading: map[string]bool{},
 		text:          textSearch{found: map[string]map[string]bool{}, pending: map[string]bool{}, delay: textSearchDelay},
 		detailH:       max(config.MinDetailHeight, cfg.DetailHeight),
@@ -528,7 +532,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.BackgroundColorMsg:
 		m.st = newStyles(theme.Get(m.cfg.Theme, msg.IsDark()))
-		m.readFor = "" // drawn in the old colors
+		m.built.forget() // drawn in the old colors
+		m.readFor = ""   // drawn in the old colors
 		return m, nil
 	case settledMsg:
 		m.settling = false

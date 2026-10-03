@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -168,7 +169,7 @@ func (m Model) frameContent(r *row, inner [numFocus]int) [numFocus]frameLines {
 		out[focusDetails] = frameLines{scroll: details, keep: -1}
 		return out
 	}
-	out[focusConv] = m.conversationContent(r, d)
+	out[focusConv] = m.built.conv(r, d, func() frameLines { return m.conversationContent(r, d) })
 	if m.expanded {
 		out[focusConv] = frameLines{pinned: []string{m.headLine(r)}, scroll: m.highlightConv(m.read), keep: -1}
 		if line := m.convSearchLine(); line != "" {
@@ -178,13 +179,59 @@ func (m Model) frameContent(r *row, inner [numFocus]int) [numFocus]frameLines {
 	if why := m.reasonLine(r.s.ID, 1<<10); why != "" { // the frame cuts it to fit
 		out[focusConv].pinned = append([]string{out[focusConv].pinned[0], why}, out[focusConv].pinned[1:]...)
 	}
-	out[focusDone] = m.doneContent(r, d, inner[focusDone])
+	out[focusDone] = m.built.done(r, d, inner[focusDone], func() frameLines { return m.doneContent(r, d, inner[focusDone]) })
 	details, ok := m.detailsGrid(r, d, inner[focusDetails])
 	if !ok {
 		details = m.detailsLines(r, d)
 	}
 	out[focusDetails] = frameLines{scroll: details, keep: -1}
 	return out
+}
+
+// builtFrames keeps Conversation's and What was done's lines as last built
+// for a session's row and detail (and, for What was done, a width), since
+// a scroll or a redraw asks for them again unchanged. Building them styles
+// up to 200 messages and groups the edited files.
+type builtFrames struct {
+	convFor builtFor
+	convOf  frameLines
+	doneFor builtFor
+	doneOf  frameLines
+}
+
+type builtFor struct {
+	r     *row
+	d     *db.Detail
+	inner int
+}
+
+func (b *builtFrames) conv(r *row, d *db.Detail, build func() frameLines) frameLines {
+	return b.get(&b.convFor, &b.convOf, builtFor{r, d, 0}, build)
+}
+
+func (b *builtFrames) done(r *row, d *db.Detail, inner int, build func() frameLines) frameLines {
+	return b.get(&b.doneFor, &b.doneOf, builtFor{r, d, inner}, build)
+}
+
+// get returns the lines kept for key, building them when it differs. The
+// pinned and scrolling lines are copied, since callers add to them.
+func (b *builtFrames) get(kept *builtFor, lines *frameLines, key builtFor, build func() frameLines) frameLines {
+	if b == nil {
+		return build()
+	}
+	if *kept != key || key.d == nil {
+		*kept, *lines = key, build()
+	}
+	c := *lines
+	c.pinned, c.scroll = slices.Clone(c.pinned), slices.Clone(c.scroll)
+	return c
+}
+
+// forget drops the kept lines, for a change they do not key on: colors.
+func (b *builtFrames) forget() {
+	if b != nil {
+		*b = builtFrames{}
+	}
 }
 
 // window returns the visible lines of a frame with n lines of room, the
