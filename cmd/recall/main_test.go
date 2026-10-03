@@ -171,3 +171,46 @@ func TestConfigErrors(t *testing.T) {
 		t.Errorf("got %v", err)
 	}
 }
+
+// --all and --all=false win over tui.scope, on recall and on recall tui.
+func TestTUIAll(t *testing.T) {
+	writeConfig(t, "[tui]\nscope = \"all\"\n")
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{nil, "all"},
+		{[]string{"--all=false"}, "folder"},
+		{[]string{"tui", "--all=false"}, "folder"},
+	} {
+		if got := tuiScope(t, tc.args...); got != tc.want {
+			t.Errorf("%v: got %q, want %q", tc.args, got, tc.want)
+		}
+	}
+	writeConfig(t, "")
+	for _, args := range [][]string{{"--all"}, {"tui", "--all"}} {
+		if got := tuiScope(t, args...); got != "all" {
+			t.Errorf("%v: got %q, want all", args, got)
+		}
+	}
+	if got := tuiScope(t); got != "folder" {
+		t.Errorf("no flag: got %q, want folder", got)
+	}
+}
+
+// tuiScope is the scope the TUI would start with for args.
+func tuiScope(t *testing.T, args ...string) string {
+	t.Helper()
+	c, rest, err := newRootCmd().Find(args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.ParseFlags(rest); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := tuiConfig(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfg.Scope
+}

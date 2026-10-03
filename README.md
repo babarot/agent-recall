@@ -56,7 +56,7 @@ A session ID from the TUI (`y`) works too: "look up session a1b2c3 with claude-r
 
 ### TUI
 
-`recall` lists every archived session with its title, folder (a git worktree is shown under the repository it belongs to), branch, message count, size and ID. Started inside a repository, it shows only that repository's sessions; `.` switches to all of them.
+`recall` lists every archived session with its title, folder (a git worktree is shown under the repository it belongs to), branch, message count, size and ID. Started inside a repository, it shows only that repository's sessions; `.` switches to all of them, and `recall --all` starts with all of them.
 
 | Key | Action |
 |-----|--------|

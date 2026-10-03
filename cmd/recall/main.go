@@ -91,7 +91,7 @@ Run without a command, it opens the TUI.`,
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		RunE:          func(*cobra.Command, []string) error { return runTUI(o) },
+		RunE:          func(c *cobra.Command, _ []string) error { return runTUI(o, c) },
 	}
 	root.SetVersionTemplate("recall {{.Version}}\n")
 	root.SetFlagErrorFunc(func(c *cobra.Command, err error) error {
@@ -141,7 +141,11 @@ Run without a command, it opens the TUI.`,
 		Use:   "tui",
 		Short: "Browse sessions interactively (the default)",
 		Args:  cobra.NoArgs,
-		RunE:  func(*cobra.Command, []string) error { return runTUI(o) },
+		RunE:  func(c *cobra.Command, _ []string) error { return runTUI(o, c) },
+	}
+	// --all is the TUI's: on recall itself, not on every command.
+	for _, c := range []*cobra.Command{root, tuiCmd} {
+		c.Flags().Bool("all", false, "start with every folder's sessions (default: scope under [tui] in the config file)")
 	}
 
 	importCmd := &cobra.Command{
@@ -511,11 +515,27 @@ func startBackground(o *options, stdout, stderr io.Writer) error {
 	return nil
 }
 
-func runTUI(o *options) error {
-	// The first run leaves a commented config to edit; one that is there,
-	// or a directory that cannot be written, is left alone.
+// tuiConfig reads the TUI's settings, with --all, or --all=false, in place
+// of tui.scope for this run. The first run leaves a commented config to
+// edit; one that is there, or a directory that cannot be written, is left
+// alone.
+func tuiConfig(c *cobra.Command) (config.TUI, error) {
 	_ = config.WriteTemplate(config.FilePath())
 	cfg, err := config.Load(config.FilePath())
+	if err != nil {
+		return config.TUI{}, err
+	}
+	if c.Flags().Changed("all") {
+		cfg.TUI.Scope = config.ScopeFolder
+		if all, _ := c.Flags().GetBool("all"); all {
+			cfg.TUI.Scope = config.ScopeAll
+		}
+	}
+	return cfg.TUI, nil
+}
+
+func runTUI(o *options, c *cobra.Command) error {
+	cfg, err := tuiConfig(c)
 	if err != nil {
 		return err
 	}
@@ -529,7 +549,7 @@ func runTUI(o *options) error {
 		return err
 	}
 
-	model := tui.New(sessions, d, cfg.TUI).RememberIn(config.StatePath()).SettleSize()
+	model := tui.New(sessions, d, cfg).RememberIn(config.StatePath()).SettleSize()
 	if wd, err := os.Getwd(); err == nil {
 		model = model.StartIn(wd)
 	}
