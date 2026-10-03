@@ -53,6 +53,11 @@ func (m *Model) readLines() {
 	}
 	m.readFor = key
 	d := m.details[r.s.ID]
+	if d == nil && m.detailLoading[r.s.ID] {
+		m.read = []string{m.st.muted.Render("Loading…")}
+		m.readFor = "" // built again once it comes
+		return
+	}
 	if d == nil || d.First == nil {
 		m.read = []string{m.st.muted.Render("No text messages.")}
 		return

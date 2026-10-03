@@ -549,7 +549,7 @@ func runTUI(o *options, c *cobra.Command) error {
 		return err
 	}
 
-	model := tui.New(sessions, d, cfg).RememberIn(config.StatePath()).SettleSize()
+	model := tui.New(sessions, d, cfg).RememberIn(config.StatePath()).SettleSize().LoadInBackground()
 	if wd, err := os.Getwd(); err == nil {
 		model = model.StartIn(wd)
 	}
