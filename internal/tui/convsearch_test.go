@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/babarot/claude-recall/internal/config"
+	"github.com/babarot/claude-recall/internal/db"
 )
 
 // typeText types s into whatever has the keys.
@@ -113,5 +114,58 @@ func TestMarkRunes(t *testing.T) {
 		if ansi.Strip(out) != c.line || strings.Count(out, style.Render(c.want)) < 1 {
 			t.Errorf("%q: %q", c.line, out)
 		}
+	}
+}
+
+// The search looks through the whole conversation, the messages the frame
+// skips too, shows what has it with the messages around, and Esc puts the
+// conversation back as it was.
+func TestConversationSearchFindsSkippedMessages(t *testing.T) {
+	m, _ := newTestModel(t, config.Default().TUI, 140, 40)
+	m = press(t, m, "space")
+	if s := screen(m); strings.Contains(s, "middle message") || !strings.Contains(s, "5 messages skipped") {
+		t.Fatalf("the frame should skip the middle:\n%s", s)
+	}
+	m = press(t, typeText(t, press(t, m, "/"), "middle message 3"), "enter")
+	s := screen(m)
+	for _, want := range []string{"middle message 3", "middle message 1", "middle message 4", "messages skipped", "1/1"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("lacks %q:\n%s", want, s)
+		}
+	}
+	if strings.Contains(s, "middle message 0") {
+		t.Errorf("only two messages on each side should show:\n%s", s)
+	}
+	if !strings.Contains(m.View().Content, m.st.matchCur.Render("middle message 3")) {
+		t.Error("the hit should be highlighted")
+	}
+	m = press(t, m, "esc")
+	if s := screen(m); strings.Contains(s, "middle message") || !strings.Contains(s, "5 messages skipped") || m.scroll[focusConv] != 0 {
+		t.Fatalf("esc should put the conversation back from the top:\n%s", s)
+	}
+}
+
+func TestSearchParts(t *testing.T) {
+	msgs := func(texts ...string) []db.Message {
+		var out []db.Message
+		for _, s := range texts {
+			out = append(out, db.Message{Content: s})
+		}
+		return out
+	}
+	all := msgs("a", "b", "c", "x hit", "d", "e", "f", "g", "h", "x again", "i")
+	parts, after, ok := searchParts(all, "x")
+	if !ok || after != 0 || len(parts) != 2 {
+		t.Fatalf("parts %d after %d ok %v", len(parts), after, ok)
+	}
+	// a is skipped, b c [x] d e show, f is skipped, g h [x] i show.
+	if parts[0].skipped != 1 || len(parts[0].msgs) != 5 || parts[1].skipped != 1 || len(parts[1].msgs) != 4 {
+		t.Fatalf("got %+v", parts)
+	}
+	if _, _, ok := searchParts(all, "zzz"); ok {
+		t.Fatal("no message has zzz")
+	}
+	if parts, after, _ := searchParts(msgs("x", "a", "b", "c", "d"), "x"); parts[0].skipped != 0 || len(parts[0].msgs) != 3 || after != 2 {
+		t.Fatalf("a hit at the start: %+v after %d", parts, after)
 	}
 }

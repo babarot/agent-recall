@@ -32,6 +32,8 @@ type Source interface {
 	SessionDetail(sessionID string) (*db.Detail, error)
 	// SessionsWithText lists the sessions whose conversation contains text.
 	SessionsWithText(text string) ([]string, error)
+	// SessionMessages is a session's whole conversation, for searching it.
+	SessionMessages(sessionID string) ([]db.Message, error)
 }
 
 type mode int
@@ -180,7 +182,7 @@ func New(sessions []db.Session, source Source, cfg config.TUI) Model {
 		askRun:     claudeRunner([]string{"recall", "mcp"}, config.ModelID(cfg.AskModel), ""),
 		reasons:    map[string]string{},
 		sideSearch: ss,
-		conv:       convSearch{input: newConvSearchInput()},
+		conv:       convSearch{input: newConvSearchInput(), full: map[string][]db.Message{}},
 		resolver:   resolver,
 		folders:    groupRows(rows),
 		cfg:        cfg,

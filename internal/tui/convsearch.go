@@ -8,24 +8,35 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/babarot/claude-recall/internal/db"
 )
 
 // Searching the conversation: / while the spread Conversation has the keys
-// types a search. Every line that has it is a hit, shown highlighted; the
-// frame scrolls to the first one, n and N go to the next and previous, and
-// Esc drops the search. It looks through what the frame shows, the first
-// message and the latest ones, and carries over to the next session read
-// in place.
+// types a search. It looks through the whole conversation, not only the
+// first message and the latest ones the frame shows: while there is a
+// search, the frame shows the messages that have it with a few around each,
+// and markers for the ones between. Every line that has it is a hit, shown
+// highlighted; the frame scrolls to the first one, n and N go to the next
+// and previous, and Esc drops the search and puts the conversation back as
+// it was. It carries over to the next session read in place.
 
-// convContext is how many lines above a hit stay in view when the frame
-// scrolls to it.
-const convContext = 3
+const (
+	// convContext is how many lines above a hit stay in view when the frame
+	// scrolls to it.
+	convContext = 3
+	// convAround is how many messages before and after one that has the
+	// search are shown with it.
+	convAround = 2
+)
 
 type convSearch struct {
 	input  textinput.Model
 	typing bool  // the search has the keys
 	hits   []int // lines of m.read that contain the query
 	cur    int   // the hit scrolled to, an index into hits
+	// full holds each session's whole conversation once it is searched.
+	full map[string][]db.Message
 }
 
 func newConvSearchInput() textinput.Model {
@@ -65,14 +76,10 @@ func (m Model) updateConvSearch(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c":
 		return m, tea.Quit
 	}
-	before := m.conv.input.Value()
+	// A change of the search rebuilds the frame (readLines), which goes to
+	// the first hit.
 	var cmd tea.Cmd
 	m.conv.input, cmd = m.conv.input.Update(msg)
-	if m.conv.input.Value() != before {
-		m.findConvHits()
-		m.conv.cur = 0
-		m.showConvHit()
-	}
 	return m, cmd
 }
 
@@ -110,13 +117,65 @@ func (m *Model) showConvHit() {
 	m.scrollFrame(focusConv, target-m.scroll[focusConv])
 }
 
-// clearConvSearch drops the search.
+// clearConvSearch drops the search; the conversation is shown as it was,
+// from the top.
 func (m *Model) clearConvSearch() {
+	if m.conv.input.Value() != "" {
+		m.scroll[focusConv] = 0
+	}
 	m.conv.typing = false
 	m.conv.input.Blur()
 	m.conv.input.SetValue("")
 	m.conv.hits = nil
 	m.conv.cur = 0
+}
+
+// fullConversation is a session's whole conversation, read once; nil when
+// it cannot be read.
+func (m *Model) fullConversation(id string) []db.Message {
+	if msgs, ok := m.conv.full[id]; ok {
+		return msgs
+	}
+	if m.source == nil {
+		return nil
+	}
+	msgs, err := m.source.SessionMessages(id)
+	if err != nil {
+		return nil
+	}
+	m.conv.full[id] = msgs
+	return msgs
+}
+
+// searchParts picks from the conversation the messages that have q, with
+// convAround on each side, and how many are left out after the last one.
+// ok is false when no message has q.
+func searchParts(all []db.Message, q string) (parts []convPart, after int, ok bool) {
+	keep := make([]bool, len(all))
+	for i, msg := range all {
+		if strings.Contains(strings.ToLower(msg.Content), q) {
+			ok = true
+			for j := max(0, i-convAround); j <= min(len(all)-1, i+convAround); j++ {
+				keep[j] = true
+			}
+		}
+	}
+	if !ok {
+		return nil, 0, false
+	}
+	skipped := 0
+	for i, msg := range all {
+		if !keep[i] {
+			skipped++
+			continue
+		}
+		if skipped > 0 || len(parts) == 0 {
+			parts = append(parts, convPart{skipped: skipped})
+			skipped = 0
+		}
+		parts[len(parts)-1].msgs = append(parts[len(parts)-1].msgs, msg)
+	}
+	return parts, skipped, true
 }
 
 // highlightConv marks the query in the lines that have it, the current
