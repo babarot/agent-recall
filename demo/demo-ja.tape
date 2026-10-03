@@ -35,7 +35,7 @@ Sleep 800ms
 # It was in the api, and something about sessions.
 Type "/"
 Sleep 300ms
-Type@30ms "in:api"
+Type@30ms "folder:api"
 Sleep 400ms
 Type@90ms " セッション"
 Sleep 1s
