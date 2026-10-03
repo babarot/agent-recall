@@ -51,6 +51,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_ident
 CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id);
 -- Backs chat-view ORDER BY turn_index reads.
 CREATE INDEX IF NOT EXISTS idx_messages_session_turn ON messages(session_id, turn_index);
+-- Covers the detail pane's counts by kind and by tool, so they read no
+-- message text: on a long session that is most of the time the pane takes.
+CREATE INDEX IF NOT EXISTS idx_messages_session_kind ON messages(session_id, block_type, role, tool_name);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
     content,

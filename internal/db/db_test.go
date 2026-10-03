@@ -296,3 +296,29 @@ func TestSessionsWithText(t *testing.T) {
 		}
 	}
 }
+
+// The detail pane's counts read the index alone, not the message text.
+func TestDetailCountsUseACoveringIndex(t *testing.T) {
+	d := newTestDB(t)
+	for _, q := range []string{
+		`SELECT role, block_type, COUNT(*) FROM messages WHERE session_id = ? GROUP BY role, block_type`,
+		`SELECT COALESCE(tool_name, ''), COUNT(*) AS n FROM messages
+        WHERE session_id = ? AND block_type = 'tool_use' GROUP BY tool_name ORDER BY n DESC, tool_name LIMIT ?`,
+	} {
+		rows, err := d.sql.Query("EXPLAIN QUERY PLAN "+q, "s", 6)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var plan strings.Builder
+		for rows.Next() {
+			var id, parent, notused int
+			var detail string
+			rows.Scan(&id, &parent, &notused, &detail)
+			plan.WriteString(detail + "\n")
+		}
+		rows.Close()
+		if !strings.Contains(plan.String(), "COVERING INDEX idx_messages_session_kind") {
+			t.Errorf("%s\nplan:\n%s", q, plan.String())
+		}
+	}
+}
