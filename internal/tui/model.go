@@ -722,6 +722,8 @@ list:
 		m.mode = modeFilter
 		return m, m.filter.Focus()
 	case "esc":
+		// One step back: the filter, then Claude's answer, then the spread
+		// conversation.
 		switch {
 		case m.filter.Value() != "":
 			m.filter.SetValue("")
@@ -729,6 +731,8 @@ list:
 		case m.asked != nil:
 			m.asked = nil
 			m.refresh()
+		case m.expanded:
+			m.toggleExpand()
 		}
 	case "space":
 		m.toggleExpand()

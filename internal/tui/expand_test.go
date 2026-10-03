@@ -151,3 +151,21 @@ func TestDetailLoadsInBackground(t *testing.T) {
 		t.Fatal("another session's detail should be kept and not shown")
 	}
 }
+
+// Reading in place from the list, esc steps back: the filter first, then
+// the spread conversation.
+func TestEscFromTheListPutsThePaneBack(t *testing.T) {
+	m, _ := newTestModel(t, config.Default().TUI, 140, 40)
+	m = press(t, m, "/")
+	m = typeText(t, m, "docs")
+	m = press(t, m, "enter", "space", "tab")
+	if !m.expanded || m.focus != focusList || m.filter.Value() == "" {
+		t.Fatalf("expanded %v focus %v filter %q", m.expanded, m.focus, m.filter.Value())
+	}
+	if m = press(t, m, "esc"); !m.expanded || m.filter.Value() != "" {
+		t.Fatalf("the first esc clears the filter: expanded %v filter %q", m.expanded, m.filter.Value())
+	}
+	if m = press(t, m, "esc"); m.expanded {
+		t.Fatal("the second esc puts the pane back")
+	}
+}
