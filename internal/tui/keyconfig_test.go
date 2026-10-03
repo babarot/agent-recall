@@ -93,10 +93,60 @@ func TestWithKeysErrors(t *testing.T) {
 	if !press(t, next, "space").expanded {
 		t.Fatal("the model should be unchanged")
 	}
-	// A conflict, once the keys themselves are right.
-	if _, err := m.WithKeys(map[string]config.KeyList{"resume": list("j")}); err == nil ||
+	// A conflict between two operations set in the file, once the keys
+	// themselves are right.
+	if _, err := m.WithKeys(map[string]config.KeyList{"resume": list("j"), "down": list("j")}); err == nil ||
 		!strings.Contains(err.Error(), "keys: j is both resume and down in the session list") {
 		t.Fatalf("got %v", err)
+	}
+}
+
+// A key set in the file takes over from the operations that have it by
+// default where they meet, as if the key were set to the operation.
+func TestWithKeysTakesOverDefaults(t *testing.T) {
+	m, _ := newTestModel(t, config.Default().TUI, 140, 40)
+	m, err := m.WithKeys(map[string]config.KeyList{"continue": list("enter")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := m.km.Session.Resume.Keys(); len(got) != 0 {
+		t.Fatalf("resume keeps %q", got)
+	}
+	// The folder list's enter never meets continue, so back keeps it.
+	if got := m.km.Folders.FoldersBack.Keys(); !slices.Contains(got, "enter") {
+		t.Fatalf("folders.back is %q", got)
+	}
+	if r := press(t, m, "enter"); !r.cont.open || r.Result != nil {
+		t.Fatalf("enter should continue: box %v result %+v", r.cont.open, r.Result)
+	}
+	// resume, without a key, leaves the footer and the key list.
+	footer := ansi.Strip(m.renderHelp())
+	if !strings.HasPrefix(footer, " space read") || strings.Contains(footer, "resume") {
+		t.Fatalf("footer %q", footer)
+	}
+	if strings.Contains(ansi.Strip(press(t, m, "?").render()), "resume the session") {
+		t.Fatal("the key list still shows resume")
+	}
+
+	// Other keys of the default operation stay.
+	m, _ = newTestModel(t, config.Default().TUI, 140, 40)
+	if m, err = m.WithKeys(map[string]config.KeyList{"resume": list("j")}); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.km.Nav.Down.Keys(); !slices.Equal(got, []string{"down", "ctrl+n"}) {
+		t.Fatalf("down is %q", got)
+	}
+	// Setting both keeps the key on the one set, the other moving away.
+	m, _ = newTestModel(t, config.Default().TUI, 140, 40)
+	if m, err = m.WithKeys(map[string]config.KeyList{"continue": list("enter"), "resume": list("c")}); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(m.km.Session.Resume.Keys(), []string{"c"}) || !slices.Equal(m.km.Session.Continue.Keys(), []string{"enter"}) {
+		t.Fatalf("resume %q continue %q", m.km.Session.Resume.Keys(), m.km.Session.Continue.Keys())
+	}
+	// A fixed key is still a mistake.
+	if _, err := m.WithKeys(map[string]config.KeyList{"sort": list("1")}); err == nil {
+		t.Fatal("sort = \"1\" should be reported")
 	}
 }
 
@@ -202,13 +252,13 @@ func TestKeyProblemsSayWhere(t *testing.T) {
 	if p := byKey["keys.list.resume"]; !p.AtKey {
 		t.Errorf("an operation in the wrong place is its name: %+v", p)
 	}
-	// A conflict is one problem however many places it is in, at the key
+	// A conflict is one problem however many places it is in, at a key
 	// set in the file.
-	_, err = m.WithKeys(config.Keys{"resume": list("x", "j")})
+	_, err = m.WithKeys(config.Keys{"resume": list("x", "j"), "down": list("down", "j")})
 	if !errors.As(err, &ps) || len(ps) != 1 {
 		t.Fatalf("got %v", err)
 	}
-	if p := ps[0]; strings.Join(p.Key, ".") != "keys.resume" || p.Index != 1 ||
+	if p := ps[0]; strings.Join(p.Key, ".") != "keys.down" || p.Index != 1 ||
 		!strings.Contains(p.Message, "j is both resume and down in the session list and a frame or the spread conversation") {
 		t.Errorf("got %+v", p)
 	}
