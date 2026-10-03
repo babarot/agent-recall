@@ -1,0 +1,28 @@
+{
+  "totalSessions": 2,
+  "totalMessages": 7,
+  "byProject": [
+    {
+      "project": "/work/api",
+      "sessions": 1,
+      "messages": 3
+    },
+    {
+      "project": "/work/app",
+      "sessions": 1,
+      "messages": 4
+    }
+  ],
+  "byMonth": [
+    {
+      "month": "2026-04",
+      "sessions": 1,
+      "messages": 3
+    },
+    {
+      "month": "2026-03",
+      "sessions": 1,
+      "messages": 4
+    }
+  ]
+}

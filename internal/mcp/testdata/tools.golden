@@ -1,0 +1,80 @@
+[
+  {
+    "description": "Export the full conversation of a specific session. Use this to get detailed context from a past session found via recall_search or recall_list.",
+    "inputSchema": {
+      "properties": {
+        "session_id": {
+          "description": "Session ID (full UUID or prefix). Get this from recall_search or recall_list results.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
+    },
+    "name": "recall_export"
+  },
+  {
+    "description": "List archived coding agent sessions. Use this to see what sessions are available before exporting a specific one.",
+    "inputSchema": {
+      "properties": {
+        "limit": {
+          "description": "Max sessions to return (default: 20)",
+          "type": "number"
+        },
+        "project": {
+          "description": "Filter by project name (partial match)",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "recall_list"
+  },
+  {
+    "description": "Search past coding agent session conversations by full-text query. Use this when you need to find previous discussions, decisions, or context from past sessions.",
+    "inputSchema": {
+      "properties": {
+        "from": {
+          "description": "Start date filter (YYYY-MM-DD)",
+          "type": "string"
+        },
+        "limit": {
+          "description": "Max results (default: 10)",
+          "type": "number"
+        },
+        "project": {
+          "description": "Filter by project name (partial match)",
+          "type": "string"
+        },
+        "query": {
+          "description": "Full-text search query. Supports FTS5 syntax: \"exact phrase\", term1 AND term2, term1 OR term2, term1 NOT term2",
+          "type": "string"
+        },
+        "to": {
+          "description": "End date filter (YYYY-MM-DD)",
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    },
+    "name": "recall_search"
+  },
+  {
+    "description": "Show archive statistics: total sessions, messages, breakdown by project and month.",
+    "inputSchema": {
+      "properties": {
+        "project": {
+          "description": "Filter by project name (partial match)",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "recall_stats"
+  }
+]

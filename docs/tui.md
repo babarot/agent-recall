@@ -63,7 +63,7 @@ It runs signed in as you, a Claude plan included, so recall needs no API key. It
 
 ## Folders
 
-Started inside a repository (or one of its worktrees, or a subdirectory), `recall` lists only that repository's sessions, with a Worktree column in place of Folder; `.` shows every folder again. A folder with no sessions starts with all of them.
+Started inside a repository (or one of its worktrees, or a subdirectory), `recall` lists only that repository's sessions, with a Worktree column in place of Folder; `.` shows every folder again. A folder with no sessions starts with all of them. `recall --all` starts with every folder for one run, and `--all=false` with the folder when `scope = "all"` is set.
 
 The folder list on the left narrows the list to any folder: a repository together with its worktrees, or a directory outside git.
 

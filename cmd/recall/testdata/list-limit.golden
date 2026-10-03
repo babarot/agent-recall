@@ -1,0 +1,5 @@
+[1mSession   [22m [1mProject                       [22m [1mBranch                        [22m [1m Msgs[22m  [1mDate[22m
+[2m-----------------------------------------------------------------------------------------------[22m
+22222222   /work/api                      feature/login                      3  2026-04-02[2m Fix the login bug where the session cookie expires early[22m
+[2m
+1 sessions listed.[22m

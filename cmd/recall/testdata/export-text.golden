@@ -1,0 +1,12 @@
+Session: 22222222 | -work-api (feature/login) | 2026-04-02
+================================================================================
+
+[USER]
+Fix the login bug where the session cookie expires early
+
+[ASSISTANT]
+Bash
+
+[ASSISTANT]
+The cookie max age was set in seconds where milliseconds were expected; fixed in auth/cookie.go.
+

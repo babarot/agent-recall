@@ -1,0 +1,6 @@
+
+[2m[2026-04-02][22m [1m/work/api[22m [2m(feature/login)[22m [2msession:22222222[22m
+  [36muser[39m: Fix the login bug where the session cookie expires early
+  [33massistant[39m: The cookie max age was set in seconds where milliseconds were expected; fixed in auth/cookie.go.
+
+[2mFound 2 results across 1 sessions.[22m

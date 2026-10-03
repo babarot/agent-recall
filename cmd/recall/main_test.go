@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/babarot/claude-recall/internal/db"
 	"github.com/babarot/claude-recall/internal/version"
@@ -170,4 +173,137 @@ func TestConfigErrors(t *testing.T) {
 	if _, err := runArgs("list", "--db", path); err == nil || !strings.Contains(err.Error(), "core.db") {
 		t.Errorf("got %v", err)
 	}
+}
+
+// --all and --all=false win over tui.scope, on recall and on recall tui.
+func TestTUIAll(t *testing.T) {
+	writeConfig(t, "[tui]\nscope = \"all\"\n")
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{nil, "all"},
+		{[]string{"--all=false"}, "folder"},
+		{[]string{"tui", "--all=false"}, "folder"},
+	} {
+		if got := tuiScope(t, tc.args...); got != tc.want {
+			t.Errorf("%v: got %q, want %q", tc.args, got, tc.want)
+		}
+	}
+	writeConfig(t, "")
+	for _, args := range [][]string{{"--all"}, {"tui", "--all"}} {
+		if got := tuiScope(t, args...); got != "all" {
+			t.Errorf("%v: got %q, want all", args, got)
+		}
+	}
+	if got := tuiScope(t); got != "folder" {
+		t.Errorf("no flag: got %q, want folder", got)
+	}
+}
+
+// tuiScope is the scope the TUI would start with for args.
+func tuiScope(t *testing.T, args ...string) string {
+	t.Helper()
+	c, rest, err := newRootCmd().Find(args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.ParseFlags(rest); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := tuiConfig(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfg.Scope
+}
+
+// ui stop reports what the server answered.
+func TestUIStop(t *testing.T) {
+	for _, tc := range []struct {
+		status int
+		want   string
+	}{
+		{http.StatusAccepted, "Shutdown request sent to http://localhost:%d.\n"},
+		{http.StatusInternalServerError, "Unexpected response: 500\n"},
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodPost && r.URL.Path == "/api/shutdown" {
+				w.WriteHeader(tc.status)
+			}
+		}))
+		port := srv.Listener.Addr().(*net.TCPAddr).Port
+		want := tc.want
+		if strings.Contains(want, "%d") {
+			want = fmt.Sprintf(want, port)
+		}
+		if out, err := runArgs("ui", "stop", "--port", strconv.Itoa(port)); err != nil || out != want {
+			t.Errorf("%d: got %q, %v", tc.status, out, err)
+		}
+		srv.Close()
+	}
+	closed := httptest.NewServer(http.NotFoundHandler())
+	port := closed.Listener.Addr().(*net.TCPAddr).Port
+	closed.Close()
+	if out, err := runArgs("ui", "stop", "--port", strconv.Itoa(port)); err != nil || out != "UI server is not running.\n" {
+		t.Errorf("not running: got %q, %v", out, err)
+	}
+}
+
+// The web UI listens on the loopback address only: its API serves
+// transcripts and local images.
+func TestServeUILoopbackOnly(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	path := emptyDB(t)
+	pr, pw := io.Pipe()
+	done := make(chan error, 1)
+	go func() { done <- run([]string{"ui", "--foreground", "--port", "0", "--db", path}, pw, io.Discard) }()
+
+	line, err := bufio.NewReader(pr).ReadString('\n')
+	if err != nil {
+		t.Fatal(err)
+	}
+	go io.Copy(io.Discard, pr)
+	port := strings.TrimSpace(line[strings.LastIndex(line, ":")+1:])
+	if !strings.HasPrefix(line, "recall UI: http://localhost:") {
+		t.Fatalf("got %q", line)
+	}
+
+	if resp, err := http.Get("http://127.0.0.1:" + port + "/api/status"); err != nil {
+		t.Fatal(err)
+	} else {
+		resp.Body.Close()
+	}
+	if ip := nonLoopbackIP(); ip != "" {
+		if conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, port), time.Second); err == nil {
+			conn.Close()
+			t.Errorf("the UI answered on %s", ip)
+		}
+	}
+
+	resp, err := http.Post("http://127.0.0.1:"+port+"/api/shutdown", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the UI did not stop")
+	}
+	pw.Close()
+}
+
+// nonLoopbackIP is an address of this machine other than loopback, or "".
+func nonLoopbackIP() string {
+	addrs, _ := net.InterfaceAddrs()
+	for _, a := range addrs {
+		if n, ok := a.(*net.IPNet); ok && !n.IP.IsLoopback() && n.IP.To4() != nil {
+			return n.IP.String()
+		}
+	}
+	return ""
 }
