@@ -573,6 +573,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toast = ""
 		}
 		return m, nil
+	case tea.PasteMsg:
+		return m.paste(msg)
 	case tea.KeyPressMsg:
 		// ctrl+c quits from anywhere, a running ask stopped first.
 		if msg.String() == "ctrl+c" {
@@ -580,6 +582,11 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.closeAsk()
 			}
 			return m, m.imagesQuit()
+		}
+		// The field reads the clipboard here, not in textinput, whose
+		// reply would not come back to it.
+		if msg.String() == pasteKey && m.typing() {
+			return m, readClipboard
 		}
 		if m.ask.stage != askClosed {
 			return m.updateAsk(msg)
@@ -926,6 +933,11 @@ func (m Model) updateFilter(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	return m.typeFilter(msg)
+}
+
+// typeFilter gives a key or a paste to the filter.
+func (m Model) typeFilter(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	before := m.filter.Value()
 	m.filter, cmd = m.filter.Update(msg)
