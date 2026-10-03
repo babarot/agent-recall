@@ -1,0 +1,10 @@
+[
+  {
+    "sessionId": "22222222",
+    "project": "/work/api",
+    "branch": "feature/login",
+    "date": "2026-04-02",
+    "role": "user",
+    "content": "Fix the login bug where the session cookie expires early"
+  }
+]

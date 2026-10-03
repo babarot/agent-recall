@@ -1,0 +1,7 @@
+
+[2m[2026-03-01][22m [1m/work/app[22m [2m(main)[22m [2msession:11111111[22m
+  [36muser[39m: How do I configure the terraform module for staging?
+  [33massistant[39m: Use a separate workspace so the terraform state of production stays apart.
+  [33massistant[39m: Put the staging values in a terraform.tfvars file and pass the module a variables block.
+
+[2mFound 3 results across 1 sessions.[22m

@@ -1,0 +1,43 @@
+{
+  "session": {
+    "sessionId": "22222222-aaaa-4bbb-8ccc-000000000002",
+    "project": "-work-api",
+    "projectPath": "/work/api",
+    "gitBranch": "feature/login",
+    "startedAt": "2026-04-02T09:00:00.000Z",
+    "firstPrompt": "Fix the login bug where the session cookie expires early",
+    "summary": null
+  },
+  "messages": [
+    {
+      "uuid": "b1",
+      "role": "user",
+      "blockType": "text",
+      "content": "Fix the login bug where the session cookie expires early",
+      "toolName": null,
+      "toolInput": null,
+      "timestamp": "2026-04-02T09:00:00.000Z",
+      "turnIndex": 0
+    },
+    {
+      "uuid": "b2",
+      "role": "assistant",
+      "blockType": "tool_use",
+      "content": "Bash",
+      "toolName": "Bash",
+      "toolInput": "{\"command\":\"go test ./auth/...\"}",
+      "timestamp": "2026-04-02T09:00:10.000Z",
+      "turnIndex": 1
+    },
+    {
+      "uuid": "b2",
+      "role": "assistant",
+      "blockType": "text",
+      "content": "The cookie max age was set in seconds where milliseconds were expected; fixed in auth/cookie.go.",
+      "toolName": null,
+      "toolInput": null,
+      "timestamp": "2026-04-02T09:00:10.000Z",
+      "turnIndex": 2
+    }
+  ]
+}

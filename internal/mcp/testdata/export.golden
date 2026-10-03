@@ -1,0 +1,23 @@
+{
+  "session": {
+    "sessionId": "22222222-aaaa-4bbb-8ccc-000000000002",
+    "project": "/work/api",
+    "branch": "feature/login",
+    "date": "2026-04-02",
+    "summary": null
+  },
+  "messages": [
+    {
+      "role": "user",
+      "content": "Fix the login bug where the session cookie expires early"
+    },
+    {
+      "role": "assistant",
+      "content": "Bash"
+    },
+    {
+      "role": "assistant",
+      "content": "The cookie max age was set in seconds where milliseconds were expected; fixed in auth/cookie.go."
+    }
+  ]
+}

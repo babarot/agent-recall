@@ -1,0 +1,26 @@
+# Session: 22222222
+
+- **Project**: /work/api
+- **Branch**: feature/login
+- **Date**: 2026-04-02
+
+---
+
+**User**:
+
+Fix the login bug where the session cookie expires early
+
+---
+
+**Assistant**:
+
+Bash
+
+---
+
+**Assistant**:
+
+The cookie max age was set in seconds where milliseconds were expected; fixed in auth/cookie.go.
+
+---
+
