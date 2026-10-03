@@ -92,6 +92,8 @@ type Model struct {
 	// the keys.
 	sideSearch textinput.Model
 	sideTyping bool
+	// conv is the search in the spread conversation.
+	conv convSearch
 
 	cursor, offset int
 	width, height  int
@@ -178,6 +180,7 @@ func New(sessions []db.Session, source Source, cfg config.TUI) Model {
 		askRun:     claudeRunner([]string{"recall", "mcp"}, config.ModelID(cfg.AskModel), ""),
 		reasons:    map[string]string{},
 		sideSearch: ss,
+		conv:       convSearch{input: newConvSearchInput()},
 		resolver:   resolver,
 		folders:    groupRows(rows),
 		cfg:        cfg,
@@ -530,7 +533,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		if msg.String() == "?" && m.mode != modeFilter && !(m.focus == focusFolders && m.sideTyping) {
+		if msg.String() == "?" && m.mode != modeFilter && !(m.focus == focusFolders && m.sideTyping) && !m.conv.typing {
 			m.helpOpen = true
 			return m, nil
 		}
@@ -547,6 +550,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.focus == focusFolders && m.sideTyping {
 		return m.updateSideSearch(msg)
+	}
+	if m.conv.typing {
+		return m.updateConvSearch(msg)
 	}
 	key := msg.String()
 	switch key {
@@ -599,11 +605,31 @@ func (m Model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			page := max(1, rects[m.focus].h-4)
 			switch key {
 			case "esc":
+				if m.convSearching() && m.conv.input.Value() != "" {
+					m.clearConvSearch()
+					break
+				}
 				if m.expanded {
 					m.toggleExpand()
 					break
 				}
 				m.focus = focusList
+			case "/":
+				// The spread conversation searches itself; elsewhere / is
+				// the list's filter.
+				if !m.convSearching() {
+					goto list
+				}
+				return m, m.startConvSearch()
+			case "n", "N":
+				if !m.convSearching() || len(m.conv.hits) == 0 {
+					goto list
+				}
+				if key == "n" {
+					m.nextConvHit(1)
+				} else {
+					m.nextConvHit(-1)
+				}
 			case "down", "j", "ctrl+n":
 				m.scrollFrame(m.focus, 1)
 			case "up", "k", "ctrl+p":

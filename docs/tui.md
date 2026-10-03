@@ -90,6 +90,8 @@ Below the list, Details sits under Conversation in a few wide lines and What was
 
 `Space` spreads the conversation over the detail pane, wrapped, and the pane grows to leave the list a few rows (`+` `-` or dragging its edge change how many, and they are remembered). `Tab` back to the list and `j` `k` read the next session in place; `Space` or `Esc` puts the pane back.
 
+`/` searches the spread conversation: every line with what you type is highlighted, and the pane scrolls to the first one. `Enter` keeps the search, `n` and `N` go to the next and previous match, and `Esc` drops it (a second `Esc` puts the pane back). It looks through what the pane shows, the first message and the latest ones, and carries over to the next session read in place. With the list focused, `/` is the list's filter as before.
+
 ## Mouse
 
 Click a session to select it, click a frame to focus it, scroll the wheel over the list or over a frame, and drag the pane's top edge (or the row count line just above it) to resize the pane. While the TUI has the mouse, most terminals still select text when you hold Shift (Option in iTerm2) while dragging.

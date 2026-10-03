@@ -354,8 +354,16 @@ func (m Model) renderHelp() string {
 			}
 			break
 		}
+		if m.conv.typing {
+			pairs = [][2]string{{"enter", "done"}, {"esc", "clear"}}
+			break
+		}
+		if m.convSearching() && m.conv.input.Value() != "" {
+			pairs = [][2]string{{"n N", "next, previous"}, {"/", "search again"}, {"esc", "clear search"}, {"j k", "scroll"}, {"tab", "sessions"}, {"?", "keys"}}
+			break
+		}
 		if m.expanded && m.focus == focusConv {
-			pairs = [][2]string{{"j k", "scroll"}, {"tab", "sessions"}, {"space esc", "close"}, {"enter", "resume"}, {"y", "copy id"}, {"?", "keys"}}
+			pairs = [][2]string{{"j k", "scroll"}, {"/", "search"}, {"tab", "sessions"}, {"space esc", "close"}, {"enter", "resume"}, {"y", "copy id"}, {"?", "keys"}}
 			break
 		}
 		if m.expanded {

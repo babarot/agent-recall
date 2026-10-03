@@ -29,6 +29,7 @@ func (m Model) expandedPaneHeight() int {
 func (m *Model) toggleExpand() {
 	m.expanded = !m.expanded
 	m.scroll[focusConv] = 0
+	m.clearConvSearch()
 	if m.expanded {
 		m.focus = focusConv
 	} else if m.focus != focusFolders {
@@ -57,4 +58,8 @@ func (m *Model) readLines() {
 	}
 	p := db.Preview{Head: []db.Message{*d.First}, Tail: d.Tail, Skipped: d.Hidden}
 	m.read = strings.Split(strings.TrimRight(m.renderConversation(p, w), "\n"), "\n")
+	// A search carries over to the next session read in place.
+	m.findConvHits()
+	m.conv.cur = 0
+	m.showConvHit()
 }

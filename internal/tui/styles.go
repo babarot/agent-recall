@@ -34,6 +34,8 @@ type styles struct {
 	border   lipgloss.Style // the detail pane
 	user     lipgloss.Style
 	claude   lipgloss.Style
+	match    lipgloss.Style // a hit of the conversation search
+	matchCur lipgloss.Style // the hit scrolled to
 }
 
 func fg(c string) lipgloss.Style { return lipgloss.NewStyle().Foreground(lipgloss.Color(c)) }
@@ -65,6 +67,8 @@ func newStyles(p theme.Palette) styles {
 		border:   lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color(p.Border)).Padding(0, 1),
 		user:     fg(p.Prompt).Bold(true),
 		claude:   fg(p.Title).Bold(true),
+		match:    lipgloss.NewStyle().Foreground(lipgloss.Color(p.Text)).Background(lipgloss.Color(p.Border)),
+		matchCur: lipgloss.NewStyle().Foreground(lipgloss.Color(p.Surface)).Background(lipgloss.Color(p.Prompt)).Bold(true),
 	}
 }
 

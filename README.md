@@ -64,7 +64,7 @@ A session ID from the TUI (`y`) works too: "look up session a1b2c3 with claude-r
 | `y` / `Y` | Copy the session ID / the resume command |
 | `/` | Filter by title, folder, branch, ID or what was said (see below) |
 | `a` | Ask Claude to find sessions, when you remember what it was about but not what to type |
-| `Space` | Read the conversation over the detail pane |
+| `Space` | Read the conversation over the detail pane; `/` searches it, `n` `N` go through the matches |
 | `←` `→` | Show or hide the folder list, to narrow to one repository or folder |
 | `s` | Choose the sort order |
 | `?` | Show every key |

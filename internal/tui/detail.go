@@ -155,7 +155,10 @@ func (m Model) frameContent(r *row, inner [numFocus]int) [numFocus]frameLines {
 	d := m.details[r.s.ID]
 	out[focusConv] = m.conversationContent(r, d)
 	if m.expanded {
-		out[focusConv] = frameLines{pinned: []string{m.headLine(r)}, scroll: m.read, keep: -1}
+		out[focusConv] = frameLines{pinned: []string{m.headLine(r)}, scroll: m.highlightConv(m.read), keep: -1}
+		if line := m.convSearchLine(); line != "" {
+			out[focusConv].pinned = append(out[focusConv].pinned, line)
+		}
 	}
 	if why := m.reasonLine(r.s.ID, 1<<10); why != "" { // the frame cuts it to fit
 		out[focusConv].pinned = append([]string{out[focusConv].pinned[0], why}, out[focusConv].pinned[1:]...)
