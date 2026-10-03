@@ -204,16 +204,18 @@ func (m Model) renderTable() []string {
 		}
 		return m.st.colHdr.Render(p.col.header)
 	}, plain)
-	// Beside the folder list, the focused side's rules take the accent and
-	// only it marks its selection with the bar.
+	// Beside the folder list or a spread Conversation, the focused side's
+	// rules take the accent. Only the side with the focus marks its
+	// selection with the bar; the row keeps its background so it still shows
+	// which session the frames are about.
 	rule := m.rule(lw)
-	if m.sidebarShown() && m.focus == focusList {
+	if (m.sidebarShown() || m.expanded) && m.focus == focusList {
 		rule = m.st.id.Render(strings.Repeat("╌", lw))
 		head = m.st.key.Render(ansi.Strip(head))
 	}
 	lines := []string{rule, head, rule}
 	bar := m.st.bar.Render("▎")
-	if m.focus == focusFolders {
+	if m.focus != focusList {
 		bar = m.st.selected.Render(" ")
 	}
 

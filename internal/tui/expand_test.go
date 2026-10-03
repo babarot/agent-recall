@@ -45,6 +45,25 @@ func TestSpaceSpreadsTheConversation(t *testing.T) {
 	}
 }
 
+func TestSpreadConversationTakesTheFocusMarks(t *testing.T) {
+	m, _ := newTestModel(t, config.Default().TUI, 140, 40)
+	line := func(m Model, i int) string { return strings.Split(m.render(), "\n")[i] }
+	accent := func(m Model) string { return m.st.id.Render(strings.Repeat("╌", m.listWidth())) }
+	selBar := func(m Model) bool { return strings.Contains(ansi.Strip(line(m, m.listTop())), "▎") }
+
+	// The Conversation focused: the list's rule stays plain and its row
+	// loses the bar.
+	m = press(t, m, "space")
+	if strings.Contains(line(m, 1), accent(m)) || selBar(m) {
+		t.Errorf("conversation focused, rule %q bar %v", line(m, 1), selBar(m))
+	}
+	// The list focused: the other way round.
+	m = press(t, m, "tab")
+	if !strings.Contains(line(m, 1), accent(m)) || !selBar(m) {
+		t.Errorf("list focused, rule %q bar %v", line(m, 1), selBar(m))
+	}
+}
+
 func TestReadTheNextSessionInPlace(t *testing.T) {
 	m, _ := newTestModel(t, config.Default().TUI, 140, 40)
 	m = press(t, m, "space", "tab")
