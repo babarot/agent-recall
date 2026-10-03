@@ -610,6 +610,9 @@ func (m Model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, m.toggleScope()
 	case "a":
 		return m, m.openAsk()
+	case "s":
+		m.openSortMenu()
+		return m, nil
 	}
 	if m.focus == focusFolders {
 		page := max(1, m.sidebarRows()-1)
@@ -715,11 +718,6 @@ list:
 	case "-":
 		m.resizeDetail(m.paneHeight() - 2)
 		return m, m.saveState()
-	case "s":
-		// The list's own key: not while a frame is being read.
-		if m.focus == focusList {
-			m.openSortMenu()
-		}
 	case "/":
 		m.mode = modeFilter
 		return m, m.filter.Focus()

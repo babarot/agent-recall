@@ -173,14 +173,18 @@ func TestSortMenu(t *testing.T) {
 	if sorts[m.sortIdx].name != "Started" || m.sortMenu {
 		t.Fatalf("click: sort %s", sorts[m.sortIdx].name)
 	}
-	// Reading a frame, s does nothing.
+	// s works from every pane: reading the conversation, a frame, the
+	// folder list.
 	m = press(t, m, "space")
-	if m = press(t, m, "s"); m.sortMenu {
-		t.Fatal("s should not open the menu while reading")
-	}
-	m = press(t, m, "tab")
 	if m = press(t, m, "s"); !m.sortMenu {
-		t.Fatal("back on the list, s opens the menu")
+		t.Fatal("s should open the menu while reading")
+	}
+	m = press(t, m, "esc", "space", "tab")
+	if m.focus != focusConv {
+		t.Fatalf("focus %v", m.focus)
+	}
+	if m = press(t, m, "s"); !m.sortMenu {
+		t.Fatal("s should open the menu from a frame")
 	}
 }
 
