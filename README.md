@@ -4,7 +4,7 @@
 
 Recall any past Claude Code session: ask Claude to look into it, or find it yourself and go back to it.
 
-<!-- TODO: screenshot or GIF of the TUI -->
+![The recall TUI: looking through sessions, narrowing to a folder and what was said, reading a conversation, and asking Claude](demo/demo.gif)
 
 claude-recall archives every Claude Code session into SQLite, including the ones whose JSONL Claude Code has since deleted, and gives you three ways back into them from one binary called `recall`:
 
