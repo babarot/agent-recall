@@ -59,18 +59,18 @@ Tab
 Sleep 400ms
 Ctrl+D
 Sleep 1.1s
-Ctrl+D
-Sleep 1.1s
-Ctrl+U
-Sleep 900ms
-Ctrl+D
-Sleep 700ms
-Ctrl+D
+
+# It was about refreshing the token: search the conversation for that.
+Type "/"
+Sleep 300ms
+Type@70ms "refresh"
 Sleep 1.6s
+Escape
+Sleep 400ms
 Escape
 Sleep 500ms
 
-# A clock problem, not it. Ask Claude what is remembered.
+# Not there, so not it. Ask Claude what is remembered.
 Type "a"
 Sleep 400ms
 Type@40ms "users kept getting logged out when the app sent several requests at once"
@@ -80,14 +80,14 @@ Sleep 5.5s
 Enter
 Sleep 900ms
 
-# Read it to be sure: this is the one.
+# Search it for the fix to be sure: this is the one.
 Space
 Sleep 900ms
-Ctrl+D
-Sleep 1s
-Ctrl+D
-Sleep 1s
-Ctrl+D
-Sleep 700ms
-Type@250ms "kk"
-Sleep 3s
+Type "/"
+Sleep 300ms
+Type@60ms "singleflight"
+Sleep 400ms
+Enter
+Sleep 1.3s
+Type "n"
+Sleep 3.5s
