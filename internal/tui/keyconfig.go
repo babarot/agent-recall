@@ -13,11 +13,14 @@ import (
 	"github.com/babarot/claude-recall/internal/config"
 )
 
-// The keys under [keys] in the config file replace operations' keys. Every
-// mistake is reported rather than ignored, since a key that is silently
-// never matched looks like a bug in the TUI: an unknown operation, a key
-// written in a way no key press is ever read as, a fixed key, and two
-// operations sharing a key in one place.
+// The keys under [keys] in the config file replace operations' keys. A key
+// given to an operation leaves the operations that have it by default and
+// would meet it in one place: continue = "enter" takes enter from resume,
+// as if enter were set to continue. Every mistake is reported rather than
+// ignored, since a key that is silently never matched looks like a bug in
+// the TUI: an unknown operation, a key written in a way no key press is
+// ever read as, a fixed key, and two operations set in the file sharing a
+// key in one place.
 
 // fixedKeys cannot be given to an operation: ctrl+c quits from anywhere and
 // esc steps back one level everywhere.
@@ -116,7 +119,7 @@ func (k *keyMap) refs() map[string]*key.Binding {
 	return map[string]*key.Binding{
 		"quit": &k.Global.Quit, "help": &k.Global.Help, "focus_next": &k.Global.FocusNext, "focus_prev": &k.Global.FocusPrev,
 		"ask": &k.Global.Ask, "sort": &k.Global.Sort, "scope": &k.Global.Scope,
-		"resume": &k.Session.Resume, "read": &k.Session.Read, "copy_id": &k.Session.CopyID,
+		"resume": &k.Session.Resume, "continue": &k.Session.Continue, "read": &k.Session.Read, "copy_id": &k.Session.CopyID,
 		"copy_command": &k.Session.CopyCommand, "grow": &k.Session.Grow, "shrink": &k.Session.Shrink,
 		"up": &k.Nav.Up, "down": &k.Nav.Down, "page_up": &k.Nav.PageUp, "page_down": &k.Nav.PageDown,
 		"top": &k.Nav.Top, "bottom": &k.Nav.Bottom, "search": &k.Nav.Search,
@@ -166,7 +169,25 @@ func applyKeys(base keyMap, set config.Keys) (keyMap, config.Problems) {
 		}
 	}
 	if len(ps) == 0 {
-		// One problem per key and pair of operations, naming every place
+		// A key set in the file wins over a default it meets: the default
+		// operation lets it go, everywhere, keeping its other keys.
+		for _, c := range k.conflicts() {
+			_, firstSet := set[c.first]
+			_, secondSet := set[c.second]
+			loser := ""
+			switch {
+			case c.first == "a fixed key" || firstSet == secondSet:
+				continue
+			case firstSet:
+				loser = c.second
+			default:
+				loser = c.first
+			}
+			ref := refs[loser]
+			*ref = keys(slices.DeleteFunc(slices.Clone(ref.Keys()), func(kk string) bool { return kk == c.key })...)
+		}
+		// What is left is a fixed key or two operations set in the file:
+		// one problem per key and pair of operations, naming every place
 		// they meet in.
 		type pair struct{ key, first, second string }
 		var order []pair
@@ -179,8 +200,8 @@ func applyKeys(base keyMap, set config.Keys) (keyMap, config.Problems) {
 			places[p] = append(places[p], c.place)
 		}
 		for _, p := range order {
-			// The operation set in the file is the one to change: the
-			// defaults share no key.
+			// Point at an operation set in the file: the second, or the
+			// one beside a fixed key.
 			blame := p.second
 			if _, ok := set[blame]; !ok {
 				blame = p.first

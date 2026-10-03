@@ -236,10 +236,12 @@ const Template = `# claude-recall settings. Uncomment a line to change it.
 
 [keys]
 # Which keys do what in the TUI, by operation: a key or a list of keys,
-# replacing the operation's own, or [] to turn it off. Every operation is
-# below with its keys; docs/tui.md says how keys are written. ctrl+c and
-# esc are fixed. For example, to resume with space and read with enter,
-# uncomment those two lines and swap their keys.
+# replacing the operation's own, or [] to turn it off. A key given to an
+# operation leaves the ones that have it by default: continue = "enter"
+# takes enter from resume. Every operation is below with its keys;
+# docs/tui.md says how keys are written. ctrl+c and esc are fixed. For
+# example, to resume with space and read with enter, uncomment those two
+# lines and swap their keys.
 #
 # Anywhere:
 # quit = "q"
@@ -252,6 +254,7 @@ const Template = `# claude-recall settings. Uncomment a line to change it.
 #
 # The selected session, from the list, a frame or the spread conversation:
 # resume = "enter"
+# continue = "c"
 # read = "space"
 # copy_id = "y"
 # copy_command = "Y"

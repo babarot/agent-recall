@@ -355,6 +355,13 @@ func (m Model) withAsk(screen string) string {
 			body = append(body, m.st.warn.Render(l))
 		}
 	}
+	return m.boxOver(screen, w, title, hint, body)
+}
+
+// boxOver lays a box w cells wide over the screen, near the top: title and
+// hint in its top edge, body inside.
+func (m Model) boxOver(screen string, w int, title, hint string, body []string) string {
+	inner := w - 4
 	b := m.st.id
 	fill := max(0, w-5-ansi.StringWidth(title)-ansi.StringWidth(hint)-2)
 	box := []string{b.Render("╭─ ") + m.st.key.Render(title) + b.Render(" "+strings.Repeat("─", fill)+" ") + m.st.muted.Render(hint) + b.Render(" ╮")}

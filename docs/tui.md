@@ -10,6 +10,7 @@ The title is the session's `/rename` name, or else the title Claude Code generat
 |-----|--------|
 | `↑` `↓` / `j` `k` | Move (`g` `G` for top and bottom, PgUp and PgDn or `ctrl+d` and `ctrl+u` by page) |
 | `Enter` | Resume the session: `claude -r <id>` from the session's folder |
+| `c` | Continue the session in a new claude (see [Continuing in a new claude](#continuing-in-a-new-claude)) |
 | `y` | Copy the session ID, to hand it to another agent ("look this session up with claude-recall") |
 | `Y` | Copy the resume command |
 | `Space` | Read the conversation over the detail pane (see [Reading a conversation](#reading-a-conversation)) |
@@ -61,6 +62,20 @@ It runs signed in as you, a Claude plan included, so recall needs no API key. It
 - `Enter` jumps to one (clearing a folder or filter that hides it), `f` narrows the list to all of them in Claude's order with the reason under each row, and `r` asks again. `Esc` clears the narrowed list.
 - The reason stays in Conversation for a session Claude picked.
 
+## Continuing in a new claude
+
+`claude -r` cannot resume a session whose folder is gone, such as one in a removed worktree (`Enter` says so and names this key), or whose transcript Claude Code has deleted. `c` continues any session another way: recall quits and starts a new claude in the folder recall was started in, with recall's MCP server, asking it to recall the session, the way you would ask in a session yourself:
+
+```console
+claude "Use the recall tools to recall session <id> ..." \
+  --mcp-config <recall mcp> \
+  --allowedTools mcp__recall__recall_search,mcp__recall__recall_list,mcp__recall__recall_export
+```
+
+- The box takes what to recall about it ("the retry policy"); left empty, Claude says what was being done and how far it got. Either way it then waits for you.
+- It is an ordinary session: your settings, CLAUDE.md and MCP servers apply. Only the recall tools are allowed without asking.
+- The new session starts from what the old one said, not from its files: a removed worktree's changes are not brought back.
+
 ## Folders
 
 Started inside a repository (or one of its worktrees, or a subdirectory), `recall` lists only that repository's sessions, with a Worktree column in place of Folder; `.` shows every folder again. A folder with no sessions starts with all of them. `recall --all` starts with every folder for one run, and `--all=false` with the folder when `scope = "all"` is set.
@@ -100,7 +115,7 @@ Click a session to select it, click a frame to focus it, scroll the wheel over t
 
 ## Changing keys
 
-Under `[keys]` in the [config file](../README.md#configuration), an operation takes a key or a list of keys in place of its own, or `[]` to turn it off. The footer and the `?` key list show the keys you set. The file `recall` writes on first run lists every operation with its keys, commented out, so a key is changed by uncommenting its line and editing it; a file written by an older `recall` lacks them, and the README shows the whole file to copy them from.
+Under `[keys]` in the [config file](../README.md#configuration), an operation takes a key or a list of keys in place of its own, or `[]` to turn it off. A key you give an operation leaves the operations that have it by default where they would meet: `continue = "enter"` makes `Enter` continue and leaves `resume` with no key, as if `Enter` itself were set, and `resume = "j"` leaves `down` its arrow and `ctrl+n`. The footer and the `?` key list show the keys you set. In the footer a key keeps the place it has by default, so with `continue = "enter"` and `resume = "c"`, `Enter` still comes first, now continuing. The file `recall` writes on first run lists every operation with its keys, commented out, so a key is changed by uncommenting its line and editing it; a file written by an older `recall` lacks them, and the README shows the whole file to copy them from.
 
 ```toml
 [keys]
@@ -123,6 +138,7 @@ An operation that works in one pane only goes in that pane's table, `[keys.list]
 | `sort` | `s` | Choose the sort order |
 | `scope` | `.` | Switch between the folder recall was started in and all folders |
 | `resume` | `enter` | Resume the session |
+| `continue` | `c` | Continue the session in a new claude |
 | `read` | `space` | Read the conversation over the detail pane, or put it back |
 | `copy_id` | `y` | Copy the session ID |
 | `copy_command` | `Y` | Copy the resume command |
@@ -143,7 +159,7 @@ Keys are written as key presses are read:
 - A named key: `enter`, `space`, `tab`, `backspace`, `up`, `down`, `left`, `right`, `home`, `end`, `pgup`, `pgdown`, `insert`, `delete`, `f1` to `f12`.
 - With modifiers in the order `ctrl+`, `alt+`, `shift+`, and a letter lower-cased: `ctrl+d`, `ctrl+shift+y`, `alt+enter`, `shift+tab`.
 
-`ctrl+c` and `esc` cannot be given to an operation, and neither can the keys inside the sort menu and the Ask box, or those of a field being typed in. An unknown operation, a key written another way and two operations that would share a key in one place (`resume = "j"` takes the list's `down`) are reported when `recall` starts, rather than ignored.
+`ctrl+c` and `esc` cannot be given to an operation, and neither can the keys inside the sort menu and the Ask box, or those of a field being typed in. An unknown operation, a key written another way and two operations set in the file that would share a key in one place (`resume = "j"` with `down = "j"`) are reported when `recall` starts, rather than ignored.
 
 ## Settings
 

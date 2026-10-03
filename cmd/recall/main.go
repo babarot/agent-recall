@@ -561,21 +561,31 @@ func runTUI(o *options, c *cobra.Command) error {
 	if wd, err := os.Getwd(); err == nil {
 		model = model.StartIn(wd)
 	}
-	// Asking Claude gives it this recall's MCP server on the same database,
-	// run from a directory of its own so no project's settings apply.
+	// Asking Claude, and a session continued in a new claude, get this
+	// recall's MCP server on the same database. Asking runs from a
+	// directory of its own so no project's settings apply.
+	recall := []string{"recall", "mcp", "--db", o.db}
 	if exe, err := os.Executable(); err == nil {
-		model = model.AskWith([]string{exe, "mcp", "--db", o.db}, filepath.Join(filepath.Dir(config.StatePath()), "ask"))
+		recall[0] = exe
+		model = model.AskWith(recall, filepath.Join(filepath.Dir(config.StatePath()), "ask"))
 	}
 	final, err := tea.NewProgram(model).Run()
 	if err != nil {
 		return err
 	}
 	m, ok := final.(tui.Model)
-	if !ok || m.Result == nil {
+	if !ok {
 		return nil
 	}
-	d.Close()
-	return resume(*m.Result)
+	switch {
+	case m.Continue != nil:
+		d.Close()
+		return continueSession(recall, *m.Continue)
+	case m.Result != nil:
+		d.Close()
+		return resume(*m.Result)
+	}
+	return nil
 }
 
 // resume replaces this process with claude -r, run from the session's folder
@@ -589,4 +599,38 @@ func resume(r tui.Resume) error {
 		return fmt.Errorf("cd %s: %w", r.Dir, err)
 	}
 	return syscall.Exec(claude, []string{"claude", "-r", r.SessionID}, os.Environ())
+}
+
+// continueSession replaces this process with a new claude, in the folder
+// recall was started in, that recalls the session through recall's MCP
+// server (the command line recall).
+func continueSession(recall []string, c tui.Continue) error {
+	claude, err := exec.LookPath("claude")
+	if err != nil {
+		return errors.New("claude is not on PATH")
+	}
+	return syscall.Exec(claude, append([]string{"claude"}, continueArgs(recall, c)...), os.Environ())
+}
+
+// continueArgs are claude's arguments for continuing a session: recall's MCP
+// server beside the user's own, its read-only tools allowed, and a first
+// prompt asking to recall the session, as one would in a session.
+func continueArgs(recall []string, c tui.Continue) []string {
+	mcp, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{
+		"recall": map[string]any{"command": recall[0], "args": recall[1:]},
+	}})
+	prompt := "Use the recall tools to recall session " + c.SessionID +
+		" (recall_export), then pick up where it left off: say briefly what was being done and how far it got, and wait for my instructions."
+	if c.Topic != "" {
+		prompt = "Use the recall tools to recall session " + c.SessionID +
+			" (recall_export, or recall_search for the parts you need) about: " + c.Topic +
+			"\nSay briefly what it says about that, and wait for my instructions."
+	}
+	// The prompt goes first: --mcp-config and --allowedTools take every
+	// argument after them.
+	return []string{
+		prompt,
+		"--mcp-config", string(mcp),
+		"--allowedTools", "mcp__recall__recall_search,mcp__recall__recall_list,mcp__recall__recall_export",
+	}
 }

@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -96,6 +97,9 @@ func (m Model) View() tea.View {
 func (m Model) render() string {
 	if m.width == 0 || m.height == 0 || m.settling {
 		return ""
+	}
+	if m.cont.open {
+		return m.withCont(m.renderScreen())
 	}
 	if m.ask.stage != askClosed {
 		return m.withAsk(m.renderScreen())
@@ -339,6 +343,10 @@ func (m Model) renderHelp() string {
 			pairs = append(pairs, [2]string{"folder: text: title: branch: worktree: id:", "one field"})
 		}
 	case modeList:
+		if m.cont.open {
+			pairs = [][2]string{{"enter", "start claude"}, {"esc", "close"}}
+			break
+		}
 		if m.ask.stage != askClosed {
 			pairs = map[askStage][][2]string{
 				askTyping:   {{"enter", "ask"}, {"esc", "close"}},
@@ -392,20 +400,46 @@ func (m Model) renderHelp() string {
 		}
 		// ? goes early so a narrow terminal still shows where the rest are.
 		pairs = [][2]string{{"{resume.0}", "resume"}, {"{read.0}", "read"}, {"{help.0}", "keys"}, {"{search.0}", "filter"},
-			{"{scope.0}", here}, {"{list.folders_open.0}", "folders"}, {"{focus_next.0}", "focus"}, {"{copy_id.0}", "copy id"},
+			{"{scope.0}", here}, {"{list.folders_open.0}", "folders"}, {"{continue.0}", "continue"}, {"{focus_next.0}", "focus"}, {"{copy_id.0}", "copy id"},
 			{"{copy_command.0}", "copy cmd"}, {"{grow.0}/{shrink.0}", "resize"}, {"{sort.0}", "sort"}, {"{quit.0}", "quit"}}
 		if m.sidebarShown() {
 			pairs[5] = [2]string{"{list.folders_close.0}", "close folders"}
 		}
 	}
 	var parts []string
-	for _, p := range pairs {
+	for _, p := range m.byDefaultKey(pairs) {
 		// A hint whose keys were all remapped away is left out.
 		if k := m.hintKeys(p[0]); k != "" {
 			parts = append(parts, m.st.key.Render(k)+" "+m.st.muted.Render(p[1]))
 		}
 	}
 	return " " + ansi.Truncate(strings.Join(parts, m.st.helpSep.Render(" · ")), m.width-2, ellipsis)
+}
+
+// byDefaultKey orders the footer's hints by where their keys stand by
+// default, so a key keeps its place when it moves to another operation:
+// with continue = "enter" and resume = "c", enter still comes first, now
+// continuing. A hint whose keys are none of the defaults' goes after them.
+func (m Model) byDefaultKey(pairs [][2]string) [][2]string {
+	d := m
+	d.km = defaultKeyMap()
+	rank := map[string]int{}
+	for i, p := range pairs {
+		if k := d.hintKeys(p[0]); k != "" {
+			if _, ok := rank[k]; !ok {
+				rank[k] = i
+			}
+		}
+	}
+	at := func(p [2]string) int {
+		if i, ok := rank[m.hintKeys(p[0])]; ok {
+			return i
+		}
+		return len(pairs)
+	}
+	out := slices.Clone(pairs)
+	slices.SortStableFunc(out, func(a, b [2]string) int { return at(a) - at(b) })
+	return out
 }
 
 // skipLine marks the messages the preview leaves out: a rule across w
