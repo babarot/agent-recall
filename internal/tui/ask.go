@@ -215,7 +215,7 @@ func (m Model) updateAsk(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.ask.input, cmd = m.ask.input.Update(msg)
 		return m, cmd
 	case askRunning:
-		if key == "esc" {
+		if key == "esc" || key == "q" {
 			m.closeAsk()
 		}
 	case askAnswered:
