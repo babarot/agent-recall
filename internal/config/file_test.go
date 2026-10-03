@@ -75,7 +75,7 @@ func TestLoadRejectsUnknownKeys(t *testing.T) {
 		"[ui]\ntheme = \"nord\"\n": `unknown key "ui.theme"; it belongs under [tui]`,
 		"db = \"/tmp/v.db\"\n":     `unknown key "db"; it belongs under [core]`,
 		"[tui]\nport = 8080\n":     `unknown key "tui.port"; it belongs under [ui]`,
-		"[web]\nport = 8080\n":     `unknown key "web" (known: core.db, ui.port, tui.`,
+		"[web]\nport = 8080\n":     `unknown table [web] (known: [core], [ui], [tui], [keys])`,
 	}
 	for body, want := range cases {
 		os.WriteFile(path, []byte(body), 0o644)
