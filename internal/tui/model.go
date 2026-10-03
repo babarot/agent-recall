@@ -118,8 +118,11 @@ type Model struct {
 	read       []string
 	readFor    string
 
-	// details caches the detail pane's data per session ID.
-	details map[string]*db.Detail
+	// details caches the detail pane's data per session ID; detailLoading
+	// has the ones being read in the background, when background is set.
+	details       map[string]*db.Detail
+	detailLoading map[string]bool
+	background    bool
 	// detailH is the height of the detail pane below the list; statePath
 	// is where a changed height is remembered.
 	detailH   int
@@ -178,24 +181,25 @@ func New(sessions []db.Session, source Source, cfg config.TUI) Model {
 	ss.SetWidth(sidebarWidth - 12)
 
 	m := Model{
-		ask:        askState{input: newAskInput()},
-		askRun:     claudeRunner([]string{"recall", "mcp"}, config.ModelID(cfg.AskModel), ""),
-		reasons:    map[string]string{},
-		sideSearch: ss,
-		conv:       newConvSearch(),
-		resolver:   resolver,
-		folders:    groupRows(rows),
-		cfg:        cfg,
-		source:     source,
-		home:       home,
-		now:        time.Now,
-		st:         newStyles(theme.Get(cfg.Theme, true)),
-		rows:       rows,
-		filter:     fi,
-		expandRows: defaultExpandRows,
-		details:    map[string]*db.Detail{},
-		text:       textSearch{found: map[string]map[string]bool{}, pending: map[string]bool{}, delay: textSearchDelay},
-		detailH:    max(config.MinDetailHeight, cfg.DetailHeight),
+		ask:           askState{input: newAskInput()},
+		askRun:        claudeRunner([]string{"recall", "mcp"}, config.ModelID(cfg.AskModel), ""),
+		reasons:       map[string]string{},
+		sideSearch:    ss,
+		conv:          newConvSearch(),
+		resolver:      resolver,
+		folders:       groupRows(rows),
+		cfg:           cfg,
+		source:        source,
+		home:          home,
+		now:           time.Now,
+		st:            newStyles(theme.Get(cfg.Theme, true)),
+		rows:          rows,
+		filter:        fi,
+		expandRows:    defaultExpandRows,
+		details:       map[string]*db.Detail{},
+		detailLoading: map[string]bool{},
+		text:          textSearch{found: map[string]map[string]bool{}, pending: map[string]bool{}, delay: textSearchDelay},
+		detailH:       max(config.MinDetailHeight, cfg.DetailHeight),
 	}
 	m.branches = values(m.rows, func(r *row) string { return r.s.GitBranch })
 	m.worktrees = values(m.rows, func(r *row) string { return r.worktree })
@@ -256,25 +260,53 @@ func (m Model) paneTop() int {
 
 // loadDetail fetches the detail pane's data for the selected session the
 // first time it is shown.
-func (m *Model) loadDetail() {
+func (m *Model) loadDetail() tea.Cmd {
 	r := m.current()
 	if r == nil {
 		if m.focus != focusFolders {
 			m.focus = focusList
 		}
-		return
+		return nil
 	}
 	if r.s.ID != m.scrollFor {
 		m.scroll, m.scrollFor = [numFocus]int{}, r.s.ID
 	}
-	if _, ok := m.details[r.s.ID]; ok {
-		return
+	if _, ok := m.details[r.s.ID]; ok || m.detailLoading[r.s.ID] {
+		return nil
 	}
-	d, err := m.source.SessionDetail(r.s.ID)
-	if err != nil {
-		d = nil
+	if !m.background {
+		d, err := m.source.SessionDetail(r.s.ID)
+		if err != nil {
+			d = nil
+		}
+		m.details[r.s.ID] = d
+		return nil
 	}
-	m.details[r.s.ID] = d
+	// Reading a long session's detail can take a moment the first time;
+	// the list keeps moving meanwhile, and the pane says it is loading.
+	id, src := r.s.ID, m.source
+	m.detailLoading[id] = true
+	return func() tea.Msg {
+		d, err := src.SessionDetail(id)
+		if err != nil {
+			d = nil
+		}
+		return detailLoaded{id, d}
+	}
+}
+
+// detailLoaded brings a session's detail read in the background.
+type detailLoaded struct {
+	id string
+	d  *db.Detail
+}
+
+// LoadInBackground makes the model read each session's detail off the
+// keys, so moving onto a long session does not hold the TUI up. Only recall
+// itself does; the tests read it in place.
+func (m Model) LoadInBackground() Model {
+	m.background = true
+	return m
 }
 
 func (m Model) Init() tea.Cmd {
@@ -434,9 +466,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if nm.focus == focusFolders && !nm.sidebarShown() {
 			nm.focus = focusList
 		}
-		nm.loadDetail()
+		load := nm.loadDetail()
 		nm.readLines()
-		return nm, tea.Batch(cmd, nm.scheduleTextSearch(), nm.convLoadCmd())
+		return nm, tea.Batch(cmd, load, nm.scheduleTextSearch(), nm.convLoadCmd())
 	}
 	return next, cmd
 }
@@ -512,6 +544,13 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.askMsg(msg)
 	case convTick, convLoaded:
 		m.convMsg(msg)
+		return m, nil
+	case detailLoaded:
+		delete(m.detailLoading, msg.id)
+		m.details[msg.id] = msg.d
+		if r := m.current(); r != nil && r.s.ID == msg.id {
+			m.readFor = "" // the spread conversation, with it
+		}
 		return m, nil
 	case textSearchTick:
 		return m, m.startTextSearch(msg)

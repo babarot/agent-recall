@@ -122,3 +122,32 @@ func TestSpreadFitsTheTerminal(t *testing.T) {
 		}
 	}
 }
+
+// In the background, moving onto a session does not wait for its detail:
+// the pane says it is loading until the detail comes, the spread
+// conversation too.
+func TestDetailLoadsInBackground(t *testing.T) {
+	src := &fakePreview{}
+	m := New(testSessions(t), src, config.Default().TUI).LoadInBackground()
+	m = update(t, m, tea.WindowSizeMsg{Width: 140, Height: 40})
+	id := m.current().s.ID
+	if len(m.details) != 0 || !m.detailLoading[id] || !strings.Contains(screen(m), "Loading…") {
+		t.Fatalf("details %v loading %v:\n%s", m.details, m.detailLoading, screen(m))
+	}
+	// Spread before it comes: loading there too, then the conversation.
+	m = press(t, m, "space")
+	if !strings.Contains(screen(m), "Loading…") {
+		t.Fatalf("the spread pane should say it is loading:\n%s", screen(m))
+	}
+	d, _ := src.SessionDetail(id)
+	m = update(t, m, detailLoaded{id, d})
+	s := screen(m)
+	if m.detailLoading[id] || strings.Contains(s, "Loading…") || !strings.Contains(s, "first question about "+id) {
+		t.Fatalf("after it came:\n%s", s)
+	}
+	// A detail that comes for another session is kept for later.
+	m = update(t, m, detailLoaded{"other", d})
+	if _, ok := m.details["other"]; !ok || !strings.Contains(screen(m), "first question about "+id) {
+		t.Fatal("another session's detail should be kept and not shown")
+	}
+}

@@ -153,6 +153,19 @@ func (m Model) frameContent(r *row, inner [numFocus]int) [numFocus]frameLines {
 		return out
 	}
 	d := m.details[r.s.ID]
+	if d == nil && m.detailLoading[r.s.ID] {
+		// Still being read: the frames that need it say so; Details shows
+		// what the session row has.
+		loading := []string{m.st.muted.Render("Loading…")}
+		out[focusConv] = frameLines{pinned: []string{m.headLine(r)}, scroll: loading, keep: -1}
+		out[focusDone] = frameLines{scroll: loading, keep: -1}
+		details, ok := m.detailsGrid(r, nil, inner[focusDetails])
+		if !ok {
+			details = m.detailsLines(r, nil)
+		}
+		out[focusDetails] = frameLines{scroll: details, keep: -1}
+		return out
+	}
 	out[focusConv] = m.conversationContent(r, d)
 	if m.expanded {
 		out[focusConv] = frameLines{pinned: []string{m.headLine(r)}, scroll: m.highlightConv(m.read), keep: -1}
