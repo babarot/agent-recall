@@ -424,6 +424,57 @@ func TestScrollbarFollowsConfig(t *testing.T) {
 	}
 }
 
+// The frames' lines are built once for a row, a detail and a width, and
+// again when any of them or the colors change.
+func TestBuiltFramesKeepLinesUntilTheirInputsChange(t *testing.T) {
+	b := &builtFrames{}
+	r1, r2 := &row{}, &row{}
+	d1, d2 := &db.Detail{}, &db.Detail{}
+	builds := 0
+	build := func() frameLines { builds++; return frameLines{scroll: []string{"x"}} }
+	for _, c := range []struct {
+		r     *row
+		d     *db.Detail
+		inner int
+		want  int
+	}{
+		{r1, d1, 40, 1}, {r1, d1, 40, 1}, {r1, d1, 50, 2}, {r2, d1, 50, 3}, {r2, d2, 50, 4}, {r2, d2, 50, 4},
+	} {
+		got := b.done(c.r, c.d, c.inner, build)
+		got.scroll = append(got.scroll[:0], "changed by a caller")
+		if builds != c.want {
+			t.Fatalf("%+v: %d builds, want %d", c, builds, c.want)
+		}
+	}
+	if got := b.done(r2, d2, 50, build); got.scroll[0] != "x" {
+		t.Fatalf("a caller's change leaked into the kept lines: %q", got.scroll)
+	}
+	b.forget()
+	if b.done(r2, d2, 50, build); builds != 5 {
+		t.Fatalf("forget should build again, %d builds", builds)
+	}
+	// No detail yet: nothing is kept.
+	b.conv(r1, nil, build)
+	b.conv(r1, nil, build)
+	if builds != 7 {
+		t.Fatalf("%d builds without a detail, want 7", builds)
+	}
+}
+
+// Moving to another session shows its own lines, not the ones kept.
+func TestFramesFollowTheSelectedSession(t *testing.T) {
+	m, _ := newTestModel(t, config.Default().TUI, 140, 40)
+	first := m.current().s.ID
+	if s := screen(m); !strings.Contains(s, "first question about "+first) {
+		t.Fatalf("first session:\n%s", s)
+	}
+	m = press(t, m, "down")
+	next := m.current().s.ID
+	if s := screen(m); next == first || !strings.Contains(s, "first question about "+next) || strings.Contains(s, "first question about "+first) {
+		t.Fatalf("after moving to %s:\n%s", next, s)
+	}
+}
+
 func TestScrollbarThumb(t *testing.T) {
 	for _, c := range []struct{ first, room, total, from, to int }{
 		{0, 10, 100, 0, 1},   // top: thumb at the top
@@ -666,6 +717,7 @@ func TestConversationKeepsLastUserMessage(t *testing.T) {
 	for i := range 10 {
 		d.Tail = append(d.Tail, db.Message{Role: "assistant", Content: fmt.Sprintf("later reply %d", i), Timestamp: now})
 	}
+	m.built.forget() // the detail changed in place, which recall never does
 	s := screen(m)
 	if !strings.Contains(s, "please also add docs") || !strings.Contains(s, "later reply 9") {
 		t.Fatalf("pane should keep the last user message and the newest reply:\n%s", s)
@@ -684,6 +736,8 @@ func manyFiles(m Model) {
 	for i := range 8 {
 		d.Commands = append(d.Commands, fmt.Sprintf("make step%d", i))
 	}
+	m.programs[m.current().s.ID] = commandCounts(d.Commands)
+	m.built.forget() // the detail changed in place, which recall never does
 }
 
 func TestDoneScrollsToFiles(t *testing.T) {

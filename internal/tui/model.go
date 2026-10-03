@@ -123,7 +123,13 @@ type Model struct {
 
 	// details caches the detail pane's data per session ID; detailLoading
 	// has the ones being read in the background, when background is set.
-	details       map[string]*db.Detail
+	// programs counts each detail's commands by program, once, since
+	// parsing them is too slow to do on every frame.
+	details  map[string]*db.Detail
+	programs map[string][]db.Count
+	// built keeps the frames' lines last built from a detail, which a
+	// scroll asks for a few times over without changing them.
+	built         *builtFrames
 	detailLoading map[string]bool
 	background    bool
 	// detailH is the height of the detail pane below the list; statePath
@@ -201,6 +207,8 @@ func New(sessions []db.Session, source Source, cfg config.TUI) Model {
 		filter:        fi,
 		expandRows:    defaultExpandRows,
 		details:       map[string]*db.Detail{},
+		programs:      map[string][]db.Count{},
+		built:         &builtFrames{},
 		detailLoading: map[string]bool{},
 		text:          textSearch{found: map[string]map[string]bool{}, pending: map[string]bool{}, delay: textSearchDelay},
 		detailH:       max(config.MinDetailHeight, cfg.DetailHeight),
@@ -283,7 +291,7 @@ func (m *Model) loadDetail() tea.Cmd {
 		if err != nil {
 			d = nil
 		}
-		m.details[r.s.ID] = d
+		m.storeDetail(r.s.ID, d, nil)
 		return nil
 	}
 	// Reading a long session's detail can take a moment the first time;
@@ -293,16 +301,32 @@ func (m *Model) loadDetail() tea.Cmd {
 	return func() tea.Msg {
 		d, err := src.SessionDetail(id)
 		if err != nil {
-			d = nil
+			return detailLoaded{id: id}
 		}
-		return detailLoaded{id, d}
+		return detailLoaded{id: id, d: d, programs: commandCounts(d.Commands)}
 	}
 }
 
-// detailLoaded brings a session's detail read in the background.
+// detailLoaded brings a session's detail read in the background, with its
+// commands counted there too.
 type detailLoaded struct {
-	id string
-	d  *db.Detail
+	id       string
+	d        *db.Detail
+	programs []db.Count
+}
+
+// storeDetail caches a session's detail and its commands by program,
+// counting them when programs is nil.
+func (m *Model) storeDetail(id string, d *db.Detail, programs []db.Count) {
+	m.details[id] = d
+	if d == nil {
+		delete(m.programs, id)
+		return
+	}
+	if programs == nil {
+		programs = commandCounts(d.Commands)
+	}
+	m.programs[id] = programs
 }
 
 // LoadInBackground makes the model read each session's detail off the
@@ -508,7 +532,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.BackgroundColorMsg:
 		m.st = newStyles(theme.Get(m.cfg.Theme, msg.IsDark()))
-		m.readFor = "" // drawn in the old colors
+		m.built.forget() // drawn in the old colors
+		m.readFor = ""   // drawn in the old colors
 		return m, nil
 	case settledMsg:
 		m.settling = false
@@ -528,7 +553,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case detailLoaded:
 		delete(m.detailLoading, msg.id)
-		m.details[msg.id] = msg.d
+		m.storeDetail(msg.id, msg.d, msg.programs)
 		if r := m.current(); r != nil && r.s.ID == msg.id {
 			m.readFor = "" // the spread conversation, with it
 		}
