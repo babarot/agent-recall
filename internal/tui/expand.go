@@ -62,8 +62,12 @@ func (m *Model) readLines() {
 	// the latest ones.
 	rendered := ""
 	if q != "" {
-		if parts, after, ok := searchParts(m.fullConversation(r.s.ID), q); ok {
-			rendered = m.renderParts(parts, after, w)
+		// Until the whole conversation is read, the first message and the
+		// latest ones; the frame is rebuilt when it comes.
+		if all, ok := m.conv.full[r.s.ID]; ok {
+			if parts, after, ok := searchParts(all, m.conv.lower[r.s.ID], q); ok {
+				rendered = m.renderParts(parts, after, w)
+			}
 		}
 	}
 	if rendered == "" {

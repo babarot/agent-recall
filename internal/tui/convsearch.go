@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -20,6 +21,11 @@ import (
 // highlighted; the frame scrolls to the first one, n and N go to the next
 // and previous, and Esc drops the search and puts the conversation back as
 // it was. It carries over to the next session read in place.
+//
+// A long session takes a moment to read and search, so the whole
+// conversation is read in the background as soon as the search starts, the
+// search runs once typing pauses (or on Enter), and the highlighted lines
+// are built once per search rather than on every draw.
 
 const (
 	// convContext is how many lines above a hit stay in view when the frame
@@ -28,15 +34,44 @@ const (
 	// convAround is how many messages before and after one that has the
 	// search are shown with it.
 	convAround = 2
+	// convSearchDelay is how long typing pauses before the search runs.
+	convSearchDelay = 120 * time.Millisecond
+	// minConvQuery is the shortest search run: one letter is in nearly
+	// every message.
+	minConvQuery = 2
 )
 
 type convSearch struct {
 	input  textinput.Model
-	typing bool  // the search has the keys
-	hits   []int // lines of m.read that contain the query
-	cur    int   // the hit scrolled to, an index into hits
-	// full holds each session's whole conversation once it is searched.
-	full map[string][]db.Message
+	typing bool // the search has the keys
+	// applied is the search the frame shows, lower-cased: the input once
+	// typing paused, or "" while it is shorter than minConvQuery.
+	applied string
+	seq     int // the last pause scheduled
+	delay   time.Duration
+	hits    []int    // lines of m.read that contain applied
+	cur     int      // the hit scrolled to, an index into hits
+	marked  []string // m.read with the hits highlighted, nil without hits
+	// full and lower hold each session's whole conversation, and its text
+	// lower-cased, once read; loading has the sessions being read.
+	full    map[string][]db.Message
+	lower   map[string][]string
+	loading map[string]bool
+}
+
+func newConvSearch() convSearch {
+	return convSearch{input: newConvSearchInput(), delay: convSearchDelay,
+		full: map[string][]db.Message{}, lower: map[string][]string{}, loading: map[string]bool{}}
+}
+
+// convTick ends a pause in typing the search.
+type convTick struct{ seq int }
+
+// convLoaded brings a session's whole conversation.
+type convLoaded struct {
+	id   string
+	msgs []db.Message
+	err  error
 }
 
 func newConvSearchInput() textinput.Model {
@@ -51,7 +86,66 @@ func newConvSearchInput() textinput.Model {
 // spread Conversation has the keys.
 func (m Model) convSearching() bool { return m.expanded && m.focus == focusConv }
 
-func (m Model) convQuery() string { return strings.ToLower(strings.TrimSpace(m.conv.input.Value())) }
+// convQuery is the search the frame is built for.
+func (m Model) convQuery() string { return m.conv.applied }
+
+// typedQuery is the search as typed, as it would be applied.
+func (m Model) typedQuery() string {
+	q := strings.ToLower(strings.TrimSpace(m.conv.input.Value()))
+	if len([]rune(q)) < minConvQuery {
+		return ""
+	}
+	return q
+}
+
+// applyConvSearch shows the search as typed; readLines rebuilds the frame
+// for it.
+func (m *Model) applyConvSearch() {
+	m.conv.seq++ // a pause still pending is moot
+	m.conv.applied = m.typedQuery()
+}
+
+// convMsg handles the pause and the background read.
+func (m *Model) convMsg(msg tea.Msg) {
+	switch msg := msg.(type) {
+	case convTick:
+		if msg.seq == m.conv.seq {
+			m.applyConvSearch()
+		}
+	case convLoaded:
+		delete(m.conv.loading, msg.id)
+		if msg.err != nil {
+			return
+		}
+		lower := make([]string, len(msg.msgs))
+		for i, mm := range msg.msgs {
+			lower[i] = strings.ToLower(mm.Content)
+		}
+		m.conv.full[msg.id], m.conv.lower[msg.id] = msg.msgs, lower
+		if r := m.current(); r != nil && r.s.ID == msg.id {
+			m.readFor = "" // rebuild with it
+		}
+	}
+}
+
+// convLoadCmd reads the shown session's whole conversation in the
+// background, once a search starts, when it is not read yet.
+func (m *Model) convLoadCmd() tea.Cmd {
+	r := m.current()
+	if r == nil || !m.expanded || (!m.conv.typing && m.conv.applied == "") || m.source == nil {
+		return nil
+	}
+	id := r.s.ID
+	if _, ok := m.conv.full[id]; ok || m.conv.loading[id] {
+		return nil
+	}
+	m.conv.loading[id] = true
+	src := m.source
+	return func() tea.Msg {
+		msgs, err := src.SessionMessages(id)
+		return convLoaded{id, msgs, err}
+	}
+}
 
 // startConvSearch starts typing a search.
 func (m *Model) startConvSearch() tea.Cmd {
@@ -68,7 +162,9 @@ func (m Model) updateConvSearch(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.conv.input.Blur()
 		if m.conv.input.Value() == "" {
 			m.clearConvSearch()
+			return m, nil
 		}
+		m.applyConvSearch() // no waiting for the pause
 		return m, nil
 	case "esc":
 		m.clearConvSearch()
@@ -76,16 +172,23 @@ func (m Model) updateConvSearch(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c":
 		return m, tea.Quit
 	}
-	// A change of the search rebuilds the frame (readLines), which goes to
-	// the first hit.
+	// Once typing pauses, the search is applied and readLines rebuilds the
+	// frame for it, going to the first hit.
+	before := m.conv.input.Value()
 	var cmd tea.Cmd
 	m.conv.input, cmd = m.conv.input.Update(msg)
-	return m, cmd
+	if m.conv.input.Value() == before {
+		return m, cmd
+	}
+	m.conv.seq++
+	seq := m.conv.seq
+	return m, tea.Batch(cmd, tea.Tick(m.conv.delay, func(time.Time) tea.Msg { return convTick{seq} }))
 }
 
-// findConvHits lists the lines of the conversation that have the query.
+// findConvHits lists the lines of the conversation that have the query,
+// and highlights them.
 func (m *Model) findConvHits() {
-	m.conv.hits = nil
+	m.conv.hits, m.conv.marked = nil, nil
 	q := m.convQuery()
 	if q == "" {
 		return
@@ -95,6 +198,23 @@ func (m *Model) findConvHits() {
 			m.conv.hits = append(m.conv.hits, i)
 		}
 	}
+	if len(m.conv.hits) == 0 {
+		return
+	}
+	m.conv.marked = append([]string(nil), m.read...)
+	for i := range m.conv.hits {
+		m.markHit(i)
+	}
+}
+
+// markHit highlights hit i, in the stronger color when it is current.
+func (m *Model) markHit(i int) {
+	style := m.st.match
+	if i == m.conv.cur {
+		style = m.st.matchCur
+	}
+	n := m.conv.hits[i]
+	m.conv.marked[n] = markRunes(m.read[n], []rune(m.convQuery()), style)
 }
 
 // nextConvHit goes delta hits on, wrapping around.
@@ -103,7 +223,12 @@ func (m *Model) nextConvHit(delta int) {
 	if n == 0 {
 		return
 	}
+	prev := m.conv.cur
 	m.conv.cur = ((m.conv.cur+delta)%n + n) % n
+	if m.conv.marked != nil {
+		m.markHit(prev)
+		m.markHit(m.conv.cur)
+	}
 	m.showConvHit()
 }
 
@@ -126,34 +251,20 @@ func (m *Model) clearConvSearch() {
 	m.conv.typing = false
 	m.conv.input.Blur()
 	m.conv.input.SetValue("")
-	m.conv.hits = nil
+	m.conv.seq++
+	m.conv.applied = ""
+	m.conv.hits, m.conv.marked = nil, nil
 	m.conv.cur = 0
 }
 
-// fullConversation is a session's whole conversation, read once; nil when
-// it cannot be read.
-func (m *Model) fullConversation(id string) []db.Message {
-	if msgs, ok := m.conv.full[id]; ok {
-		return msgs
-	}
-	if m.source == nil {
-		return nil
-	}
-	msgs, err := m.source.SessionMessages(id)
-	if err != nil {
-		return nil
-	}
-	m.conv.full[id] = msgs
-	return msgs
-}
-
 // searchParts picks from the conversation the messages that have q, with
-// convAround on each side, and how many are left out after the last one.
-// ok is false when no message has q.
-func searchParts(all []db.Message, q string) (parts []convPart, after int, ok bool) {
+// convAround on each side, and how many are left out after the last one;
+// lower is the messages' text lower-cased. ok is false when no message has
+// q.
+func searchParts(all []db.Message, lower []string, q string) (parts []convPart, after int, ok bool) {
 	keep := make([]bool, len(all))
-	for i, msg := range all {
-		if strings.Contains(strings.ToLower(msg.Content), q) {
+	for i := range all {
+		if strings.Contains(lower[i], q) {
 			ok = true
 			for j := max(0, i-convAround); j <= min(len(all)-1, i+convAround); j++ {
 				keep[j] = true
@@ -178,22 +289,13 @@ func searchParts(all []db.Message, q string) (parts []convPart, after int, ok bo
 	return parts, skipped, true
 }
 
-// highlightConv marks the query in the lines that have it, the current
-// hit's line in a stronger color.
+// highlightConv is the conversation with its hits highlighted, as built
+// when the search ran.
 func (m Model) highlightConv(lines []string) []string {
-	q := []rune(m.convQuery())
-	if len(q) == 0 || len(m.conv.hits) == 0 {
+	if len(m.conv.marked) != len(lines) {
 		return lines
 	}
-	out := append([]string(nil), lines...)
-	for i, n := range m.conv.hits {
-		style := m.st.match
-		if i == m.conv.cur {
-			style = m.st.matchCur
-		}
-		out[n] = markRunes(out[n], q, style)
-	}
-	return out
+	return m.conv.marked
 }
 
 // markRunes styles every case-insensitive occurrence of q in the styled
@@ -226,9 +328,13 @@ func (m Model) convSearchLine() string {
 		return ""
 	}
 	count := m.st.muted.Render("  no match")
-	if n := len(m.conv.hits); n > 0 {
-		count = m.st.muted.Render(fmt.Sprintf("  %d/%d", m.conv.cur+1, n))
-	} else if m.convQuery() == "" {
+	r := m.current()
+	switch {
+	case m.typedQuery() != m.convQuery() || (r != nil && m.conv.loading[r.s.ID]):
+		count = m.st.muted.Render("  searching…")
+	case len(m.conv.hits) > 0:
+		count = m.st.muted.Render(fmt.Sprintf("  %d/%d", m.conv.cur+1, len(m.conv.hits)))
+	case m.convQuery() == "":
 		count = ""
 	}
 	if m.conv.typing {

@@ -182,7 +182,7 @@ func New(sessions []db.Session, source Source, cfg config.TUI) Model {
 		askRun:     claudeRunner([]string{"recall", "mcp"}, config.ModelID(cfg.AskModel), ""),
 		reasons:    map[string]string{},
 		sideSearch: ss,
-		conv:       convSearch{input: newConvSearchInput(), full: map[string][]db.Message{}},
+		conv:       newConvSearch(),
 		resolver:   resolver,
 		folders:    groupRows(rows),
 		cfg:        cfg,
@@ -436,7 +436,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		nm.loadDetail()
 		nm.readLines()
-		return nm, tea.Batch(cmd, nm.scheduleTextSearch())
+		return nm, tea.Batch(cmd, nm.scheduleTextSearch(), nm.convLoadCmd())
 	}
 	return next, cmd
 }
@@ -510,6 +510,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case askStepMsg, askDoneMsg, askTickMsg:
 		return m, m.askMsg(msg)
+	case convTick, convLoaded:
+		m.convMsg(msg)
+		return m, nil
 	case textSearchTick:
 		return m, m.startTextSearch(msg)
 	case textSearchDone:

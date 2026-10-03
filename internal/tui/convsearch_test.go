@@ -12,6 +12,20 @@ import (
 	"github.com/babarot/claude-recall/internal/db"
 )
 
+// settle ends the pause in typing the search and brings the shown
+// session's whole conversation, as the commands Update returns would.
+func settle(t *testing.T, m Model) Model {
+	t.Helper()
+	m = update(t, m, convTick{m.conv.seq})
+	if r := m.current(); r != nil {
+		if _, ok := m.conv.full[r.s.ID]; !ok {
+			msgs, err := m.source.SessionMessages(r.s.ID)
+			m = update(t, m, convLoaded{r.s.ID, msgs, err})
+		}
+	}
+	return m
+}
+
 // typeText types s into whatever has the keys.
 func typeText(t *testing.T, m Model, s string) Model {
 	t.Helper()
@@ -28,7 +42,7 @@ func TestConversationSearch(t *testing.T) {
 		t.Fatalf("/ in the spread conversation should search it, not filter the list")
 	}
 	// Typing goes to the first hit and shows which it is.
-	m = typeText(t, m, "Message 05")
+	m = settle(t, typeText(t, m, "Message 05"))
 	s := screen(m)
 	if len(m.conv.hits) != 1 || !strings.Contains(s, "older message 05") || strings.Contains(s, "older message 00") || !strings.Contains(s, "1/1") {
 		t.Fatalf("hits %v:\n%s", m.conv.hits, s)
@@ -66,7 +80,7 @@ func TestConversationSearch(t *testing.T) {
 
 func TestConversationSearchNoMatch(t *testing.T) {
 	m, _ := newTestModel(t, config.Default().TUI, 140, 40)
-	m = typeText(t, press(t, m, "space", "/"), "kubernetes")
+	m = settle(t, typeText(t, press(t, m, "space", "/"), "kubernetes"))
 	if len(m.conv.hits) != 0 || !strings.Contains(screen(m), "no match") {
 		t.Fatalf("hits %v:\n%s", m.conv.hits, screen(m))
 	}
@@ -91,11 +105,11 @@ func TestSlashFiltersOutsideTheConversation(t *testing.T) {
 // when the pane is put back.
 func TestConversationSearchCarriesOver(t *testing.T) {
 	m, _ := newTestModel(t, config.Default().TUI, 140, 40)
-	m = press(t, typeText(t, press(t, m, "space", "/"), "first question"), "enter")
+	m = press(t, settle(t, typeText(t, press(t, m, "space", "/"), "first question")), "enter")
 	if len(m.conv.hits) != 1 {
 		t.Fatalf("hits %v", m.conv.hits)
 	}
-	m = press(t, m, "tab", "j")
+	m = settle(t, press(t, m, "tab", "j"))
 	if len(m.conv.hits) != 1 || !strings.Contains(m.read[m.conv.hits[0]], "aaaaaaaa-1111") {
 		t.Fatalf("the next session should be searched too: %v", m.conv.hits)
 	}
@@ -126,7 +140,7 @@ func TestConversationSearchFindsSkippedMessages(t *testing.T) {
 	if s := screen(m); strings.Contains(s, "middle message") || !strings.Contains(s, "5 messages skipped") {
 		t.Fatalf("the frame should skip the middle:\n%s", s)
 	}
-	m = press(t, typeText(t, press(t, m, "/"), "middle message 3"), "enter")
+	m = press(t, settle(t, typeText(t, press(t, m, "/"), "middle message 3")), "enter")
 	s := screen(m)
 	for _, want := range []string{"middle message 3", "middle message 1", "middle message 4", "messages skipped", "1/1"} {
 		if !strings.Contains(s, want) {
@@ -154,7 +168,14 @@ func TestSearchParts(t *testing.T) {
 		return out
 	}
 	all := msgs("a", "b", "c", "x hit", "d", "e", "f", "g", "h", "x again", "i")
-	parts, after, ok := searchParts(all, "x")
+	lower := func(ms []db.Message) []string {
+		var out []string
+		for _, m := range ms {
+			out = append(out, strings.ToLower(m.Content))
+		}
+		return out
+	}
+	parts, after, ok := searchParts(all, lower(all), "x")
 	if !ok || after != 0 || len(parts) != 2 {
 		t.Fatalf("parts %d after %d ok %v", len(parts), after, ok)
 	}
@@ -162,10 +183,44 @@ func TestSearchParts(t *testing.T) {
 	if parts[0].skipped != 1 || len(parts[0].msgs) != 5 || parts[1].skipped != 1 || len(parts[1].msgs) != 4 {
 		t.Fatalf("got %+v", parts)
 	}
-	if _, _, ok := searchParts(all, "zzz"); ok {
+	if _, _, ok := searchParts(all, lower(all), "zzz"); ok {
 		t.Fatal("no message has zzz")
 	}
-	if parts, after, _ := searchParts(msgs("x", "a", "b", "c", "d"), "x"); parts[0].skipped != 0 || len(parts[0].msgs) != 3 || after != 2 {
+	start := msgs("x", "a", "b", "c", "d")
+	if parts, after, _ := searchParts(start, lower(start), "x"); parts[0].skipped != 0 || len(parts[0].msgs) != 3 || after != 2 {
 		t.Fatalf("a hit at the start: %+v after %d", parts, after)
+	}
+}
+
+// The search waits for typing to pause and for the conversation to be read,
+// showing the frame as it was meanwhile, and does not run for one letter.
+func TestConversationSearchWaits(t *testing.T) {
+	m, _ := newTestModel(t, config.Default().TUI, 140, 40)
+	m = typeText(t, press(t, m, "space", "/"), "middle message 3")
+	if m.conv.applied != "" || len(m.conv.hits) != 0 || !strings.Contains(screen(m), "searching…") {
+		t.Fatalf("before the pause: applied %q\n%s", m.conv.applied, screen(m))
+	}
+	// The pause applies it; until the conversation is read, the frame is
+	// the usual one.
+	inFrame := func(m Model) bool { return strings.Contains(strings.Join(m.read, "\n"), "middle message 3") }
+	m = update(t, m, convTick{m.conv.seq})
+	if m.conv.applied != "middle message 3" || inFrame(m) || !strings.Contains(screen(m), "searching…") {
+		t.Fatalf("applied %q, before the conversation is read:\n%s", m.conv.applied, screen(m))
+	}
+	m = settle(t, m)
+	if !inFrame(m) || strings.Contains(screen(m), "searching…") {
+		t.Fatalf("after:\n%s", screen(m))
+	}
+	// A pause from before more was typed is moot.
+	old := m.conv.seq
+	m = typeText(t, m, "x")
+	if m = update(t, m, convTick{old}); m.conv.applied != "middle message 3" {
+		t.Fatalf("a stale pause applied %q", m.conv.applied)
+	}
+	// One letter is not searched.
+	m = press(t, m, "esc")
+	m = settle(t, typeText(t, press(t, m, "/"), "m"))
+	if m.conv.applied != "" || len(m.conv.hits) != 0 {
+		t.Fatalf("one letter: applied %q hits %d", m.conv.applied, len(m.conv.hits))
 	}
 }
