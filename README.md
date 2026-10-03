@@ -81,7 +81,7 @@ The filter matches words against titles, folders, branches, IDs and the conversa
 
 `a` runs Claude Code itself (`claude -p`, signed in as you, with recall's search as its only tools), so no API key is needed. It lists the sessions it found with why each matched; Enter jumps to one, `f` narrows the list to all of them.
 
-Its settings are under `[tui]` in the [config file](#configuration). See [docs/tui.md](docs/tui.md) for every key, the detail pane and the mouse.
+Its settings are under `[tui]` in the [config file](#configuration), and `[keys]` changes which keys do what. See [docs/tui.md](docs/tui.md) for every key, the detail pane and the mouse.
 
 ### Web UI
 
@@ -236,6 +236,14 @@ Sessions are imported from `~/.claude/projects` (`$CLAUDE_CONFIG_DIR/projects` w
 # ask_model = "sonnet-5.5"
 # ask_show_cost = true
 # ask_reasons = true
+
+[keys]
+# Which keys do what in the TUI, by operation: a key or a list of keys,
+# replacing the operation's own, or [] to turn it off. docs/tui.md lists
+# the operations and their keys. For example, to resume with space and read
+# the conversation with enter:
+# resume = "space"
+# read = "enter"
 ```
 
 ## CLI

@@ -41,6 +41,40 @@ type File struct {
 	Core Core `toml:"core"`
 	UI   UI   `toml:"ui"`
 	TUI  TUI  `toml:"tui"`
+	// Keys changes which keys do what in the TUI, by operation name. The TUI
+	// checks the names and keys when it starts, so a mistake here stops only
+	// the TUI, as one under [tui] does.
+	Keys map[string]KeyList `toml:"keys"`
+}
+
+// KeyList is an operation's keys as written under [keys]: a key or a list
+// of keys. A value of another type is kept as an error for the TUI to
+// report rather than one that stops every command.
+type KeyList struct {
+	Keys []string
+	Err  error
+}
+
+// UnmarshalTOML takes a string or an array of strings.
+func (k *KeyList) UnmarshalTOML(v any) error {
+	switch v := v.(type) {
+	case string:
+		k.Keys = []string{v}
+		return nil
+	case []any:
+		k.Keys = []string{}
+		for _, e := range v {
+			s, ok := e.(string)
+			if !ok {
+				k.Keys, k.Err = nil, errors.New("must be a key or a list of keys, as strings")
+				return nil
+			}
+			k.Keys = append(k.Keys, s)
+		}
+		return nil
+	}
+	k.Err = errors.New("must be a key or a list of keys, as strings")
+	return nil
 }
 
 // Core configures what every command uses.
@@ -147,6 +181,14 @@ const Template = `# claude-recall settings. Uncomment a line to change it.
 # ask_model = "sonnet-5.5"
 # ask_show_cost = true
 # ask_reasons = true
+
+[keys]
+# Which keys do what in the TUI, by operation: a key or a list of keys,
+# replacing the operation's own, or [] to turn it off. docs/tui.md lists
+# the operations and their keys. For example, to resume with space and read
+# the conversation with enter:
+# resume = "space"
+# read = "enter"
 `
 
 // WriteTemplate writes Template to path unless a file is already there.
@@ -193,6 +235,9 @@ func LoadCore(path string) (File, error) {
 	}
 	if keys := md.Undecoded(); len(keys) > 0 {
 		return File{}, unknownKey(path, keys[0].String())
+	}
+	if len(cfg.Keys) == 0 {
+		cfg.Keys = nil // an empty [keys] changes nothing
 	}
 	if db := cfg.Core.DB; db != "" && !strings.HasPrefix(db, "~/") && !filepath.IsAbs(db) {
 		return File{}, fmt.Errorf("%s: core.db must be an absolute path or start with ~/, got %q", path, db)
@@ -247,6 +292,9 @@ func knownKeys() []string {
 	for i := range f.NumField() {
 		section := f.Field(i).Tag.Get("toml")
 		t := f.Field(i).Type
+		if t.Kind() != reflect.Struct {
+			continue // [keys], whose names the TUI knows
+		}
 		for j := range t.NumField() {
 			out = append(out, section+"."+t.Field(j).Tag.Get("toml"))
 		}

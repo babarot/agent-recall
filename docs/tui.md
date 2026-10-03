@@ -96,6 +96,48 @@ Below the list, Details sits under Conversation in a few wide lines and What was
 
 Click a session to select it, click a frame to focus it, scroll the wheel over the list or over a frame, and drag the pane's top edge (or the row count line just above it) to resize the pane. While the TUI has the mouse, most terminals still select text when you hold Shift (Option in iTerm2) while dragging.
 
+## Changing keys
+
+Under `[keys]` in the [config file](../README.md#configuration), an operation takes a key or a list of keys in place of its own, or `[]` to turn it off. The footer and the `?` key list show the keys you set.
+
+```toml
+[keys]
+resume = "space"
+read = "enter"
+```
+
+| Operation | Keys | What it does |
+|---|---|---|
+| `quit` | `q` | Quit |
+| `help` | `?` | Show every key |
+| `focus_next` | `tab` `]` | Focus the next pane |
+| `focus_prev` | `shift+tab` `[` | Focus the previous pane |
+| `ask` | `a` | Ask Claude to find sessions |
+| `sort` | `s` | Choose the sort order |
+| `scope` | `.` | Switch between the folder recall was started in and all folders |
+| `resume` | `enter` | Resume the session |
+| `read` | `space` | Read the conversation over the detail pane, or put it back |
+| `copy_id` | `y` | Copy the session ID |
+| `copy_command` | `Y` | Copy the resume command |
+| `grow` | `+` `=` | Make the detail pane taller |
+| `shrink` | `-` | Make the detail pane shorter |
+| `up` `down` | `up` `k` `ctrl+p`, `down` `j` `ctrl+n` | Move in a list, scroll a frame |
+| `page_up` `page_down` | `pgup` `ctrl+b` `ctrl+u`, `pgdown` `ctrl+f` `ctrl+d` | A page up or down |
+| `top` `bottom` | `home` `g`, `end` `G` | The first, the last |
+| `search` | `/` | Search what has focus: the list's filter, the folder search, the conversation search |
+| `next_match` `prev_match` | `n`, `N` | The next, the previous match of the conversation search |
+| `folders_open` | `left` `h` | Open the folder list, then move into it |
+| `folders_close` | `right` `l` | Close the folder list |
+| `folders_back` | `right` `l` `enter` | Go from the folder list back to the sessions |
+
+Keys are written as key presses are read:
+
+- A character as itself (`a`, `Y`, `?`), including a shifted one: `Y`, not `shift+y`.
+- A named key: `enter`, `space`, `tab`, `backspace`, `up`, `down`, `left`, `right`, `home`, `end`, `pgup`, `pgdown`, `insert`, `delete`, `f1` to `f12`.
+- With modifiers in the order `ctrl+`, `alt+`, `shift+`, and a letter lower-cased: `ctrl+d`, `ctrl+shift+y`, `alt+enter`, `shift+tab`.
+
+`ctrl+c` and `esc` cannot be given to an operation, and neither can the keys inside the sort menu and the Ask box, or those of a field being typed in. An unknown operation, a key written another way and two operations that would share a key in one place (`resume = "j"` takes the list's `down`) are reported when `recall` starts, rather than ignored.
+
 ## Settings
 
 The `[tui]` section of the config file holds the TUI's settings: where the detail pane goes and how tall it starts, the color scheme, which sessions to start with, and the model and display of `a`. See [Configuration](../README.md#configuration) in the README for the whole file.

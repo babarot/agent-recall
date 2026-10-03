@@ -82,16 +82,11 @@ func defaultKeyMap() keyMap {
 // byName maps each operation's name, as the key hints and the config file
 // write it, to its keys.
 func (k keyMap) byName() map[string]key.Binding {
-	return map[string]key.Binding{
-		"quit": k.Global.Quit, "help": k.Global.Help, "focus_next": k.Global.FocusNext, "focus_prev": k.Global.FocusPrev,
-		"ask": k.Global.Ask, "sort": k.Global.Sort, "scope": k.Global.Scope,
-		"resume": k.Session.Resume, "read": k.Session.Read, "copy_id": k.Session.CopyID,
-		"copy_command": k.Session.CopyCommand, "grow": k.Session.Grow, "shrink": k.Session.Shrink,
-		"up": k.Nav.Up, "down": k.Nav.Down, "page_up": k.Nav.PageUp, "page_down": k.Nav.PageDown,
-		"top": k.Nav.Top, "bottom": k.Nav.Bottom, "search": k.Nav.Search,
-		"next_match": k.Nav.NextMatch, "prev_match": k.Nav.PrevMatch,
-		"folders_open": k.List.FoldersOpen, "folders_close": k.List.FoldersClose, "folders_back": k.Folders.FoldersBack,
+	out := map[string]key.Binding{}
+	for name, b := range k.refs() {
+		out[name] = *b
 	}
+	return out
 }
 
 // keyContext is where a key that reaches the panes goes: which pane has
