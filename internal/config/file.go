@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -26,6 +27,13 @@ const (
 const (
 	ScopeFolder = "folder" // the folder it was started in, when that has sessions
 	ScopeAll    = "all"
+)
+
+// Scrollbar thumbs in the TUI's detail frames, from thinnest to thickest.
+const (
+	ThumbThin  = "thin"  // │, told apart from the track only by its color
+	ThumbHeavy = "heavy" // ┃
+	ThumbBlock = "block" // █
 )
 
 // MinDetailHeight is the smallest detail pane, in lines, that still shows
@@ -144,12 +152,17 @@ type TUI struct {
 	// AskReasons shows why Claude picked a session, under its row and in
 	// Conversation, after an ask.
 	AskReasons bool `toml:"ask_reasons"`
+	// ScrollbarThumb is ThumbThin, ThumbHeavy or ThumbBlock.
+	ScrollbarThumb string `toml:"scrollbar_thumb"`
+	// ScrollbarColor colors the thumb: a hex color (#rrggbb) or an ANSI
+	// color number (0-255). Empty uses the frame's border color.
+	ScrollbarColor string `toml:"scrollbar_color"`
 }
 
 // Default returns the settings used when the config file is absent.
 func Default() File {
 	return File{UI: UI{Port: DefaultPort}, TUI: TUI{DetailPosition: DetailBottom, DetailAutoWidth: 160, Theme: theme.Auto, DetailHeight: 16, Scope: ScopeFolder,
-		AskModel: "sonnet-5.5", AskShowCost: true, AskReasons: true}}
+		AskModel: "sonnet-5.5", AskShowCost: true, AskReasons: true, ScrollbarThumb: ThumbHeavy}}
 }
 
 // DBPath is the archive database the file names, with ~/ expanded, or
@@ -210,6 +223,12 @@ const Template = `# claude-recall settings. Uncomment a line to change it.
 # ask_model = "sonnet-5.5"
 # ask_show_cost = true
 # ask_reasons = true
+# The scrollbar on the right edge of a detail frame whose content scrolls. The
+# thumb: "thin" (│), "heavy" (┃, default) or "block" (█). Its color: a hex
+# color such as "#f5a3b5" or an ANSI color number (0-255); empty (default) is
+# the frame's border color, so "thin" needs a color to stand out.
+# scrollbar_thumb = "heavy"
+# scrollbar_color = ""
 
 [keys]
 # Which keys do what in the TUI, by operation: a key or a list of keys,
@@ -336,7 +355,23 @@ func (t TUI) check(path string) error {
 	if t.DetailAutoWidth <= 0 {
 		return fmt.Errorf("%s: tui.detail_auto_width must be positive", path)
 	}
+	switch t.ScrollbarThumb {
+	case ThumbThin, ThumbHeavy, ThumbBlock:
+	default:
+		return fmt.Errorf("%s: tui.scrollbar_thumb must be %q, %q or %q, got %q",
+			path, ThumbThin, ThumbHeavy, ThumbBlock, t.ScrollbarThumb)
+	}
+	if c := t.ScrollbarColor; c != "" && !hexColor.MatchString(c) && !ansiColor(c) {
+		return fmt.Errorf("%s: tui.scrollbar_color must be a hex color such as \"#f5a3b5\" or an ANSI color number (0-255), got %q", path, c)
+	}
 	return nil
+}
+
+var hexColor = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+
+func ansiColor(s string) bool {
+	n, err := strconv.Atoi(s)
+	return err == nil && n >= 0 && n <= 255 && strconv.Itoa(n) == s
 }
 
 // unknownKey explains a key Load does not know, pointing a setting written

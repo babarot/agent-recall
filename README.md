@@ -236,6 +236,12 @@ Sessions are imported from `~/.claude/projects` (`$CLAUDE_CONFIG_DIR/projects` w
 # ask_model = "sonnet-5.5"
 # ask_show_cost = true
 # ask_reasons = true
+# The scrollbar on the right edge of a detail frame whose content scrolls. The
+# thumb: "thin" (│), "heavy" (┃, default) or "block" (█). Its color: a hex
+# color such as "#f5a3b5" or an ANSI color number (0-255); empty (default) is
+# the frame's border color, so "thin" needs a color to stand out.
+# scrollbar_thumb = "heavy"
+# scrollbar_color = ""
 
 [keys]
 # Which keys do what in the TUI, by operation: a key or a list of keys,
