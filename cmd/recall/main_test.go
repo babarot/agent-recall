@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/babarot/claude-recall/internal/db"
+	"github.com/babarot/claude-recall/internal/tui"
 	"github.com/babarot/claude-recall/internal/version"
 )
 
@@ -319,5 +320,27 @@ func TestConfigKeysErrors(t *testing.T) {
 	}
 	if out, err := runArgs("list", "--db", path); err != nil || out != "No sessions found.\n" {
 		t.Errorf("list should not care: %q, %v", out, err)
+	}
+}
+
+func TestContinueArgs(t *testing.T) {
+	recall := []string{"/bin/recall", "mcp", "--db", "/tmp/vault.db"}
+	args := continueArgs(recall, tui.Continue{SessionID: "abc-123"})
+	if len(args) != 5 || args[1] != "--mcp-config" || args[3] != "--allowedTools" {
+		t.Fatalf("args %q", args)
+	}
+	// The prompt comes before the flags that take every argument after them.
+	if !strings.Contains(args[0], "recall session abc-123") || !strings.Contains(args[0], "where it left off") {
+		t.Fatalf("prompt %q", args[0])
+	}
+	if want := `{"mcpServers":{"recall":{"args":["mcp","--db","/tmp/vault.db"],"command":"/bin/recall"}}}`; args[2] != want {
+		t.Fatalf("mcp config %s, want %s", args[2], want)
+	}
+	if args[4] != "mcp__recall__recall_search,mcp__recall__recall_list,mcp__recall__recall_export" {
+		t.Fatalf("allowed tools %q", args[4])
+	}
+	topic := continueArgs(recall, tui.Continue{SessionID: "abc-123", Topic: "the retry policy"})[0]
+	if !strings.Contains(topic, "recall session abc-123") || !strings.Contains(topic, "about: the retry policy") {
+		t.Fatalf("prompt %q", topic)
 	}
 }

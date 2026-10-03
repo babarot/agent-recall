@@ -13,6 +13,8 @@ const pasteKey = "ctrl+v"
 // in the order update gives keys out.
 func (m Model) typing() bool {
 	switch {
+	case m.cont.open:
+		return true
 	case m.ask.stage != askClosed:
 		return m.ask.stage == askTyping
 	case m.sortMenu, m.helpOpen:
@@ -27,6 +29,10 @@ func (m Model) paste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch {
+	case m.cont.open:
+		var cmd tea.Cmd
+		m.cont.input, cmd = m.cont.input.Update(msg)
+		return m, cmd
 	case m.ask.stage == askTyping:
 		var cmd tea.Cmd
 		m.ask.input, cmd = m.ask.input.Update(msg)

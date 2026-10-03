@@ -10,6 +10,7 @@ The title is the session's `/rename` name, or else the title Claude Code generat
 |-----|--------|
 | `↑` `↓` / `j` `k` | Move (`g` `G` for top and bottom, PgUp and PgDn or `ctrl+d` and `ctrl+u` by page) |
 | `Enter` | Resume the session: `claude -r <id>` from the session's folder |
+| `c` | Continue the session in a new claude (see [Continuing in a new claude](#continuing-in-a-new-claude)) |
 | `y` | Copy the session ID, to hand it to another agent ("look this session up with claude-recall") |
 | `Y` | Copy the resume command |
 | `Space` | Read the conversation over the detail pane (see [Reading a conversation](#reading-a-conversation)) |
@@ -60,6 +61,20 @@ It runs signed in as you, a Claude plan included, so recall needs no API key. It
 - The answer lists the sessions found with why each matched, the model, the time taken and the cost claude reports.
 - `Enter` jumps to one (clearing a folder or filter that hides it), `f` narrows the list to all of them in Claude's order with the reason under each row, and `r` asks again. `Esc` clears the narrowed list.
 - The reason stays in Conversation for a session Claude picked.
+
+## Continuing in a new claude
+
+`claude -r` cannot resume a session whose folder is gone, such as one in a removed worktree (`Enter` says so and names this key), or whose transcript Claude Code has deleted. `c` continues any session another way: recall quits and starts a new claude in the folder recall was started in, with recall's MCP server, asking it to recall the session, the way you would ask in a session yourself:
+
+```console
+claude "Use the recall tools to recall session <id> ..." \
+  --mcp-config <recall mcp> \
+  --allowedTools mcp__recall__recall_search,mcp__recall__recall_list,mcp__recall__recall_export
+```
+
+- The box takes what to recall about it ("the retry policy"); left empty, Claude says what was being done and how far it got. Either way it then waits for you.
+- It is an ordinary session: your settings, CLAUDE.md and MCP servers apply. Only the recall tools are allowed without asking.
+- The new session starts from what the old one said, not from its files: a removed worktree's changes are not brought back.
 
 ## Folders
 
@@ -123,6 +138,7 @@ An operation that works in one pane only goes in that pane's table, `[keys.list]
 | `sort` | `s` | Choose the sort order |
 | `scope` | `.` | Switch between the folder recall was started in and all folders |
 | `resume` | `enter` | Resume the session |
+| `continue` | `c` | Continue the session in a new claude |
 | `read` | `space` | Read the conversation over the detail pane, or put it back |
 | `copy_id` | `y` | Copy the session ID |
 | `copy_command` | `Y` | Copy the resume command |

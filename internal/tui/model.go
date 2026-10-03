@@ -83,12 +83,15 @@ type Model struct {
 	resolver *worktree.Resolver
 	// folders are what the list can be narrowed to; scope is the chosen
 	// one's key ("" for all) and startFolder the one the TUI started in.
+	// startDir is the directory the TUI started in, where a continued
+	// session's claude runs.
 	folders []folderInfo
 	// branches and worktrees are the values the filter suggests for
 	// branch: and worktree:.
 	branches, worktrees []sideEntry
 	scope               string
 	startFolder         string
+	startDir            string
 	sidebar             bool // the folder list is open
 	sideOffset          int
 	// sideSearch narrows the folder list; sideTyping is set while it has
@@ -169,8 +172,13 @@ type Model struct {
 	toastKind toastKind
 	toastID   int
 
-	// Result is set when the user picks a session to resume.
-	Result *Resume
+	// cont is the box that continues a session in a new claude.
+	cont contState
+
+	// Result is set when the user picks a session to resume, Continue when
+	// they pick one to continue in a new claude.
+	Result   *Resume
+	Continue *Continue
 }
 
 // New builds the model from the archived sessions.
@@ -193,6 +201,7 @@ func New(sessions []db.Session, source Source, cfg config.TUI) Model {
 
 	m := Model{
 		ask:           askState{input: newAskInput()},
+		cont:          contState{input: newContInput()},
 		askRun:        claudeRunner([]string{"recall", "mcp"}, config.ModelID(cfg.AskModel), ""),
 		reasons:       map[string]string{},
 		sideSearch:    ss,
@@ -488,7 +497,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.helpOpen = false
 			return m, nil
 		}
-		if m.ask.stage != askClosed {
+		if m.ask.stage != askClosed || m.cont.open {
 			return m, nil
 		}
 		if m.sortMenu {
@@ -587,6 +596,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// reply would not come back to it.
 		if msg.String() == pasteKey && m.typing() {
 			return m, readClipboard
+		}
+		if m.cont.open {
+			return m.updateCont(msg)
 		}
 		if m.ask.stage != askClosed {
 			return m.updateAsk(msg)
@@ -688,10 +700,16 @@ func (m *Model) sessionKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	switch {
 	case key.Matches(msg, s.Resume):
 		if r.gone {
-			return m.showToast(toastWarn, "Folder no longer exists: "+tildePath(r.s.ProjectPath, m.home)), true
+			text := "Folder no longer exists: " + tildePath(r.s.ProjectPath, m.home)
+			if k := m.hintKeys("{continue.0}"); k != "" {
+				text += " · " + k + " continues it in a new claude"
+			}
+			return m.showToast(toastWarn, text), true
 		}
 		m.Result = &Resume{Dir: r.s.ProjectPath, SessionID: r.s.ID}
 		return m.imagesQuit(), true
+	case key.Matches(msg, s.Continue):
+		return m.openCont(r.s.ID), true
 	case key.Matches(msg, s.CopyID):
 		return tea.Batch(copyCmd(r.s.ID), m.showToast(toastOK, "Copied session ID "+r.s.ID)), true
 	case key.Matches(msg, s.CopyCommand):

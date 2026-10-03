@@ -94,6 +94,7 @@ func groupRows(rows []row) []folderInfo {
 // when it has sessions. With tui.scope = "folder" the list starts narrowed
 // to it.
 func (m Model) StartIn(dir string) Model {
+	m.startDir = dir
 	info := m.resolver.Resolve(dir)
 	key := cmp.Or(realPath(info.MainRoot), info.Root, realPath(dir))
 	if slices.ContainsFunc(m.folders, func(f folderInfo) bool { return f.key == key }) {

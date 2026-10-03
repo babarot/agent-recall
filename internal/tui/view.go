@@ -97,6 +97,9 @@ func (m Model) render() string {
 	if m.width == 0 || m.height == 0 || m.settling {
 		return ""
 	}
+	if m.cont.open {
+		return m.withCont(m.renderScreen())
+	}
 	if m.ask.stage != askClosed {
 		return m.withAsk(m.renderScreen())
 	}
@@ -339,6 +342,10 @@ func (m Model) renderHelp() string {
 			pairs = append(pairs, [2]string{"folder: text: title: branch: worktree: id:", "one field"})
 		}
 	case modeList:
+		if m.cont.open {
+			pairs = [][2]string{{"enter", "start claude"}, {"esc", "close"}}
+			break
+		}
 		if m.ask.stage != askClosed {
 			pairs = map[askStage][][2]string{
 				askTyping:   {{"enter", "ask"}, {"esc", "close"}},
@@ -392,7 +399,7 @@ func (m Model) renderHelp() string {
 		}
 		// ? goes early so a narrow terminal still shows where the rest are.
 		pairs = [][2]string{{"{resume.0}", "resume"}, {"{read.0}", "read"}, {"{help.0}", "keys"}, {"{search.0}", "filter"},
-			{"{scope.0}", here}, {"{list.folders_open.0}", "folders"}, {"{focus_next.0}", "focus"}, {"{copy_id.0}", "copy id"},
+			{"{scope.0}", here}, {"{list.folders_open.0}", "folders"}, {"{continue.0}", "continue"}, {"{focus_next.0}", "focus"}, {"{copy_id.0}", "copy id"},
 			{"{copy_command.0}", "copy cmd"}, {"{grow.0}/{shrink.0}", "resize"}, {"{sort.0}", "sort"}, {"{quit.0}", "quit"}}
 		if m.sidebarShown() {
 			pairs[5] = [2]string{"{list.folders_close.0}", "close folders"}

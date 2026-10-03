@@ -252,6 +252,7 @@ const Template = `# claude-recall settings. Uncomment a line to change it.
 #
 # The selected session, from the list, a frame or the spread conversation:
 # resume = "enter"
+# continue = "c"
 # read = "space"
 # copy_id = "y"
 # copy_command = "Y"

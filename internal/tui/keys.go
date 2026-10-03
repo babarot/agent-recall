@@ -29,7 +29,7 @@ type globalKeys struct {
 // sessionKeys act on the selected session, from the list, a frame or the
 // spread conversation.
 type sessionKeys struct {
-	Resume, Read, CopyID, CopyCommand, Grow, Shrink key.Binding
+	Resume, Continue, Read, CopyID, CopyCommand, Grow, Shrink key.Binding
 }
 
 // navKeys mean the same in every pane: move or scroll, search what has
@@ -65,7 +65,7 @@ func defaultKeyMap() keyMap {
 			Ask: keys("a"), Sort: keys("s"), Scope: keys("."),
 		},
 		Session: sessionKeys{
-			Resume: keys("enter"), Read: keys("space"), CopyID: keys("y"), CopyCommand: keys("Y"),
+			Resume: keys("enter"), Continue: keys("c"), Read: keys("space"), CopyID: keys("y"), CopyCommand: keys("Y"),
 			Grow: keys("+", "="), Shrink: keys("-"),
 		},
 		Nav: navKeys{
@@ -201,7 +201,7 @@ func (k keyMap) keyScopes() []struct {
 } {
 	all := k.byName()
 	global := []string{"quit", "help", "focus_next", "focus_prev", "ask", "sort", "scope"}
-	session := []string{"resume", "read", "copy_id", "copy_command", "grow", "shrink"}
+	session := []string{"resume", "continue", "read", "copy_id", "copy_command", "grow", "shrink"}
 	nav := []string{"up", "down", "page_up", "page_down", "top", "bottom", "search", "next_match", "prev_match"}
 	cat := func(lists ...[]string) []string {
 		var out []string

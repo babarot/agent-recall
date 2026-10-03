@@ -36,7 +36,7 @@ A support question comes in, you open a session, and it is settled in ten minute
 | You want to | Use | What only it gives you |
 |---|---|---|
 | Have Claude remember what happened in a past session | [MCP server](#mcp-server) | The answer lands in the session you are working in, as context Claude can use right away |
-| Find a session yourself and go back to it | [TUI](#tui) | Resume it in place (`claude -r`), or copy its ID to hand to another agent |
+| Find a session yourself and go back to it | [TUI](#tui) | Resume it in place (`claude -r`), continue it in a new claude, or copy its ID to hand to another agent |
 | Find a session yourself and read it | [Web UI](#web-ui) | A comfortable reader in the browser, for long conversations and images |
 
 The [CLI](#cli) underneath starts each of them (`recall mcp`, `recall`, `recall ui`) and also searches, lists and exports from the terminal or a script.
@@ -61,6 +61,7 @@ A session ID from the TUI (`y`) works too: "look up session a1b2c3 with claude-r
 | Key | Action |
 |-----|--------|
 | `Enter` | Resume the session: `claude -r <id>` from the session's folder |
+| `c` | Continue the session in a new claude, which recalls it through MCP: for a session `claude -r` cannot resume, such as one whose worktree was removed |
 | `y` / `Y` | Copy the session ID / the resume command |
 | `/` | Filter by title, folder, branch, ID or what was said (see below) |
 | `a` | Ask Claude to find sessions, when you remember what it was about but not what to type |
@@ -266,6 +267,7 @@ Sessions are imported from `~/.claude/projects` (`$CLAUDE_CONFIG_DIR/projects` w
 #
 # The selected session, from the list, a frame or the spread conversation:
 # resume = "enter"
+# continue = "c"
 # read = "space"
 # copy_id = "y"
 # copy_command = "Y"
