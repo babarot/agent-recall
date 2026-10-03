@@ -173,14 +173,18 @@ func TestSortMenu(t *testing.T) {
 	if sorts[m.sortIdx].name != "Started" || m.sortMenu {
 		t.Fatalf("click: sort %s", sorts[m.sortIdx].name)
 	}
-	// Reading a frame, s does nothing.
+	// s works from every pane: reading the conversation, a frame, the
+	// folder list.
 	m = press(t, m, "space")
-	if m = press(t, m, "s"); m.sortMenu {
-		t.Fatal("s should not open the menu while reading")
-	}
-	m = press(t, m, "tab")
 	if m = press(t, m, "s"); !m.sortMenu {
-		t.Fatal("back on the list, s opens the menu")
+		t.Fatal("s should open the menu while reading")
+	}
+	m = press(t, m, "esc", "space", "tab")
+	if m.focus != focusConv {
+		t.Fatalf("focus %v", m.focus)
+	}
+	if m = press(t, m, "s"); !m.sortMenu {
+		t.Fatal("s should open the menu from a frame")
 	}
 }
 
@@ -833,4 +837,53 @@ func TestSettleSizeDrawsOnceTheSizeSettles(t *testing.T) {
 	if m = update(t, m, settledMsg{}); m.render() == "" {
 		t.Fatal("after the wait the screen should be drawn")
 	}
+}
+
+// ctrl+d and ctrl+u page the session list, as they page a frame and the
+// folder list, and as pgdown and pgup page the list.
+func TestListPagesWithCtrlD(t *testing.T) {
+	m := manyFolders(t)
+	page := max(1, m.listRows())
+	ctrl := func(r rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: r, Mod: tea.ModCtrl} }
+	m = update(t, m, ctrl('d'))
+	if m.cursor != min(page, len(m.visible)-1) {
+		t.Fatalf("ctrl+d: cursor %d, page %d", m.cursor, page)
+	}
+	if m = update(t, m, ctrl('u')); m.cursor != 0 {
+		t.Fatalf("ctrl+u: cursor %d", m.cursor)
+	}
+}
+
+// ctrl+c quits from every pane, box and field, a running ask stopped.
+func TestCtrlCQuitsFromAnywhere(t *testing.T) {
+	ctrlC := tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}
+	quits := func(name string, m Model) {
+		t.Helper()
+		next, cmd := m.Update(ctrlC)
+		if cmd == nil {
+			t.Errorf("%s: ctrl+c returned no command", name)
+			return
+		}
+		if _, ok := cmd().(tea.QuitMsg); !ok {
+			t.Errorf("%s: ctrl+c did not quit", name)
+		}
+		if next.(Model).ask.stage != askClosed {
+			t.Errorf("%s: the ask is still open", name)
+		}
+	}
+	m, _ := newTestModel(t, config.Default().TUI, 140, 40)
+	quits("list", m)
+	quits("frame", press(t, m, "tab"))
+	quits("reading", press(t, m, "space"))
+	quits("conversation search", press(t, m, "space", "/"))
+	quits("filter", press(t, m, "/"))
+	quits("key list", press(t, m, "?"))
+	quits("sort menu", press(t, m, "s"))
+	a := m
+	a.ask.stage = askRunning
+	quits("ask", a)
+	f := newFolderFixture(t)
+	fm := press(t, folderModel(t, config.Default().TUI, f, 140, 40), "left", "left")
+	quits("folder list", fm)
+	quits("folder search", press(t, fm, "/"))
 }

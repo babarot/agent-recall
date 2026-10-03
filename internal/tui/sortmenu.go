@@ -4,11 +4,12 @@ import (
 	"fmt"
 	"strings"
 
+	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
-// s, on the session list, opens a menu of the sort orders over the screen:
+// s opens a menu of the sort orders over the screen:
 // the arrows, j k or the mouse pick one and Enter applies it, as does its
 // number; Esc, s or q closes the menu as it was.
 
@@ -41,20 +42,23 @@ func (m *Model) applySort(i int) {
 
 // updateSortMenu handles a key while the menu shows.
 func (m Model) updateSortMenu(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch key := msg.String(); key {
+	switch k := msg.String(); k {
 	case "down", "j", "ctrl+n", "tab":
 		m.sortSel = (m.sortSel + 1) % len(sorts)
 	case "up", "k", "ctrl+p", "shift+tab":
 		m.sortSel = (m.sortSel + len(sorts) - 1) % len(sorts)
 	case "enter", "space":
 		m.applySort(m.sortSel)
-	case "esc", "s", "q":
+	case "esc", "q":
 		m.sortMenu = false
-	case "ctrl+c":
-		return m, tea.Quit
 	default:
-		if n := int(key[0] - '1'); len(key) == 1 && n >= 0 && n < len(sorts) {
+		if n := int(k[0] - '1'); len(k) == 1 && n >= 0 && n < len(sorts) {
 			m.applySort(n)
+			break
+		}
+		// It also closes on the key that opened it.
+		if key.Matches(msg, m.km.Global.Sort) {
+			m.sortMenu = false
 		}
 	}
 	return m, nil

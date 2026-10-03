@@ -384,3 +384,15 @@ func TestHLWorkLikeTheArrows(t *testing.T) {
 		t.Fatal("l again closes the folder list")
 	}
 }
+
+// s opens the sort menu from the folder list too, as from any pane.
+func TestSortFromFolderList(t *testing.T) {
+	f := newFolderFixture(t)
+	m := press(t, folderModel(t, config.Default().TUI, f, 140, 40), "left", "left")
+	if m.focus != focusFolders {
+		t.Fatalf("focus %v", m.focus)
+	}
+	if m = press(t, m, "s"); !m.sortMenu {
+		t.Fatal("s should open the sort menu from the folder list")
+	}
+}
