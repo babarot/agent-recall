@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Stands in for Claude Code in the demo: `a` in the TUI runs claude -p, and
+# this replays the answer demo/gen wrote, a step at a time, whatever it asks.
+while IFS= read -r line; do
+  sleep 0.9
+  printf '%s\n' "$line"
+done <"$RECALL_DEMO/ask.jsonl"
