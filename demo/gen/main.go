@@ -1,7 +1,8 @@
-// Command gen builds the demo that demo/demo.tape records: a home directory
-// with a few git repositories and worktrees, Claude Code transcripts of the
-// sessions in scenario.go, an archive imported from them, a config file,
-// and the answer the stand-in claude (demo/bin/claude) gives to `a`.
+// Command gen builds the demo that demo/demo.tape (or demo/demo-ja.tape)
+// records: a home directory with a few git repositories and worktrees,
+// Claude Code transcripts of the sessions in scenario.go (scenario_ja.go with
+// -lang ja), an archive imported from them, a config file, and the answer
+// the stand-in claude (demo/bin/claude) gives to `a`.
 //
 // The demo lives in claude-recall-demo under the temporary directory, which
 // it replaces: outside any git repository, so the TUI sees only the demo's,
@@ -32,14 +33,19 @@ func main() {
 	}
 	out := flag.String("out", filepath.Join(tmp, "claude-recall-demo"), "directory to build the demo in")
 	env := flag.String("env", "demo/.out/env.sh", "where to write the script that points a shell at the demo")
+	langName := flag.String("lang", "en", "language of the conversations: en or ja")
 	flag.Parse()
-	if err := build(*out, *env, time.Now()); err != nil {
+	lang, ok := languages[*langName]
+	if !ok {
+		log.Fatalf("unknown -lang %q: en or ja", *langName)
+	}
+	if err := build(*out, *env, lang, time.Now()); err != nil {
 		log.Fatal(err)
 	}
 	fmt.Printf("demo built in %s: source %s\n", *out, *env)
 }
 
-func build(root, envPath string, now time.Time) error {
+func build(root, envPath string, lang language, now time.Time) error {
 	if err := os.RemoveAll(root); err != nil {
 		return err
 	}
@@ -54,8 +60,8 @@ func build(root, envPath string, now time.Time) error {
 	}
 
 	projects := filepath.Join(root, "claude", "projects")
-	for _, s := range sessions {
-		if err := writeTranscript(projects, home, s, now); err != nil {
+	for _, s := range lang.sessions {
+		if err := writeTranscript(projects, home, lang, s, now); err != nil {
 			return err
 		}
 	}
@@ -86,7 +92,7 @@ export CLAUDE_CONFIG_DIR="$RECALL_DEMO/claude"
 export PATH=%[2]q:%[3]q:"$PATH"
 export PS1='$ '
 `, root, filepath.Join(repoRoot, "demo", "bin"), filepath.Join(repoRoot, "demo", ".out", "bin")),
-		"ask.jsonl": askStream(),
+		"ask.jsonl": askStream(lang),
 	}
 	for name, body := range files {
 		p := name
@@ -134,7 +140,7 @@ func sessionID(s session) string {
 
 type obj = map[string]any
 
-func writeTranscript(projects, home string, s session, now time.Time) error {
+func writeTranscript(projects, home string, lang language, s session, now time.Time) error {
 	id := sessionID(s)
 	cwd := filepath.Join(home, s.dir)
 	// Messages come in bursts with pauses between them, as real work does,
@@ -193,7 +199,7 @@ func writeTranscript(projects, home string, s session, now time.Time) error {
 			toolID := fmt.Sprintf("toolu_%s_%d", id[:8], step)
 			call := obj{"type": "tool_use", "id": toolID, "name": tool, "input": input}
 			if i < 2 {
-				assistant(text(narrate(tool, input, step)), call)
+				assistant(text(lang.narrate(tool, input, step)), call)
 			} else {
 				assistant(call)
 			}
@@ -244,44 +250,45 @@ func toolStep(s session, cwd string, step int) (string, obj) {
 }
 
 // narrate is the note Claude writes before a tool call.
-func narrate(tool string, input obj, step int) string {
-	pick := func(forms ...string) string { return forms[step%len(forms)] }
+func (l language) narrate(tool string, input obj, step int) string {
+	pick := func(forms []string) string { return forms[step%len(forms)] }
 	switch tool {
 	case "Read":
-		f := filepath.Base(input["file_path"].(string))
-		return fmt.Sprintf(pick("Let me look at %s first.", "Checking how %s handles this.", "Reading %s."), f)
+		return fmt.Sprintf(pick(l.read), filepath.Base(input["file_path"].(string)))
 	case "Edit":
-		f := filepath.Base(input["file_path"].(string))
-		return fmt.Sprintf(pick("Updating %s.", "Making the change in %s.", "Now the edit in %s."), f)
+		return fmt.Sprintf(pick(l.edit), filepath.Base(input["file_path"].(string)))
 	case "Bash":
-		return fmt.Sprintf(pick("Running `%s`.", "Let me check with `%s`.", "Now `%s` to confirm."), input["command"])
+		return fmt.Sprintf(pick(l.bash), input["command"])
 	}
-	return "Searching for it."
+	return l.grep
 }
 
-// askStream is what the stand-in claude prints for `a`: two searches, then
-// the two token refresh sessions with why each matches.
-func askStream() string {
+// askStream is what the stand-in claude prints for a: its searches, then
+// the sessions it found with why each matches.
+func askStream(l language) string {
 	find := func(title string) string {
-		for _, s := range sessions {
+		for _, s := range l.sessions {
 			if s.title == title {
 				return sessionID(s)[:8]
 			}
 		}
 		panic("no session titled " + title)
 	}
-	events := []obj{
-		{"type": "system", "subtype": "init"},
-		{"type": "assistant", "message": obj{"content": []obj{{"type": "tool_use", "name": "mcp__recall__recall_search", "input": obj{"query": "logged out several requests at once"}}}}},
-		{"type": "assistant", "message": obj{"content": []obj{{"type": "tool_use", "name": "mcp__recall__recall_search", "input": obj{"query": "token refresh concurrent"}}}}},
-		{"type": "assistant", "message": obj{"content": []obj{{"type": "tool_use", "name": "StructuredOutput", "input": obj{}}}}},
-		{"type": "result", "subtype": "success", "is_error": false, "total_cost_usd": 0.0412,
-			"modelUsage": obj{"claude-sonnet-5-5": obj{"costUSD": 0.0412}},
-			"structured_output": obj{"sessions": []obj{
-				{"session_id": find("Fix the token refresh race on concurrent requests"), "why": "Found that concurrent refreshes revoked each other and fixed it with singleflight."},
-				{"session_id": find("Write tests for token refresh under load"), "why": "Added a 50-goroutine test proving only one refresh reaches the provider."},
-			}}},
+	events := []obj{{"type": "system", "subtype": "init"}}
+	for _, q := range l.searches {
+		events = append(events, obj{"type": "assistant", "message": obj{"content": []obj{
+			{"type": "tool_use", "name": "mcp__recall__recall_search", "input": obj{"query": q}}}}})
 	}
+	var found []obj
+	for _, f := range l.found {
+		found = append(found, obj{"session_id": find(f[0]), "why": f[1]})
+	}
+	events = append(events,
+		obj{"type": "assistant", "message": obj{"content": []obj{{"type": "tool_use", "name": "StructuredOutput", "input": obj{}}}}},
+		obj{"type": "result", "subtype": "success", "is_error": false, "total_cost_usd": 0.0412,
+			"modelUsage":        obj{"claude-sonnet-5-5": obj{"costUSD": 0.0412}},
+			"structured_output": obj{"sessions": found}},
+	)
 	var b strings.Builder
 	for _, e := range events {
 		j, _ := json.Marshal(e)
