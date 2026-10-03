@@ -82,15 +82,15 @@ func TestTemplateLoadsAsTheDefaults(t *testing.T) {
 	if got, _ := Load(path); got.TUI.Scope != ScopeAll {
 		t.Fatal("the existing file was replaced")
 	}
-	// Every setting is in the template, and the README shows the template.
+	// Every setting is in the template, and docs/tui.md shows the template.
 	for _, k := range knownKeys() {
 		if !strings.Contains(Template, "# "+strings.TrimPrefix(k, "tui.")+" = ") {
 			t.Errorf("template lacks %s", k)
 		}
 	}
-	readme, _ := os.ReadFile("../../README.md")
-	if !strings.Contains(string(readme), Template) {
-		t.Error("README.md should show the config template as written")
+	doc, _ := os.ReadFile("../../docs/tui.md")
+	if !strings.Contains(string(doc), Template) {
+		t.Error("docs/tui.md should show the config template as written")
 	}
 }
 
