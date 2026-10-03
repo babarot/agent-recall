@@ -805,3 +805,22 @@ func TestPaneStaysWhenNothingMatches(t *testing.T) {
 		}
 	}
 }
+
+func TestSettleSizeDrawsOnceTheSizeSettles(t *testing.T) {
+	m := New(testSessions(t), &fakePreview{}, config.Default().TUI).SettleSize()
+	m.now = func() time.Time { return now }
+	m = update(t, m, tea.WindowSizeMsg{Width: 115, Height: 40})
+	if m.render() != "" {
+		t.Fatal("the first size report should not be drawn yet")
+	}
+	m = update(t, m, tea.WindowSizeMsg{Width: 116, Height: 40})
+	if out := m.render(); out == "" || ansi.StringWidth(strings.Split(out, "\n")[0]) != 116 {
+		t.Fatal("the second report should be drawn, at its size")
+	}
+	// A terminal that sends one report is drawn after the wait.
+	m = New(testSessions(t), &fakePreview{}, config.Default().TUI).SettleSize()
+	m = update(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	if m = update(t, m, settledMsg{}); m.render() == "" {
+		t.Fatal("after the wait the screen should be drawn")
+	}
+}

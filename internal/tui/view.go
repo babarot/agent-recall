@@ -94,7 +94,7 @@ func (m Model) View() tea.View {
 }
 
 func (m Model) render() string {
-	if m.width == 0 || m.height == 0 {
+	if m.width == 0 || m.height == 0 || m.settling {
 		return ""
 	}
 	if m.ask.stage != askClosed {

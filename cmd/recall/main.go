@@ -488,7 +488,7 @@ func runTUI(o *options) error {
 		return err
 	}
 
-	model := tui.New(sessions, d, cfg.TUI).RememberIn(config.StatePath())
+	model := tui.New(sessions, d, cfg.TUI).RememberIn(config.StatePath()).SettleSize()
 	if wd, err := os.Getwd(); err == nil {
 		model = model.StartIn(wd)
 	}
