@@ -170,6 +170,11 @@ func (m Model) updateConvSearch(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.clearConvSearch()
 		return m, nil
 	}
+	return m.typeConvSearch(msg)
+}
+
+// typeConvSearch gives a key or a paste to the search.
+func (m Model) typeConvSearch(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Once typing pauses, the search is applied and readLines rebuilds the
 	// frame for it, going to the first hit.
 	before := m.conv.input.Value()

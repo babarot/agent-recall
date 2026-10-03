@@ -300,6 +300,11 @@ func (m Model) updateSideSearch(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.clearSideSearch()
 		return m, nil
 	}
+	return m.typeSideSearch(msg)
+}
+
+// typeSideSearch gives a key or a paste to the sidebar search.
+func (m Model) typeSideSearch(msg tea.Msg) (tea.Model, tea.Cmd) {
 	before := m.sideSearch.Value()
 	var cmd tea.Cmd
 	m.sideSearch, cmd = m.sideSearch.Update(msg)
