@@ -82,6 +82,9 @@ func (d *DB) Sessions() ([]Session, error) {
 
 // Message is one text block of a session.
 type Message struct {
+	// UUID is the transcript line the block came from, which the images
+	// pasted with it are stored under.
+	UUID      string
 	Role      string
 	Content   string
 	Timestamp time.Time
@@ -111,7 +114,7 @@ func (d *DB) messages(query string, args ...any) ([]Message, error) {
 	for rows.Next() {
 		var m Message
 		var ts string
-		if err := rows.Scan(&m.Role, &m.Content, &ts); err != nil {
+		if err := rows.Scan(&m.UUID, &m.Role, &m.Content, &ts); err != nil {
 			return nil, err
 		}
 		m.Timestamp = parseTime(ts)
@@ -123,7 +126,7 @@ func (d *DB) messages(query string, args ...any) ([]Message, error) {
 // SessionMessages returns every text message of a session, in conversation
 // order: what SessionPreview takes its head and tail from.
 func (d *DB) SessionMessages(sessionID string) ([]Message, error) {
-	msgs, err := d.messages(`SELECT role, content, COALESCE(timestamp, '') `+textMessages+` ORDER BY turn_index, block_index`, sessionID)
+	msgs, err := d.messages(`SELECT uuid, role, content, COALESCE(timestamp, '') `+textMessages+` ORDER BY turn_index, block_index`, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("session messages: %w", err)
 	}
@@ -137,7 +140,7 @@ func (d *DB) SessionPreview(sessionID string, head, tail int) (Preview, error) {
 	if err := d.sql.QueryRow(`SELECT COUNT(*) `+textMessages, sessionID).Scan(&total); err != nil {
 		return Preview{}, fmt.Errorf("preview: %w", err)
 	}
-	const cols = `SELECT role, content, COALESCE(timestamp, '') `
+	const cols = `SELECT uuid, role, content, COALESCE(timestamp, '') `
 	if total <= head+tail {
 		all, err := d.messages(cols+textMessages+` ORDER BY turn_index, block_index`, sessionID)
 		if err != nil {
