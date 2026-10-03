@@ -204,16 +204,18 @@ func (m Model) renderTable() []string {
 		}
 		return m.st.colHdr.Render(p.col.header)
 	}, plain)
-	// Beside the folder list, the focused side's rules take the accent and
-	// only it marks its selection with the bar.
+	// Beside the folder list or a spread Conversation, the focused side's
+	// rules take the accent. Only the side with the focus marks its
+	// selection with the bar; the row keeps its background so it still shows
+	// which session the frames are about.
 	rule := m.rule(lw)
-	if m.sidebarShown() && m.focus == focusList {
+	if (m.sidebarShown() || m.expanded) && m.focus == focusList {
 		rule = m.st.id.Render(strings.Repeat("╌", lw))
 		head = m.st.key.Render(ansi.Strip(head))
 	}
 	lines := []string{rule, head, rule}
 	bar := m.st.bar.Render("▎")
-	if m.focus == focusFolders {
+	if m.focus != focusList {
 		bar = m.st.selected.Render(" ")
 	}
 
@@ -369,7 +371,7 @@ func (m Model) renderHelp() string {
 		}
 		if m.expanded && m.focus == focusConv {
 			pairs = [][2]string{{"{down.1} {up.1}", "scroll"}, {"{search.0}", "search"}, {"{focus_next.0}", "sessions"},
-				{"{read.0} esc", "close"}, {"{resume.0}", "resume"}, {"{copy_id.0}", "copy id"}, {"{help.0}", "keys"}}
+				{"{read.0} {quit.0} esc", "close"}, {"{resume.0}", "resume"}, {"{copy_id.0}", "copy id"}, {"{help.0}", "keys"}}
 			break
 		}
 		if m.expanded {

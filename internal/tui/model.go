@@ -780,6 +780,10 @@ func (m *Model) frameKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		m.nextConvHit(1)
 	case reading && len(m.conv.hits) > 0 && key.Matches(msg, n.PrevMatch):
 		m.nextConvHit(-1)
+	case reading && key.Matches(msg, m.km.Global.Quit):
+		// The spread Conversation is opened over the pane, so quit closes
+		// it, as it closes the key list; a search left in it goes too.
+		m.toggleExpand()
 	case msg.String() == "esc":
 		switch {
 		case reading && m.conv.input.Value() != "":

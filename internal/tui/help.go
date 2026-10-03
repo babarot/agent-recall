@@ -63,7 +63,7 @@ var helpGroups = []helpGroup{
 		{"{grow.0} {shrink.0}", "more or fewer session rows (or drag)"},
 		{"{search.0}", "search the conversation"},
 		{"{next_match.0} {prev_match.0}", "next, previous match; esc clears"},
-		{"{read.0} esc", "put the pane back"},
+		{"{read.0} {quit.0} esc", "put the pane back"},
 	}},
 }
 

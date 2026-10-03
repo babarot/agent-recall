@@ -45,6 +45,63 @@ func TestSpaceSpreadsTheConversation(t *testing.T) {
 	}
 }
 
+func TestSpreadConversationTakesTheFocusMarks(t *testing.T) {
+	m, _ := newTestModel(t, config.Default().TUI, 140, 40)
+	line := func(m Model, i int) string { return strings.Split(m.render(), "\n")[i] }
+	accent := func(m Model) string { return m.st.id.Render(strings.Repeat("╌", m.listWidth())) }
+	selBar := func(m Model) bool { return strings.Contains(ansi.Strip(line(m, m.listTop())), "▎") }
+
+	// The Conversation focused: the list's rule stays plain and its row
+	// loses the bar.
+	m = press(t, m, "space")
+	if strings.Contains(line(m, 1), accent(m)) || selBar(m) {
+		t.Errorf("conversation focused, rule %q bar %v", line(m, 1), selBar(m))
+	}
+	// The list focused: the other way round.
+	m = press(t, m, "tab")
+	if !strings.Contains(line(m, 1), accent(m)) || !selBar(m) {
+		t.Errorf("list focused, rule %q bar %v", line(m, 1), selBar(m))
+	}
+}
+
+// quit closes the spread Conversation, as it closes the key list, and
+// quits only from the list.
+func TestQuitClosesTheSpreadConversation(t *testing.T) {
+	quits := func(m Model, k string) (Model, bool) {
+		t.Helper()
+		next, cmd := m.Update(tea.KeyPressMsg{Code: []rune(k)[0], Text: k})
+		if cmd == nil {
+			return next.(Model), false
+		}
+		_, ok := cmd().(tea.QuitMsg)
+		return next.(Model), ok
+	}
+	m, _ := newTestModel(t, config.Default().TUI, 140, 40)
+	m, q := quits(press(t, m, "space"), "q")
+	if q || m.expanded || m.focus != focusList {
+		t.Fatalf("q on the Conversation: quit %v expanded %v focus %v", q, m.expanded, m.focus)
+	}
+	// A search left in it does not take a second q.
+	m = settle(t, typeText(t, press(t, m, "space", "/"), "older"))
+	m, q = quits(press(t, m, "enter"), "q")
+	if q || m.expanded || m.conv.input.Value() != "" {
+		t.Fatalf("q with a search: quit %v expanded %v search %q", q, m.expanded, m.conv.input.Value())
+	}
+	// From the list, still spread, q quits.
+	if _, q = quits(press(t, m, "space", "tab"), "q"); !q {
+		t.Fatal("q on the list should quit")
+	}
+	// It follows the quit key.
+	m, _ = newTestModel(t, config.Default().TUI, 140, 40)
+	m, err := m.WithKeys(config.Keys{"quit": config.KeyList{Keys: []string{"x"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m, q = quits(press(t, m, "space"), "x"); q || m.expanded {
+		t.Fatalf("x as quit: quit %v expanded %v", q, m.expanded)
+	}
+}
+
 func TestReadTheNextSessionInPlace(t *testing.T) {
 	m, _ := newTestModel(t, config.Default().TUI, 140, 40)
 	m = press(t, m, "space", "tab")
