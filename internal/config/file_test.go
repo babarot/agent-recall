@@ -165,3 +165,19 @@ func TestLoadCoreLeavesTUIValuesToTheTUI(t *testing.T) {
 		}
 	}
 }
+
+// Transcripts follow CLAUDE_CONFIG_DIR; the archive stays where it is.
+func TestClaudeConfigDir(t *testing.T) {
+	t.Setenv("HOME", "/home/me")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	if got := ProjectsDir(); got != "/home/me/.claude/projects" {
+		t.Errorf("ProjectsDir: got %q", got)
+	}
+	t.Setenv("CLAUDE_CONFIG_DIR", "/home/me/.config/claude")
+	if got := ProjectsDir(); got != "/home/me/.config/claude/projects" {
+		t.Errorf("ProjectsDir: got %q", got)
+	}
+	if got := DefaultDBPath(); got != "/home/me/.claude/vault.db" {
+		t.Errorf("DefaultDBPath: got %q", got)
+	}
+}

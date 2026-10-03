@@ -186,7 +186,7 @@ The archive is `~/.claude/vault.db`. Sessions whose JSONL Claude Code has delete
 sqlite3 ~/.claude/vault.db ".backup '/path/to/backup.db'"
 ```
 
-Sessions are imported while the MCP server or the web UI runs, when a session ends (the plugin's hook), and by `recall import`.
+Sessions are imported from `~/.claude/projects` (`$CLAUDE_CONFIG_DIR/projects` when Claude Code runs with `CLAUDE_CONFIG_DIR`) while the MCP server or the web UI runs, when a session ends (the plugin's hook), and by `recall import`. The archive stays in `~/.claude` either way; `db` in the [config file](#configuration) moves it.
 
 | Stored | Excluded |
 |--------|----------|
