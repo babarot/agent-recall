@@ -519,11 +519,11 @@ func startBackground(o *options, stdout, stderr io.Writer) error {
 // of tui.scope for this run. The first run leaves a commented config to
 // edit; one that is there, or a directory that cannot be written, is left
 // alone.
-func tuiConfig(c *cobra.Command) (config.TUI, error) {
+func tuiConfig(c *cobra.Command) (config.File, error) {
 	_ = config.WriteTemplate(config.FilePath())
 	cfg, err := config.Load(config.FilePath())
 	if err != nil {
-		return config.TUI{}, err
+		return config.File{}, err
 	}
 	if c.Flags().Changed("all") {
 		cfg.TUI.Scope = config.ScopeFolder
@@ -531,7 +531,7 @@ func tuiConfig(c *cobra.Command) (config.TUI, error) {
 			cfg.TUI.Scope = config.ScopeAll
 		}
 	}
-	return cfg.TUI, nil
+	return cfg, nil
 }
 
 func runTUI(o *options, c *cobra.Command) error {
@@ -549,7 +549,11 @@ func runTUI(o *options, c *cobra.Command) error {
 		return err
 	}
 
-	model := tui.New(sessions, d, cfg).RememberIn(config.StatePath()).SettleSize().LoadInBackground()
+	model, err := tui.New(sessions, d, cfg.TUI).WithKeys(cfg.Keys)
+	if err != nil {
+		return fmt.Errorf("%s:\n%w", config.FilePath(), err)
+	}
+	model = model.RememberIn(config.StatePath()).SettleSize().LoadInBackground()
 	if wd, err := os.Getwd(); err == nil {
 		model = model.StartIn(wd)
 	}

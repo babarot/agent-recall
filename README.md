@@ -81,7 +81,7 @@ The filter matches words against titles, folders, branches, IDs and the conversa
 
 `a` runs Claude Code itself (`claude -p`, signed in as you, with recall's search as its only tools), so no API key is needed. It lists the sessions it found with why each matched; Enter jumps to one, `f` narrows the list to all of them.
 
-Its settings are under `[tui]` in the [config file](#configuration). See [docs/tui.md](docs/tui.md) for every key, the detail pane and the mouse.
+Its settings are under `[tui]` in the [config file](#configuration), and `[keys]` changes which keys do what. See [docs/tui.md](docs/tui.md) for every key, the detail pane and the mouse.
 
 ### Web UI
 
@@ -236,6 +236,51 @@ Sessions are imported from `~/.claude/projects` (`$CLAUDE_CONFIG_DIR/projects` w
 # ask_model = "sonnet-5.5"
 # ask_show_cost = true
 # ask_reasons = true
+
+[keys]
+# Which keys do what in the TUI, by operation: a key or a list of keys,
+# replacing the operation's own, or [] to turn it off. Every operation is
+# below with its keys; docs/tui.md says how keys are written. ctrl+c and
+# esc are fixed. For example, to resume with space and read with enter,
+# uncomment those two lines and swap their keys.
+#
+# Anywhere:
+# quit = "q"
+# help = "?"
+# focus_next = ["tab", "]"]
+# focus_prev = ["shift+tab", "["]
+# ask = "a"
+# sort = "s"
+# scope = "."
+#
+# The selected session, from the list, a frame or the spread conversation:
+# resume = "enter"
+# read = "space"
+# copy_id = "y"
+# copy_command = "Y"
+# grow = ["+", "="]
+# shrink = "-"
+#
+# Moving and searching, in every pane:
+# up = ["up", "k", "ctrl+p"]
+# down = ["down", "j", "ctrl+n"]
+# page_up = ["pgup", "ctrl+b", "ctrl+u"]
+# page_down = ["pgdown", "ctrl+f", "ctrl+d"]
+# top = ["home", "g"]
+# bottom = ["end", "G"]
+# search = "/"
+# next_match = "n"
+# prev_match = "N"
+#
+# Keys that work in one pane go in its table, after the lines above.
+# The session list:
+# [keys.list]
+# folders_open = ["left", "h"]
+# folders_close = ["right", "l"]
+#
+# The folder list:
+# [keys.folders]
+# back = ["right", "l", "enter"]
 ```
 
 ## CLI

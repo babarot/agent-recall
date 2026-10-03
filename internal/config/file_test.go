@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -12,7 +13,7 @@ func TestLoadMissingFileUsesDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != Default() {
+	if !reflect.DeepEqual(got, Default()) {
 		t.Fatalf("got %+v", got)
 	}
 }
@@ -74,7 +75,7 @@ func TestTemplateLoadsAsTheDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := Load(path)
-	if err != nil || got != Default() {
+	if err != nil || !reflect.DeepEqual(got, Default()) {
 		t.Fatalf("got %+v, %v", got, err)
 	}
 	// It never replaces a file that is there.
@@ -179,5 +180,42 @@ func TestClaudeConfigDir(t *testing.T) {
 	}
 	if got := DefaultDBPath(); got != "/home/me/.claude/vault.db" {
 		t.Errorf("DefaultDBPath: got %q", got)
+	}
+}
+
+// [keys] takes a key or a list of keys per operation; a value of another
+// type is kept for the TUI to report and stops no other command.
+func TestLoadKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	os.WriteFile(path, []byte("[keys]\nresume = \"space\"\nread = [\"enter\", \"o\"]\nsort = []\nask = 3\n"), 0o644)
+	got, err := LoadCore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got.Keys["resume"].Keys, []string{"space"}) || !reflect.DeepEqual(got.Keys["read"].Keys, []string{"enter", "o"}) {
+		t.Errorf("got %+v", got.Keys)
+	}
+	if k := got.Keys["sort"]; k.Keys == nil || len(k.Keys) != 0 || k.Err != nil {
+		t.Errorf("[] should be an empty list: %+v", k)
+	}
+	if got.Keys["ask"].Err == nil {
+		t.Error("a number should be kept as an error")
+	}
+	if _, err := Load(path); err != nil {
+		t.Errorf("Load leaves the keys to the TUI: %v", err)
+	}
+}
+
+// A pane's table under [keys] names its operations after the pane.
+func TestLoadPaneKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	os.WriteFile(path, []byte("[keys]\nresume = \"space\"\n\n[keys.list]\nfolders_open = \"o\"\n\n[keys.folders]\nback = [\"b\"]\n"), 0o644)
+	got, err := LoadCore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Keys{"resume": {Keys: []string{"space"}}, "list.folders_open": {Keys: []string{"o"}}, "folders.back": {Keys: []string{"b"}}}
+	if !reflect.DeepEqual(got.Keys, want) {
+		t.Fatalf("got %+v", got.Keys)
 	}
 }

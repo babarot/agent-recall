@@ -82,16 +82,11 @@ func defaultKeyMap() keyMap {
 // byName maps each operation's name, as the key hints and the config file
 // write it, to its keys.
 func (k keyMap) byName() map[string]key.Binding {
-	return map[string]key.Binding{
-		"quit": k.Global.Quit, "help": k.Global.Help, "focus_next": k.Global.FocusNext, "focus_prev": k.Global.FocusPrev,
-		"ask": k.Global.Ask, "sort": k.Global.Sort, "scope": k.Global.Scope,
-		"resume": k.Session.Resume, "read": k.Session.Read, "copy_id": k.Session.CopyID,
-		"copy_command": k.Session.CopyCommand, "grow": k.Session.Grow, "shrink": k.Session.Shrink,
-		"up": k.Nav.Up, "down": k.Nav.Down, "page_up": k.Nav.PageUp, "page_down": k.Nav.PageDown,
-		"top": k.Nav.Top, "bottom": k.Nav.Bottom, "search": k.Nav.Search,
-		"next_match": k.Nav.NextMatch, "prev_match": k.Nav.PrevMatch,
-		"folders_open": k.List.FoldersOpen, "folders_close": k.List.FoldersClose, "folders_back": k.Folders.FoldersBack,
+	out := map[string]key.Binding{}
+	for name, b := range k.refs() {
+		out[name] = *b
 	}
+	return out
 }
 
 // keyContext is where a key that reaches the panes goes: which pane has
@@ -131,7 +126,7 @@ func keyGlyph(k string) string {
 	return k
 }
 
-var keyRef = regexp.MustCompile(`\{([a-z_]+)\.(\d+)\}`)
+var keyRef = regexp.MustCompile(`\{([a-z_.]+)\.(\d+)\}`)
 
 // hintKeys fills in a key hint template: {op.N} is operation op's N-th key
 // (from 0) and the rest is printed as written, so a template lays the keys
@@ -220,9 +215,9 @@ func (k keyMap) keyScopes() []struct {
 		ops   []namedKey
 		fixed []string
 	}{
-		{"the session list", pick(all, cat(global, session, nav, []string{"folders_open", "folders_close"})...), []string{"esc"}},
+		{"the session list", pick(all, cat(global, session, nav, []string{"list.folders_open", "list.folders_close"})...), []string{"esc"}},
 		{"a frame or the spread conversation", pick(all, cat(global, session, nav)...), []string{"esc"}},
-		{"the folder list", pick(all, cat(global, nav, []string{"folders_back"})...), []string{"esc"}},
+		{"the folder list", pick(all, cat(global, nav, []string{"folders.back"})...), []string{"esc"}},
 		// Boxes close on the key that opened them, beside their own keys.
 		{"the key list", pick(all, "help"), []string{"esc", "q"}},
 		{"the sort menu", pick(all, "sort"), []string{"down", "j", "ctrl+n", "tab", "up", "k", "ctrl+p", "shift+tab",

@@ -215,7 +215,7 @@ func tuiScope(t *testing.T, args ...string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return cfg.Scope
+	return cfg.TUI.Scope
 }
 
 // ui stop reports what the server answered.
@@ -306,4 +306,18 @@ func nonLoopbackIP() string {
 		}
 	}
 	return ""
+}
+
+// A mistake under [keys] stops the TUI with what is wrong, before it
+// draws, and no other command.
+func TestConfigKeysErrors(t *testing.T) {
+	path := emptyDB(t)
+	writeConfig(t, "[keys]\nresume = \"j\"\nread = \"shift+y\"\n")
+	_, err := runArgs("tui", "--db", path)
+	if err == nil || !strings.Contains(err.Error(), "config.toml") || !strings.Contains(err.Error(), `keys.read: "shift+y" is never read`) {
+		t.Fatalf("got %v", err)
+	}
+	if out, err := runArgs("list", "--db", path); err != nil || out != "No sessions found.\n" {
+		t.Errorf("list should not care: %q, %v", out, err)
+	}
 }

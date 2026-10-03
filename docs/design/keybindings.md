@@ -158,8 +158,8 @@ TUI のキー操作を、どの場面で何が効くかという設計から決�
 
 | キー | 操作 | 操作名 |
 |---|---|---|
-| `←` `h` | フォルダ一覧を開く。開いていれば、フォルダ一覧へ移る | `folders_open` |
-| `→` `l` | フォルダ一覧を閉じる | `folders_close` |
+| `←` `h` | フォルダ一覧を開く。開いていれば、フォルダ一覧へ移る | `list.folders_open` |
+| `→` `l` | フォルダ一覧を閉じる | `list.folders_close` |
 
 会話を広げている間も、一覧にフォーカスがあれば `j` `k` で次のセッションの会話をその場で読める（今と同じ）。
 
@@ -169,7 +169,7 @@ TUI のキー操作を、どの場面で何が効くかという設計から決�
 
 | キー | 操作 | 操作名 |
 |---|---|---|
-| `→` `l` `enter` | セッション一覧に戻る | `folders_back` |
+| `→` `l` `enter` | セッション一覧に戻る | `folders.back` |
 
 セッション操作（`enter` で再開、`y` など）は効かない（今と同じ）。
 
@@ -251,6 +251,7 @@ read   = ["enter"]
 ```
 
 - `[keys]` の下に、操作名とキーの並びを書く。1 つなら文字列でもよい。書いた操作は、既定のキーを置き換える
+- 1 つのペインでしか効かない操作は、そのペインの表に書く: `[keys.list]` の `folders_open` と `folders_close`、`[keys.folders]` の `back`。操作名は表の名前を付けて `list.folders_open`、`folders.back` と呼ぶ。書く場所を間違えた行（`[keys.list]` の下の `resume`、`[keys]` の直下の `folders_open`）は、正しい場所を案内するエラーにする
 - `[]` でその操作を外せる
 - キーの書き方は bubbletea の表記（`KeyPressMsg.String()` が返す形: `enter`、`space`、`ctrl+d`、`shift+tab`、1 文字など）。bubbles と bubbletea にはキー名の一覧も解析器もないので、読み込みの側で許すキー名の一覧を持つ
   - 許すのは、印字できる 1 文字（大文字を含む）、名前のあるキー（`enter` `space` `tab` `backspace` `up` `down` `left` `right` `home` `end` `pgup` `pgdown` `insert` `delete` `f1`〜`f12`）、それに `ctrl+` と `alt+` を付けたもの。`shift+` は名前のあるキーにだけ付けられる（`shift+tab`、`shift+up` など）

@@ -41,6 +41,69 @@ type File struct {
 	Core Core `toml:"core"`
 	UI   UI   `toml:"ui"`
 	TUI  TUI  `toml:"tui"`
+	// Keys changes which keys do what in the TUI, by operation name. The TUI
+	// checks the names and keys when it starts, so a mistake here stops only
+	// the TUI, as one under [tui] does.
+	Keys Keys `toml:"keys"`
+}
+
+// Keys are the operations under [keys], by name. An operation that works
+// in one pane only is written in that pane's table, as [keys.list] or
+// [keys.folders], and named with it: list.folders_open, folders.back.
+type Keys map[string]KeyList
+
+// UnmarshalTOML reads [keys], naming the operations in a pane's table after
+// the table.
+func (k *Keys) UnmarshalTOML(v any) error {
+	t, ok := v.(map[string]any)
+	if !ok {
+		return errors.New("keys must be a table")
+	}
+	*k = Keys{}
+	for name, val := range t {
+		if pane, ok := val.(map[string]any); ok {
+			for op, pv := range pane {
+				var l KeyList
+				_ = l.UnmarshalTOML(pv)
+				(*k)[name+"."+op] = l
+			}
+			continue
+		}
+		var l KeyList
+		_ = l.UnmarshalTOML(val)
+		(*k)[name] = l
+	}
+	return nil
+}
+
+// KeyList is an operation's keys as written under [keys]: a key or a list
+// of keys. A value of another type is kept as an error for the TUI to
+// report rather than one that stops every command.
+type KeyList struct {
+	Keys []string
+	Err  error
+}
+
+// UnmarshalTOML takes a string or an array of strings.
+func (k *KeyList) UnmarshalTOML(v any) error {
+	switch v := v.(type) {
+	case string:
+		k.Keys = []string{v}
+		return nil
+	case []any:
+		k.Keys = []string{}
+		for _, e := range v {
+			s, ok := e.(string)
+			if !ok {
+				k.Keys, k.Err = nil, errors.New("must be a key or a list of keys, as strings")
+				return nil
+			}
+			k.Keys = append(k.Keys, s)
+		}
+		return nil
+	}
+	k.Err = errors.New("must be a key or a list of keys, as strings")
+	return nil
 }
 
 // Core configures what every command uses.
@@ -147,6 +210,51 @@ const Template = `# claude-recall settings. Uncomment a line to change it.
 # ask_model = "sonnet-5.5"
 # ask_show_cost = true
 # ask_reasons = true
+
+[keys]
+# Which keys do what in the TUI, by operation: a key or a list of keys,
+# replacing the operation's own, or [] to turn it off. Every operation is
+# below with its keys; docs/tui.md says how keys are written. ctrl+c and
+# esc are fixed. For example, to resume with space and read with enter,
+# uncomment those two lines and swap their keys.
+#
+# Anywhere:
+# quit = "q"
+# help = "?"
+# focus_next = ["tab", "]"]
+# focus_prev = ["shift+tab", "["]
+# ask = "a"
+# sort = "s"
+# scope = "."
+#
+# The selected session, from the list, a frame or the spread conversation:
+# resume = "enter"
+# read = "space"
+# copy_id = "y"
+# copy_command = "Y"
+# grow = ["+", "="]
+# shrink = "-"
+#
+# Moving and searching, in every pane:
+# up = ["up", "k", "ctrl+p"]
+# down = ["down", "j", "ctrl+n"]
+# page_up = ["pgup", "ctrl+b", "ctrl+u"]
+# page_down = ["pgdown", "ctrl+f", "ctrl+d"]
+# top = ["home", "g"]
+# bottom = ["end", "G"]
+# search = "/"
+# next_match = "n"
+# prev_match = "N"
+#
+# Keys that work in one pane go in its table, after the lines above.
+# The session list:
+# [keys.list]
+# folders_open = ["left", "h"]
+# folders_close = ["right", "l"]
+#
+# The folder list:
+# [keys.folders]
+# back = ["right", "l", "enter"]
 `
 
 // WriteTemplate writes Template to path unless a file is already there.
@@ -193,6 +301,9 @@ func LoadCore(path string) (File, error) {
 	}
 	if keys := md.Undecoded(); len(keys) > 0 {
 		return File{}, unknownKey(path, keys[0].String())
+	}
+	if len(cfg.Keys) == 0 {
+		cfg.Keys = nil // an empty [keys] changes nothing
 	}
 	if db := cfg.Core.DB; db != "" && !strings.HasPrefix(db, "~/") && !filepath.IsAbs(db) {
 		return File{}, fmt.Errorf("%s: core.db must be an absolute path or start with ~/, got %q", path, db)
@@ -247,6 +358,9 @@ func knownKeys() []string {
 	for i := range f.NumField() {
 		section := f.Field(i).Tag.Get("toml")
 		t := f.Field(i).Type
+		if t.Kind() != reflect.Struct {
+			continue // [keys], whose names the TUI knows
+		}
 		for j := range t.NumField() {
 			out = append(out, section+"."+t.Field(j).Tag.Get("toml"))
 		}

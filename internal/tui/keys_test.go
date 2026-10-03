@@ -23,7 +23,7 @@ func TestConflicts(t *testing.T) {
 		{func(k *keyMap) { k.Session.Resume = keys("j") }, "j is both resume and down in the session list"},
 		{func(k *keyMap) { k.Global.Sort = keys("1") }, "1 is both a fixed key and sort in the sort menu"},
 		{func(k *keyMap) { k.Global.Help = keys("esc") }, "esc is both a fixed key and help"},
-		{func(k *keyMap) { k.Folders.FoldersBack = keys("q") }, "q is both quit and folders_back in the folder list"},
+		{func(k *keyMap) { k.Folders.FoldersBack = keys("q") }, "q is both quit and folders.back in the folder list"},
 	} {
 		k := defaultKeyMap()
 		tc.edit(&k)
