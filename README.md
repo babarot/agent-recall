@@ -114,14 +114,13 @@ claude-mem extends the agent's memory, for Claude Code and many other agents. It
 | Where data lives | Local, with optional cloud sync | Local only |
 | Agents | Claude Code, Codex, Gemini, OpenCode and more | Claude Code |
 | Runtime | Node + Bun + Python (uv) + Chroma, resident worker | One static binary, no daemon |
-| License | Apache-2.0 | MIT |
 
 The tradeoff claude-recall picks:
 
 - Raw logs don't drift. What's stored is what happened, not a summary of it.
 - The agent says when it doesn't know. Past context comes from a tool call, not from memory it may misremember.
 - Idle means idle. No worker, no background LLM calls.
-- One binary, MIT licensed, works offline.
+- One binary, works offline.
 
 ## Install
 
