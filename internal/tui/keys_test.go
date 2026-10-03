@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -11,7 +12,7 @@ import (
 
 func TestDefaultKeyMapHasNoConflicts(t *testing.T) {
 	if c := defaultKeyMap().conflicts(); len(c) > 0 {
-		t.Fatalf("conflicts:\n%s", strings.Join(c, "\n"))
+		t.Fatalf("conflicts: %v", c)
 	}
 }
 
@@ -27,7 +28,7 @@ func TestConflicts(t *testing.T) {
 	} {
 		k := defaultKeyMap()
 		tc.edit(&k)
-		if got := strings.Join(k.conflicts(), "\n"); !strings.Contains(got, tc.want) {
+		if got := fmt.Sprint(k.conflicts()); !strings.Contains(got, tc.want) {
 			t.Errorf("got %q, want %q", got, tc.want)
 		}
 	}

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -8,10 +9,11 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
-	"github.com/BurntSushi/toml"
+	"github.com/pelletier/go-toml/v2"
 
 	"github.com/babarot/claude-recall/internal/theme"
 )
@@ -60,28 +62,23 @@ type File struct {
 // [keys.folders], and named with it: list.folders_open, folders.back.
 type Keys map[string]KeyList
 
-// UnmarshalTOML reads [keys], naming the operations in a pane's table after
-// the table.
-func (k *Keys) UnmarshalTOML(v any) error {
-	t, ok := v.(map[string]any)
-	if !ok {
-		return errors.New("keys must be a table")
+// keysFrom reads [keys] as decoded, naming the operations in a pane's table
+// after the table.
+func keysFrom(t map[string]any) Keys {
+	if len(t) == 0 {
+		return nil // an empty [keys] changes nothing
 	}
-	*k = Keys{}
+	k := Keys{}
 	for name, val := range t {
 		if pane, ok := val.(map[string]any); ok {
 			for op, pv := range pane {
-				var l KeyList
-				_ = l.UnmarshalTOML(pv)
-				(*k)[name+"."+op] = l
+				k[name+"."+op] = keyListFrom(pv)
 			}
 			continue
 		}
-		var l KeyList
-		_ = l.UnmarshalTOML(val)
-		(*k)[name] = l
+		k[name] = keyListFrom(val)
 	}
-	return nil
+	return k
 }
 
 // KeyList is an operation's keys as written under [keys]: a key or a list
@@ -92,26 +89,24 @@ type KeyList struct {
 	Err  error
 }
 
-// UnmarshalTOML takes a string or an array of strings.
-func (k *KeyList) UnmarshalTOML(v any) error {
+// keyListFrom takes a string or an array of strings.
+func keyListFrom(v any) KeyList {
+	bad := KeyList{Err: errors.New("must be a key or a list of keys, as strings")}
 	switch v := v.(type) {
 	case string:
-		k.Keys = []string{v}
-		return nil
+		return KeyList{Keys: []string{v}}
 	case []any:
-		k.Keys = []string{}
+		keys := []string{}
 		for _, e := range v {
 			s, ok := e.(string)
 			if !ok {
-				k.Keys, k.Err = nil, errors.New("must be a key or a list of keys, as strings")
-				return nil
+				return bad
 			}
-			k.Keys = append(k.Keys, s)
+			keys = append(keys, s)
 		}
-		return nil
+		return KeyList{Keys: keys}
 	}
-	k.Err = errors.New("must be a key or a list of keys, as strings")
-	return nil
+	return bad
 }
 
 // Core configures what every command uses.
@@ -300,8 +295,8 @@ func Load(path string) (File, error) {
 	if err != nil {
 		return File{}, err
 	}
-	if err := cfg.TUI.check(path); err != nil {
-		return File{}, err
+	if ps := cfg.TUI.check(); len(ps) > 0 {
+		return File{}, Report(path, ps)
 	}
 	return cfg, nil
 }
@@ -310,61 +305,133 @@ func Load(path string) (File, error) {
 // than the TUI: a value under [tui] it does not check, so a mistake there
 // does not stop the MCP server or an import.
 func LoadCore(path string) (File, error) {
-	cfg := Default()
-	md, err := toml.DecodeFile(path, &cfg)
+	src, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return Default(), nil
 		}
 		return File{}, fmt.Errorf("read %s: %w", path, err)
 	}
-	if keys := md.Undecoded(); len(keys) > 0 {
-		return File{}, unknownKey(path, keys[0].String())
+	cfg := Default()
+	// [keys] is read as it is and checked by the TUI.
+	doc := struct {
+		Core Core           `toml:"core"`
+		UI   UI             `toml:"ui"`
+		TUI  TUI            `toml:"tui"`
+		Keys map[string]any `toml:"keys"`
+	}{Core: cfg.Core, UI: cfg.UI, TUI: cfg.TUI}
+	if err := toml.NewDecoder(bytes.NewReader(src)).DisallowUnknownFields().Decode(&doc); err != nil {
+		return File{}, Report(path, decodeProblems(err))
 	}
-	if len(cfg.Keys) == 0 {
-		cfg.Keys = nil // an empty [keys] changes nothing
-	}
+	cfg = File{Core: doc.Core, UI: doc.UI, TUI: doc.TUI, Keys: keysFrom(doc.Keys)}
+	var ps Problems
 	if db := cfg.Core.DB; db != "" && !strings.HasPrefix(db, "~/") && !filepath.IsAbs(db) {
-		return File{}, fmt.Errorf("%s: core.db must be an absolute path or start with ~/, got %q", path, db)
+		ps = append(ps, problem("core.db", "core.db must be an absolute path or start with ~/, got %q", db))
 	}
 	if p := cfg.UI.Port; p < 1 || p > 65535 {
-		return File{}, fmt.Errorf("%s: ui.port must be between 1 and 65535, got %d", path, p)
+		ps = append(ps, problem("ui.port", "ui.port must be between 1 and 65535, got %d", p))
+	}
+	if len(ps) > 0 {
+		return File{}, Report(path, ps)
 	}
 	return cfg, nil
 }
 
-func (t TUI) check(path string) error {
+// problem is a mistake in the value of setting (section.key).
+func problem(setting, format string, args ...any) Problem {
+	return Problem{Key: strings.Split(setting, "."), Index: -1, Message: fmt.Sprintf(format, args...)}
+}
+
+// decodeProblems turns what the decoder found wrong into problems: keys
+// that are no setting, each pointed to where it belongs when it is in the
+// wrong section, or a file that does not parse or has a value of the wrong
+// type, where the decoder says it is.
+func decodeProblems(err error) Problems {
+	var strict *toml.StrictMissingError
+	if errors.As(err, &strict) {
+		var ps Problems
+		for _, e := range strict.Errors {
+			key := []string(e.Key())
+			ps = append(ps, Problem{Key: key, Index: -1, AtKey: true, Message: unknownKey(strings.Join(key, "."))})
+		}
+		return ps
+	}
+	var de *toml.DecodeError
+	if errors.As(err, &de) {
+		msg := strings.TrimPrefix(de.Error(), "toml: ")
+		if m := wrongType.FindStringSubmatch(msg); m != nil && len(de.Key()) > 0 {
+			setting := strings.Join(de.Key(), ".")
+			return Problems{problem(setting, "%s must be %s, got %s", setting, goTypeWords(m[2]), tomlTypeWords(m[1]))}
+		}
+		line, col := de.Position()
+		return Problems{{Line: line, Col: col, Index: -1, Message: msg}}
+	}
+	return Problems{{Index: -1, Message: err.Error()}}
+}
+
+// wrongType is how the decoder says a value has the wrong type.
+var wrongType = regexp.MustCompile(`^cannot decode TOML (\w+) into struct field \S+ of type (\S+)$`)
+
+// goTypeWords says what a setting's Go type takes.
+func goTypeWords(t string) string {
+	switch {
+	case t == "bool":
+		return "true or false"
+	case t == "string":
+		return "a string"
+	case strings.HasPrefix(t, "int"), strings.HasPrefix(t, "uint"), strings.HasPrefix(t, "float"):
+		return "a number"
+	}
+	return "a " + t
+}
+
+// tomlTypeWords names the type of a TOML value as the decoder reports it.
+func tomlTypeWords(t string) string {
+	switch t {
+	case "string":
+		return "a string"
+	case "integer", "float":
+		return "a number"
+	case "boolean", "bool":
+		return "true or false"
+	case "array":
+		return "a list"
+	}
+	return "a " + t
+}
+
+func (t TUI) check() Problems {
+	var ps Problems
+	add := func(setting, format string, args ...any) { ps = append(ps, problem(setting, format, args...)) }
 	switch t.DetailPosition {
 	case DetailBottom, DetailRight, DetailAuto:
 	default:
-		return fmt.Errorf("%s: tui.detail_position must be %q, %q or %q, got %q",
-			path, DetailBottom, DetailRight, DetailAuto, t.DetailPosition)
+		add("tui.detail_position", "tui.detail_position must be %q, %q or %q, got %q", DetailBottom, DetailRight, DetailAuto, t.DetailPosition)
 	}
 	if t.Scope != ScopeFolder && t.Scope != ScopeAll {
-		return fmt.Errorf("%s: tui.scope must be %q or %q, got %q", path, ScopeFolder, ScopeAll, t.Scope)
+		add("tui.scope", "tui.scope must be %q or %q, got %q", ScopeFolder, ScopeAll, t.Scope)
 	}
 	if !theme.Valid(t.Theme) {
-		return fmt.Errorf("%s: tui.theme must be one of %s, got %q", path, theme.NamesString(), t.Theme)
+		add("tui.theme", "tui.theme must be one of %s, got %q", theme.NamesString(), t.Theme)
 	}
 	if t.DetailHeight < MinDetailHeight {
-		return fmt.Errorf("%s: tui.detail_height must be at least %d", path, MinDetailHeight)
+		add("tui.detail_height", "tui.detail_height must be at least %d", MinDetailHeight)
 	}
 	if strings.TrimSpace(t.AskModel) == "" {
-		return fmt.Errorf("%s: tui.ask_model must not be empty", path)
+		add("tui.ask_model", "tui.ask_model must not be empty")
 	}
 	if t.DetailAutoWidth <= 0 {
-		return fmt.Errorf("%s: tui.detail_auto_width must be positive", path)
+		add("tui.detail_auto_width", "tui.detail_auto_width must be positive")
 	}
 	switch t.ScrollbarThumb {
 	case ThumbThin, ThumbHeavy, ThumbBlock:
 	default:
-		return fmt.Errorf("%s: tui.scrollbar_thumb must be %q, %q or %q, got %q",
-			path, ThumbThin, ThumbHeavy, ThumbBlock, t.ScrollbarThumb)
+		add("tui.scrollbar_thumb", "tui.scrollbar_thumb must be %q, %q or %q, got %q", ThumbThin, ThumbHeavy, ThumbBlock, t.ScrollbarThumb)
 	}
 	if c := t.ScrollbarColor; c != "" && !hexColor.MatchString(c) && !ansiColor(c) {
-		return fmt.Errorf("%s: tui.scrollbar_color must be a hex color such as \"#f5a3b5\" or an ANSI color number (0-255), got %q", path, c)
+		add("tui.scrollbar_color", "tui.scrollbar_color must be a hex color such as \"#f5a3b5\" or an ANSI color number (0-255), got %q", c)
 	}
-	return nil
+	return ps
 }
 
 var hexColor = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
@@ -376,14 +443,17 @@ func ansiColor(s string) bool {
 
 // unknownKey explains a key Load does not know, pointing a setting written
 // in the wrong section to where it belongs.
-func unknownKey(path, key string) error {
+func unknownKey(key string) string {
+	if !strings.Contains(key, ".") && !slices.ContainsFunc(knownKeys(), func(k string) bool { return strings.HasSuffix(k, "."+key) }) {
+		return fmt.Sprintf("unknown table [%s] (known: [core], [ui], [tui], [keys])", key)
+	}
 	name := key[strings.LastIndex(key, ".")+1:]
 	for _, k := range knownKeys() {
 		if section, n, _ := strings.Cut(k, "."); n == name {
-			return fmt.Errorf("%s: unknown key %q; it belongs under [%s]", path, key, section)
+			return fmt.Sprintf("unknown key %q; it belongs under [%s]", key, section)
 		}
 	}
-	return fmt.Errorf("%s: unknown key %q (known: %s)", path, key, strings.Join(knownKeys(), ", "))
+	return fmt.Sprintf("unknown key %q (known: %s)", key, strings.Join(knownKeys(), ", "))
 }
 
 // knownKeys lists every setting as section.key.
