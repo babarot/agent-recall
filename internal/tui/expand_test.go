@@ -2,6 +2,8 @@ package tui
 
 import (
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -140,15 +142,36 @@ func TestDetailLoadsInBackground(t *testing.T) {
 		t.Fatalf("the spread pane should say it is loading:\n%s", screen(m))
 	}
 	d, _ := src.SessionDetail(id)
-	m = update(t, m, detailLoaded{id, d})
+	m = update(t, m, detailLoaded{id: id, d: d})
 	s := screen(m)
 	if m.detailLoading[id] || strings.Contains(s, "Loading…") || !strings.Contains(s, "first question about "+id) {
 		t.Fatalf("after it came:\n%s", s)
 	}
 	// A detail that comes for another session is kept for later.
-	m = update(t, m, detailLoaded{"other", d})
+	m = update(t, m, detailLoaded{id: "other", d: d})
 	if _, ok := m.details["other"]; !ok || !strings.Contains(screen(m), "first question about "+id) {
 		t.Fatal("another session's detail should be kept and not shown")
+	}
+}
+
+// Commands are counted by program where the detail is read, once, and the
+// pane shows those counts.
+func TestDetailCountsCommandsWhereItIsRead(t *testing.T) {
+	src := &fakePreview{}
+	m := New(testSessions(t), src, config.Default().TUI).LoadInBackground()
+	m = update(t, m, tea.WindowSizeMsg{Width: 140, Height: 40})
+	id := m.current().s.ID
+	delete(m.detailLoading, id)
+	msg, ok := m.loadDetail()().(detailLoaded)
+	if !ok || msg.id != id || len(msg.programs) == 0 {
+		t.Fatalf("got %+v", msg)
+	}
+	m = update(t, m, msg)
+	if got, want := m.programs[id], commandCounts(m.details[id].Commands); !slices.Equal(got, want) {
+		t.Fatalf("programs %v, want %v", got, want)
+	}
+	if !regexp.MustCompile(`git status +▇+ +1`).MatchString(screen(m)) {
+		t.Fatalf("What was done lacks the counted commands:\n%s", screen(m))
 	}
 }
 

@@ -405,7 +405,7 @@ func (m Model) doneContent(r *row, d *db.Detail, inner int) frameLines {
 
 	c.scroll = append(c.scroll, "", m.section("Tools"))
 	c.scroll = append(c.scroll, m.bars(d.TopTools, len(d.TopTools), inner)...)
-	programs := commandCounts(d.Commands)
+	programs := m.programs[r.s.ID]
 	c.scroll = append(c.scroll, "", m.section("Commands")+m.st.muted.Render(fmt.Sprintf("  %d run", len(d.Commands))))
 	c.scroll = append(c.scroll, m.bars(programs, barRows, inner)...)
 	if extra := len(programs) - barRows; extra > 0 {

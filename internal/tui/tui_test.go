@@ -684,6 +684,7 @@ func manyFiles(m Model) {
 	for i := range 8 {
 		d.Commands = append(d.Commands, fmt.Sprintf("make step%d", i))
 	}
+	m.programs[m.current().s.ID] = commandCounts(d.Commands)
 }
 
 func TestDoneScrollsToFiles(t *testing.T) {
