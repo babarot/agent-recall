@@ -97,7 +97,23 @@ Run without a command, it opens the TUI.`,
 	root.SetFlagErrorFunc(func(c *cobra.Command, err error) error {
 		return fmt.Errorf("%w\nRun '%s --help' for usage.", err, c.CommandPath())
 	})
-	root.PersistentFlags().StringVar(&o.db, "db", config.DefaultDBPath(), "database path")
+	root.PersistentFlags().StringVar(&o.db, "db", "", "database path (default: db under [core] in the config file, or ~/.claude/vault.db)")
+	// The config file gives the defaults of --db and --port. Every command
+	// reads it, so the MCP server and the SessionEnd import use the same
+	// archive as the TUI.
+	root.PersistentPreRunE = func(c *cobra.Command, _ []string) error {
+		cfg, err := config.LoadCore(config.FilePath())
+		if err != nil {
+			return err
+		}
+		if !c.Flags().Changed("db") {
+			o.db = cfg.DBPath()
+		}
+		if f := c.Flags().Lookup("port"); f != nil && !f.Changed {
+			o.port = cfg.UI.Port
+		}
+		return nil
+	}
 
 	project := func(c *cobra.Command, what string) {
 		c.Flags().StringVar(&o.project, "project", "", what)
@@ -208,8 +224,9 @@ Run without a command, it opens the TUI.`,
 	uiCmd := &cobra.Command{
 		Use:   "ui",
 		Short: "Start the web UI in the background",
-		Long: fmt.Sprintf(`Start the web UI in the background, on http://localhost:%d unless --port says
-otherwise. If it is already running, print its URL.`, web.DefaultPort),
+		Long: fmt.Sprintf(`Start the web UI in the background, on http://localhost:%d unless port under
+[ui] in the config file or --port says otherwise. If it is already running,
+print its URL.`, config.DefaultPort),
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			if o.foreground {
@@ -218,7 +235,7 @@ otherwise. If it is already running, print its URL.`, web.DefaultPort),
 			return startBackground(o, c.OutOrStdout(), c.ErrOrStderr())
 		},
 	}
-	uiCmd.PersistentFlags().IntVar(&o.port, "port", web.DefaultPort, "port of the web UI")
+	uiCmd.PersistentFlags().IntVar(&o.port, "port", 0, "port of the web UI (default: port under [ui] in the config file, or 6276)")
 	uiCmd.Flags().BoolVar(&o.foreground, "foreground", false, "run in the foreground")
 	uiCmd.AddCommand(
 		&cobra.Command{

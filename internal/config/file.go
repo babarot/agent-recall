@@ -32,9 +32,28 @@ const (
 // each of its three frames.
 const MinDetailHeight = 10
 
+// DefaultPort is where the web UI listens unless the config file or --port
+// says otherwise.
+const DefaultPort = 6276
+
 // File is the user's config file, ~/.config/claude-recall/config.toml.
 type File struct {
-	TUI TUI `toml:"tui"`
+	Core Core `toml:"core"`
+	UI   UI   `toml:"ui"`
+	TUI  TUI  `toml:"tui"`
+}
+
+// Core configures what every command uses.
+type Core struct {
+	// DB is the archive database: an absolute path or one starting with ~/.
+	// Empty means DefaultDBPath.
+	DB string `toml:"db"`
+}
+
+// UI configures the web UI.
+type UI struct {
+	// Port is where recall ui listens, and where ui stop and ui status look.
+	Port int `toml:"port"`
 }
 
 // TUI configures the interactive session list.
@@ -66,8 +85,20 @@ type TUI struct {
 
 // Default returns the settings used when the config file is absent.
 func Default() File {
-	return File{TUI: TUI{DetailPosition: DetailBottom, DetailAutoWidth: 160, Theme: theme.Auto, DetailHeight: 16, Scope: ScopeFolder,
+	return File{UI: UI{Port: DefaultPort}, TUI: TUI{DetailPosition: DetailBottom, DetailAutoWidth: 160, Theme: theme.Auto, DetailHeight: 16, Scope: ScopeFolder,
 		AskModel: "sonnet-5.5", AskShowCost: true, AskReasons: true}}
+}
+
+// DBPath is the archive database the file names, with ~/ expanded, or
+// DefaultDBPath.
+func (f File) DBPath() string {
+	switch {
+	case f.Core.DB == "":
+		return DefaultDBPath()
+	case strings.HasPrefix(f.Core.DB, "~/"):
+		return filepath.Join(homeDir(), f.Core.DB[2:])
+	}
+	return f.Core.DB
 }
 
 // FilePath returns the config file location, honoring XDG_CONFIG_HOME.
@@ -83,6 +114,16 @@ func FilePath() string {
 // default, commented out, so a default changed later still applies until
 // the user picks a value.
 const Template = `# claude-recall settings. Uncomment a line to change it.
+
+[core]
+# The archive database, for every command, the MCP server and the web UI,
+# unless --db says otherwise: an absolute path or one starting with ~/.
+# db = "~/.claude/vault.db"
+
+[ui]
+# Where the web UI (recall ui) listens, and where recall ui stop and
+# recall ui status look for it, unless --port says otherwise.
+# port = 6276
 
 [tui]
 # Where the detail pane goes: "bottom" (default), "right", or "auto" to put it
@@ -124,10 +165,24 @@ func WriteTemplate(path string) error {
 	return f.Close()
 }
 
-// Load reads the config file at path. A missing file yields the defaults;
-// keys left out of the file keep their defaults. A key it does not know is
-// an error, since it would otherwise be ignored without a word.
+// Load reads the config file at path for the TUI. A missing file yields the
+// defaults; keys left out of the file keep their defaults. A key it does not
+// know is an error, since it would otherwise be ignored without a word.
 func Load(path string) (File, error) {
+	cfg, err := LoadCore(path)
+	if err != nil {
+		return File{}, err
+	}
+	if err := cfg.TUI.check(path); err != nil {
+		return File{}, err
+	}
+	return cfg, nil
+}
+
+// LoadCore reads the config file at path like Load, for the commands other
+// than the TUI: a value under [tui] it does not check, so a mistake there
+// does not stop the MCP server or an import.
+func LoadCore(path string) (File, error) {
 	cfg := Default()
 	md, err := toml.DecodeFile(path, &cfg)
 	if err != nil {
@@ -139,47 +194,62 @@ func Load(path string) (File, error) {
 	if keys := md.Undecoded(); len(keys) > 0 {
 		return File{}, unknownKey(path, keys[0].String())
 	}
-	switch cfg.TUI.DetailPosition {
-	case DetailBottom, DetailRight, DetailAuto:
-	default:
-		return File{}, fmt.Errorf("%s: tui.detail_position must be %q, %q or %q, got %q",
-			path, DetailBottom, DetailRight, DetailAuto, cfg.TUI.DetailPosition)
+	if db := cfg.Core.DB; db != "" && !strings.HasPrefix(db, "~/") && !filepath.IsAbs(db) {
+		return File{}, fmt.Errorf("%s: core.db must be an absolute path or start with ~/, got %q", path, db)
 	}
-	if cfg.TUI.Scope != ScopeFolder && cfg.TUI.Scope != ScopeAll {
-		return File{}, fmt.Errorf("%s: tui.scope must be %q or %q, got %q", path, ScopeFolder, ScopeAll, cfg.TUI.Scope)
-	}
-	if !theme.Valid(cfg.TUI.Theme) {
-		return File{}, fmt.Errorf("%s: tui.theme must be one of %s, got %q", path, theme.NamesString(), cfg.TUI.Theme)
-	}
-	if cfg.TUI.DetailHeight < MinDetailHeight {
-		return File{}, fmt.Errorf("%s: tui.detail_height must be at least %d", path, MinDetailHeight)
-	}
-	if strings.TrimSpace(cfg.TUI.AskModel) == "" {
-		return File{}, fmt.Errorf("%s: tui.ask_model must not be empty", path)
-	}
-	if cfg.TUI.DetailAutoWidth <= 0 {
-		return File{}, fmt.Errorf("%s: tui.detail_auto_width must be positive", path)
+	if p := cfg.UI.Port; p < 1 || p > 65535 {
+		return File{}, fmt.Errorf("%s: ui.port must be between 1 and 65535, got %d", path, p)
 	}
 	return cfg, nil
 }
 
-// unknownKey explains a key Load does not know, pointing a TUI setting
-// written outside [tui] to where it belongs.
+func (t TUI) check(path string) error {
+	switch t.DetailPosition {
+	case DetailBottom, DetailRight, DetailAuto:
+	default:
+		return fmt.Errorf("%s: tui.detail_position must be %q, %q or %q, got %q",
+			path, DetailBottom, DetailRight, DetailAuto, t.DetailPosition)
+	}
+	if t.Scope != ScopeFolder && t.Scope != ScopeAll {
+		return fmt.Errorf("%s: tui.scope must be %q or %q, got %q", path, ScopeFolder, ScopeAll, t.Scope)
+	}
+	if !theme.Valid(t.Theme) {
+		return fmt.Errorf("%s: tui.theme must be one of %s, got %q", path, theme.NamesString(), t.Theme)
+	}
+	if t.DetailHeight < MinDetailHeight {
+		return fmt.Errorf("%s: tui.detail_height must be at least %d", path, MinDetailHeight)
+	}
+	if strings.TrimSpace(t.AskModel) == "" {
+		return fmt.Errorf("%s: tui.ask_model must not be empty", path)
+	}
+	if t.DetailAutoWidth <= 0 {
+		return fmt.Errorf("%s: tui.detail_auto_width must be positive", path)
+	}
+	return nil
+}
+
+// unknownKey explains a key Load does not know, pointing a setting written
+// in the wrong section to where it belongs.
 func unknownKey(path, key string) error {
-	t := reflect.TypeOf(TUI{})
-	for i := range t.NumField() {
-		if name := t.Field(i).Tag.Get("toml"); name == key {
-			return fmt.Errorf("%s: unknown key %q; it belongs under [tui]", path, key)
+	name := key[strings.LastIndex(key, ".")+1:]
+	for _, k := range knownKeys() {
+		if section, n, _ := strings.Cut(k, "."); n == name {
+			return fmt.Errorf("%s: unknown key %q; it belongs under [%s]", path, key, section)
 		}
 	}
 	return fmt.Errorf("%s: unknown key %q (known: %s)", path, key, strings.Join(knownKeys(), ", "))
 }
 
+// knownKeys lists every setting as section.key.
 func knownKeys() []string {
 	var out []string
-	t := reflect.TypeOf(TUI{})
-	for i := range t.NumField() {
-		out = append(out, "tui."+t.Field(i).Tag.Get("toml"))
+	f := reflect.TypeOf(File{})
+	for i := range f.NumField() {
+		section := f.Field(i).Tag.Get("toml")
+		t := f.Field(i).Type
+		for j := range t.NumField() {
+			out = append(out, section+"."+t.Field(j).Tag.Get("toml"))
+		}
 	}
 	return out
 }

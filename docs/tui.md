@@ -96,31 +96,4 @@ Click a session to select it, click a frame to focus it, scroll the wheel over t
 
 ## Settings
 
-`~/.config/claude-recall/config.toml` (or `$XDG_CONFIG_HOME/claude-recall/config.toml`). `recall` writes it the first time it runs, with every setting at its default and commented out; uncomment a line to change it. An unknown key, or a setting outside `[tui]`, is reported instead of ignored.
-
-```toml
-# claude-recall settings. Uncomment a line to change it.
-
-[tui]
-# Where the detail pane goes: "bottom" (default), "right", or "auto" to put it
-# on the right when the terminal is at least detail_auto_width columns wide.
-# detail_position = "bottom"
-# detail_auto_width = 160
-# Initial height of the detail pane below the list, in lines (at least 10).
-# detail_height = 16
-# Color scheme: "auto" (default) picks catppuccin-mocha on a dark terminal and
-# catppuccin-latte on a light one. Also: tokyo-night, dracula, nord,
-# gruvbox-dark, and ansi (the terminal's own 16 colors).
-# theme = "auto"
-# Which sessions to start with: "folder" (default) for the repository recall is
-# started in, when it has sessions, or "all".
-# scope = "folder"
-# a asks Claude Code (claude -p, on your Claude plan) to find sessions.
-# The model: a family and version such as "sonnet-5.5", "opus-5.5" or
-# "haiku-4.5", or a full model ID. Whether to show what an answer cost (the
-# price claude reports; on a Claude plan it counts toward your usage rather
-# than being billed), and why Claude picked each session.
-# ask_model = "sonnet-5.5"
-# ask_show_cost = true
-# ask_reasons = true
-```
+The `[tui]` section of the config file holds the TUI's settings: where the detail pane goes and how tall it starts, the color scheme, which sessions to start with, and the model and display of `a`. See [Configuration](../README.md#configuration) in the README for the whole file.
