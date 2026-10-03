@@ -51,15 +51,6 @@ func str(p *string) string {
 	return *p
 }
 
-// Date10 is s?.slice(0, 10): nil stays nil.
-func Date10(p *string) *string {
-	if p == nil {
-		return nil
-	}
-	d := jscompat.Slice(*p, 10)
-	return &d
-}
-
 // WriteJSON prints v like console.log(JSON.stringify(v, null, 2)).
 func WriteJSON(w io.Writer, v any) error {
 	b, err := jscompat.Marshal(v, "  ")
