@@ -81,7 +81,7 @@ The filter matches words against titles, folders, branches, IDs and the conversa
 
 `a` runs Claude Code itself (`claude -p`, signed in as you, with recall's search as its only tools), so no API key is needed. It lists the sessions it found with why each matched; Enter jumps to one, `f` narrows the list to all of them.
 
-Settings live in `~/.config/claude-recall/config.toml`, which `recall` writes on first run with every setting commented out. See [docs/tui.md](docs/tui.md) for every key, the detail pane, the mouse and the settings.
+Its settings are under `[tui]` in the [config file](#configuration). See [docs/tui.md](docs/tui.md) for every key, the detail pane and the mouse.
 
 ### Web UI
 
@@ -195,6 +195,49 @@ Sessions are imported while the MCP server or the web UI runs, when a session en
 | Tool calls and their results | Sidechains |
 | Slash-command expansions, task notifications | Progress, queue operations and other bookkeeping |
 
+## Configuration
+
+`~/.config/claude-recall/config.toml` (or `$XDG_CONFIG_HOME/claude-recall/config.toml`). `recall` writes it the first time the TUI runs, with every setting at its default and commented out; uncomment a line to change it. An unknown key, or a key in the wrong section, is reported instead of ignored.
+
+`db` and `port` are the defaults of `--db` and `--port`, so the MCP server and the `SessionEnd` import use the archive you set here too. A mistake under `[tui]` stops only the TUI.
+
+```toml
+# claude-recall settings. Uncomment a line to change it.
+
+[core]
+# The archive database, for every command, the MCP server and the web UI,
+# unless --db says otherwise: an absolute path or one starting with ~/.
+# db = "~/.claude/vault.db"
+
+[ui]
+# Where the web UI (recall ui) listens, and where recall ui stop and
+# recall ui status look for it, unless --port says otherwise.
+# port = 6276
+
+[tui]
+# Where the detail pane goes: "bottom" (default), "right", or "auto" to put it
+# on the right when the terminal is at least detail_auto_width columns wide.
+# detail_position = "bottom"
+# detail_auto_width = 160
+# Initial height of the detail pane below the list, in lines (at least 10).
+# detail_height = 16
+# Color scheme: "auto" (default) picks catppuccin-mocha on a dark terminal and
+# catppuccin-latte on a light one. Also: tokyo-night, dracula, nord,
+# gruvbox-dark, and ansi (the terminal's own 16 colors).
+# theme = "auto"
+# Which sessions to start with: "folder" (default) for the repository recall is
+# started in, when it has sessions, or "all".
+# scope = "folder"
+# a asks Claude Code (claude -p, on your Claude plan) to find sessions.
+# The model: a family and version such as "sonnet-5.5", "opus-5.5" or
+# "haiku-4.5", or a full model ID. Whether to show what an answer cost (the
+# price claude reports; on a Claude plan it counts toward your usage rather
+# than being billed), and why Claude picked each session.
+# ask_model = "sonnet-5.5"
+# ask_show_cost = true
+# ask_reasons = true
+```
+
 ## CLI
 
 ```bash
@@ -264,7 +307,7 @@ recall stats [--project <name>]
 ### Web UI
 
 ```
-recall ui [--port <n>]        Start in the background (default port: 6276)
+recall ui [--port <n>]        Start in the background (default port: port in the config file, or 6276)
 recall ui --foreground        Run in the foreground
 recall ui status              Show server status
 recall ui stop                Stop the server
@@ -273,7 +316,7 @@ recall ui stop                Stop the server
 ### Global options
 
 ```
---db <path>   Database file (default: ~/.claude/vault.db)
+--db <path>   Database file (default: db in the config file, or ~/.claude/vault.db)
 -h, --help    Show help; recall <command> --help shows a command's flags
 ```
 

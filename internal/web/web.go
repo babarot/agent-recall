@@ -24,9 +24,6 @@ import (
 	"github.com/babarot/claude-recall/internal/webui"
 )
 
-// DefaultPort is where the UI listens unless --port says otherwise.
-const DefaultPort = 6276
-
 const keepAlive = 15 * time.Second
 
 // Broadcaster fans server-sent events out to every connected client.
