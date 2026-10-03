@@ -125,9 +125,12 @@ func (k *keyMap) refs() map[string]*key.Binding {
 	}
 }
 
+// keySetting is where operation name is set in the config file.
+func keySetting(name string) []string { return append([]string{"keys"}, strings.Split(name, ".")...) }
+
 // applyKeys returns the keymap with the operations in set given those keys,
-// or every mistake in set.
-func applyKeys(base keyMap, set map[string]config.KeyList) (keyMap, error) {
+// or every mistake in set, each where it is in the config file.
+func applyKeys(base keyMap, set config.Keys) (keyMap, config.Problems) {
 	k := base
 	refs := k.refs()
 	names := make([]string, 0, len(set))
@@ -135,22 +138,26 @@ func applyKeys(base keyMap, set map[string]config.KeyList) (keyMap, error) {
 		names = append(names, n)
 	}
 	slices.Sort(names)
-	var errs []error
+	var ps config.Problems
+	at := func(name string, index int, atKey bool, format string, args ...any) {
+		ps = append(ps, config.Problem{Key: keySetting(name), Index: index, AtKey: atKey,
+			Message: "keys." + name + ": " + fmt.Sprintf(format, args...)})
+	}
 	for _, name := range names {
 		v := set[name]
 		ref, ok := refs[name]
 		switch {
 		case !ok:
-			errs = append(errs, fmt.Errorf("keys.%s: %s", name, unknownOperation(name, refs)))
+			at(name, -1, true, "%s", unknownOperation(name, refs))
 			continue
 		case v.Err != nil:
-			errs = append(errs, fmt.Errorf("keys.%s: %w", name, v.Err))
+			at(name, -1, false, "%v", v.Err)
 			continue
 		}
 		bad := false
-		for _, kk := range v.Keys {
+		for i, kk := range v.Keys {
 			if err := checkKey(kk); err != nil {
-				errs = append(errs, fmt.Errorf("keys.%s: %w", name, err))
+				at(name, i, false, "%v", err)
 				bad = true
 			}
 		}
@@ -158,12 +165,35 @@ func applyKeys(base keyMap, set map[string]config.KeyList) (keyMap, error) {
 			*ref = keys(v.Keys...)
 		}
 	}
-	if len(errs) == 0 {
+	if len(ps) == 0 {
+		// One problem per key and pair of operations, naming every place
+		// they meet in.
+		type pair struct{ key, first, second string }
+		var order []pair
+		places := map[pair][]string{}
 		for _, c := range k.conflicts() {
-			errs = append(errs, fmt.Errorf("keys: %s", c))
+			p := pair{c.key, c.first, c.second}
+			if _, ok := places[p]; !ok {
+				order = append(order, p)
+			}
+			places[p] = append(places[p], c.place)
+		}
+		for _, p := range order {
+			// The operation set in the file is the one to change: the
+			// defaults share no key.
+			blame := p.second
+			if _, ok := set[blame]; !ok {
+				blame = p.first
+			}
+			index := -1
+			if v, ok := set[blame]; ok {
+				index = slices.Index(v.Keys, p.key)
+			}
+			c := conflict{p.key, p.first, p.second, strings.Join(places[p], " and ")}
+			ps = append(ps, config.Problem{Key: keySetting(blame), Index: index, Message: "keys: " + c.String()})
 		}
 	}
-	return k, errors.Join(errs...)
+	return k, ps
 }
 
 // unknownOperation explains a name under [keys] that is no operation,
@@ -189,10 +219,10 @@ func unknownOperation(name string, refs map[string]*key.Binding) string {
 // WithKeys gives operations the keys set under [keys] in the config file,
 // keeping the rest as they are. It reports every mistake in set, with the
 // model unchanged.
-func (m Model) WithKeys(set map[string]config.KeyList) (Model, error) {
-	k, err := applyKeys(m.km, set)
-	if err != nil {
-		return m, err
+func (m Model) WithKeys(set config.Keys) (Model, error) {
+	k, ps := applyKeys(m.km, set)
+	if len(ps) > 0 {
+		return m, ps
 	}
 	m.km = k
 	return m, nil

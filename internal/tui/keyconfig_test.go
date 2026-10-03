@@ -146,9 +146,9 @@ func TestTemplateListsEveryKey(t *testing.T) {
 			t.Errorf("the template lacks keys.%s", name)
 		}
 	}
-	got, err := applyKeys(def, cfg.Keys)
-	if err != nil {
-		t.Fatal(err)
+	got, ps := applyKeys(def, cfg.Keys)
+	if len(ps) > 0 {
+		t.Fatal(ps)
 	}
 	want := defaultKeyMap()
 	for name, b := range want.byName() {
@@ -179,5 +179,37 @@ func TestWithKeysMisplaced(t *testing.T) {
 	}
 	if m = press(t, m, "o"); !m.sidebarShown() {
 		t.Fatal("o should open the folder list")
+	}
+}
+
+// Each mistake under [keys] says where it is in the config file: a bad key
+// is the element it is, a conflict the key of the operation set there, an
+// operation in the wrong place its name.
+func TestKeyProblemsSayWhere(t *testing.T) {
+	m, _ := newTestModel(t, config.Default().TUI, 140, 40)
+	_, err := m.WithKeys(config.Keys{"read": list("enter", "shift+y"), "list.resume": list("o")})
+	var ps config.Problems
+	if !errors.As(err, &ps) || len(ps) != 2 {
+		t.Fatalf("got %v", err)
+	}
+	byKey := map[string]config.Problem{}
+	for _, p := range ps {
+		byKey[strings.Join(p.Key, ".")] = p
+	}
+	if p := byKey["keys.read"]; p.Index != 1 || p.AtKey {
+		t.Errorf("a bad key is its element: %+v", p)
+	}
+	if p := byKey["keys.list.resume"]; !p.AtKey {
+		t.Errorf("an operation in the wrong place is its name: %+v", p)
+	}
+	// A conflict is one problem however many places it is in, at the key
+	// set in the file.
+	_, err = m.WithKeys(config.Keys{"resume": list("x", "j")})
+	if !errors.As(err, &ps) || len(ps) != 1 {
+		t.Fatalf("got %v", err)
+	}
+	if p := ps[0]; strings.Join(p.Key, ".") != "keys.resume" || p.Index != 1 ||
+		!strings.Contains(p.Message, "j is both resume and down in the session list and a frame or the spread conversation") {
+		t.Errorf("got %+v", p)
 	}
 }

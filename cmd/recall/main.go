@@ -551,7 +551,11 @@ func runTUI(o *options, c *cobra.Command) error {
 
 	model, err := tui.New(sessions, d, cfg.TUI).WithKeys(cfg.Keys)
 	if err != nil {
-		return fmt.Errorf("%s:\n%w", config.FilePath(), err)
+		var ps config.Problems
+		if errors.As(err, &ps) {
+			return config.Report(config.FilePath(), ps)
+		}
+		return err
 	}
 	model = model.RememberIn(config.StatePath()).SettleSize().LoadInBackground()
 	if wd, err := os.Getwd(); err == nil {

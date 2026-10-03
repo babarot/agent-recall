@@ -225,10 +225,20 @@ func (k keyMap) keyScopes() []struct {
 	}
 }
 
+// conflict is a key two operations, or an operation and a fixed key
+// ("a fixed key" as first), share in one place.
+type conflict struct {
+	key, first, second, place string
+}
+
+func (c conflict) String() string {
+	return c.key + " is both " + c.first + " and " + c.second + " in " + c.place
+}
+
 // conflicts lists every key two operations, or an operation and a fixed
 // key, share in one place.
-func (k keyMap) conflicts() []string {
-	var out []string
+func (k keyMap) conflicts() []conflict {
+	var out []conflict
 	for _, sc := range k.keyScopes() {
 		owner := map[string]string{}
 		for _, f := range sc.fixed {
@@ -237,7 +247,7 @@ func (k keyMap) conflicts() []string {
 		for _, op := range sc.ops {
 			for _, kk := range op.b.Keys() {
 				if prev, ok := owner[kk]; ok && prev != op.name {
-					out = append(out, kk+" is both "+prev+" and "+op.name+" in "+sc.name)
+					out = append(out, conflict{kk, prev, op.name, sc.name})
 					continue
 				}
 				owner[kk] = op.name
