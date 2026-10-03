@@ -3,6 +3,9 @@ package tui
 import (
 	"errors"
 	"os"
+	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -107,6 +110,45 @@ func TestDocsListEveryOperation(t *testing.T) {
 	for name := range k.refs() {
 		if !strings.Contains(string(doc), "`"+name+"`") {
 			t.Errorf("docs/tui.md does not list %s", name)
+		}
+	}
+}
+
+// The config file written on first run lists every operation under [keys]
+// with its keys, so a key is changed by editing its line: uncommented as
+// they are, they give the keymap as it is.
+func TestTemplateListsEveryKey(t *testing.T) {
+	section := config.Template[strings.Index(config.Template, "[keys]"):]
+	var b strings.Builder
+	b.WriteString("[keys]\n")
+	setting := regexp.MustCompile(`^# ([a-z_]+ = (".*"|\[.*\]))$`)
+	for _, l := range strings.Split(section, "\n") {
+		if m := setting.FindStringSubmatch(l); m != nil {
+			b.WriteString(m[1] + "\n")
+		}
+	}
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	def := defaultKeyMap()
+	for name := range def.refs() {
+		if _, ok := cfg.Keys[name]; !ok {
+			t.Errorf("the template lacks keys.%s", name)
+		}
+	}
+	got, err := applyKeys(def, cfg.Keys)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := defaultKeyMap()
+	for name, b := range want.byName() {
+		if g := got.byName()[name]; !slices.Equal(g.Keys(), b.Keys()) {
+			t.Errorf("keys.%s in the template is %q, the default is %q", name, g.Keys(), b.Keys())
 		}
 	}
 }

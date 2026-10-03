@@ -98,7 +98,7 @@ Click a session to select it, click a frame to focus it, scroll the wheel over t
 
 ## Changing keys
 
-Under `[keys]` in the [config file](../README.md#configuration), an operation takes a key or a list of keys in place of its own, or `[]` to turn it off. The footer and the `?` key list show the keys you set.
+Under `[keys]` in the [config file](../README.md#configuration), an operation takes a key or a list of keys in place of its own, or `[]` to turn it off. The footer and the `?` key list show the keys you set. The file `recall` writes on first run lists every operation with its keys, commented out, so a key is changed by uncommenting its line and editing it; a file written by an older `recall` lacks them, and the README shows the whole file to copy them from.
 
 ```toml
 [keys]

@@ -239,11 +239,43 @@ Sessions are imported from `~/.claude/projects` (`$CLAUDE_CONFIG_DIR/projects` w
 
 [keys]
 # Which keys do what in the TUI, by operation: a key or a list of keys,
-# replacing the operation's own, or [] to turn it off. docs/tui.md lists
-# the operations and their keys. For example, to resume with space and read
-# the conversation with enter:
-# resume = "space"
-# read = "enter"
+# replacing the operation's own, or [] to turn it off. Every operation is
+# below with its keys; docs/tui.md says how keys are written. ctrl+c and
+# esc are fixed. For example, to resume with space and read with enter,
+# uncomment those two lines and swap their keys.
+#
+# Anywhere:
+# quit = "q"
+# help = "?"
+# focus_next = ["tab", "]"]
+# focus_prev = ["shift+tab", "["]
+# ask = "a"
+# sort = "s"
+# scope = "."
+#
+# The selected session, from the list, a frame or the spread conversation:
+# resume = "enter"
+# read = "space"
+# copy_id = "y"
+# copy_command = "Y"
+# grow = ["+", "="]
+# shrink = "-"
+#
+# Moving and searching, in every pane:
+# up = ["up", "k", "ctrl+p"]
+# down = ["down", "j", "ctrl+n"]
+# page_up = ["pgup", "ctrl+b", "ctrl+u"]
+# page_down = ["pgdown", "ctrl+f", "ctrl+d"]
+# top = ["home", "g"]
+# bottom = ["end", "G"]
+# search = "/"
+# next_match = "n"
+# prev_match = "N"
+#
+# The folder list:
+# folders_open = ["left", "h"]
+# folders_close = ["right", "l"]
+# folders_back = ["right", "l", "enter"]
 ```
 
 ## CLI
