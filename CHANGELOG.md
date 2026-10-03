@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/babarot/claude-recall/compare/1.2.0...1.3.0) - 2026-10-02
+### New Features
+- Search the conversation from the TUI filter and add field keys by @babarot in https://github.com/babarot/claude-recall/pull/21
+- Move focus with Tab in the TUI and list the keys with ? by @babarot in https://github.com/babarot/claude-recall/pull/23
+- Read the conversation over the TUI detail pane and pick the sort from a menu by @babarot in https://github.com/babarot/claude-recall/pull/24
+- Ask Claude to find sessions from the TUI by @babarot in https://github.com/babarot/claude-recall/pull/25
+
 ## [1.2.0](https://github.com/babarot/claude-recall/compare/1.1.0...1.2.0) - 2026-10-02
 ### New Features
 - Narrow the TUI to a folder and add a folder list by @babarot in https://github.com/babarot/claude-recall/pull/19
