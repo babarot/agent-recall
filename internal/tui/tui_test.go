@@ -46,6 +46,16 @@ func (f *fakePreview) SessionPreview(id string, head, tail int) (db.Preview, err
 	}, nil
 }
 
+// SessionMessages is the whole conversation SessionDetail shows the ends
+// of: the first question, the five hidden messages and the tail.
+func (f *fakePreview) SessionMessages(id string) ([]db.Message, error) {
+	out := []db.Message{{Role: "user", Content: "first question about " + id, Timestamp: now}}
+	for i := range 5 {
+		out = append(out, db.Message{Role: "assistant", Content: fmt.Sprintf("middle message %d", i), Timestamp: now})
+	}
+	return append(out, longTail()...), nil
+}
+
 func (f *fakePreview) SessionDetail(id string) (*db.Detail, error) {
 	first := db.Message{Role: "user", Content: "first question about " + id, Timestamp: now}
 	return &db.Detail{

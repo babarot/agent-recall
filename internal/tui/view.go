@@ -354,8 +354,16 @@ func (m Model) renderHelp() string {
 			}
 			break
 		}
+		if m.conv.typing {
+			pairs = [][2]string{{"enter", "done"}, {"esc", "clear"}}
+			break
+		}
+		if m.convSearching() && m.conv.input.Value() != "" {
+			pairs = [][2]string{{"n N", "next, previous"}, {"/", "search again"}, {"esc", "clear search"}, {"j k", "scroll"}, {"tab", "sessions"}, {"?", "keys"}}
+			break
+		}
 		if m.expanded && m.focus == focusConv {
-			pairs = [][2]string{{"j k", "scroll"}, {"tab", "sessions"}, {"space esc", "close"}, {"enter", "resume"}, {"y", "copy id"}, {"?", "keys"}}
+			pairs = [][2]string{{"j k", "scroll"}, {"/", "search"}, {"tab", "sessions"}, {"space esc", "close"}, {"enter", "resume"}, {"y", "copy id"}, {"?", "keys"}}
 			break
 		}
 		if m.expanded {
@@ -408,6 +416,20 @@ func (m Model) skipLine(p db.Preview, w int) string {
 // edge, in bold; Claude's carry a rail down their left side, in a softer
 // color, so long replies read as one block.
 func (m Model) renderConversation(p db.Preview, w int) string {
+	return m.renderParts([]convPart{{msgs: p.Head}, {skipped: p.Skipped, msgs: p.Tail}}, 0, w)
+}
+
+// convPart is a run of messages shown together, after skipped ones that are
+// left out.
+type convPart struct {
+	skipped int
+	msgs    []db.Message
+}
+
+// renderParts formats runs of messages, a marker for the skipped ones
+// before each and after the last (after of them), as renderConversation
+// does.
+func (m Model) renderParts(parts []convPart, after, w int) string {
 	var b strings.Builder
 	when := func(msg db.Message) string { return m.st.dim.Render(formatEnded(msg.Timestamp, m.now())) }
 	user := func(msg db.Message) {
@@ -438,16 +460,27 @@ func (m Model) renderConversation(p db.Preview, w int) string {
 		}
 		b.WriteString("\n")
 	}
-	for _, msg := range p.Head {
-		one(msg)
+	// skip marks n skipped messages between prev and next, either of which
+	// may be missing.
+	var last []db.Message
+	skip := func(n int, next []db.Message) {
+		fmt.Fprintf(&b, " %s\n\n", m.skipLine(db.Preview{Head: last, Tail: next, Skipped: n}, w-2))
 	}
-	if p.Skipped > 0 {
-		fmt.Fprintf(&b, " %s\n\n", m.skipLine(p, w-2))
+	shown := 0
+	for _, part := range parts {
+		if part.skipped > 0 {
+			skip(part.skipped, part.msgs)
+		}
+		for _, msg := range part.msgs {
+			one(msg)
+			last = []db.Message{msg}
+		}
+		shown += len(part.msgs)
 	}
-	for _, msg := range p.Tail {
-		one(msg)
+	if after > 0 {
+		skip(after, nil)
 	}
-	if len(p.Head)+len(p.Tail) == 0 {
+	if shown == 0 {
 		fmt.Fprintf(&b, " %s\n", m.st.muted.Render("This session has no text messages."))
 	}
 	return b.String()

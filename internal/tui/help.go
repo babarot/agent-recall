@@ -54,6 +54,8 @@ var helpGroups = []helpGroup{
 		{"↑ ↓  j k", "scroll; g G, PgUp PgDn too"},
 		{"tab", "to the sessions: j k read the next one"},
 		{"+ -", "more or fewer session rows (or drag)"},
+		{"/", "search the conversation"},
+		{"n N", "next, previous match; esc clears"},
 		{"space esc", "put the pane back"},
 	}},
 }

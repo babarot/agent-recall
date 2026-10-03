@@ -29,6 +29,7 @@ func (m Model) expandedPaneHeight() int {
 func (m *Model) toggleExpand() {
 	m.expanded = !m.expanded
 	m.scroll[focusConv] = 0
+	m.clearConvSearch()
 	if m.expanded {
 		m.focus = focusConv
 	} else if m.focus != focusFolders {
@@ -45,7 +46,8 @@ func (m *Model) readLines() {
 		return
 	}
 	w := m.width - 4
-	key := r.s.ID + "\x00" + string(rune(w))
+	q := m.convQuery()
+	key := r.s.ID + "\x00" + string(rune(w)) + "\x00" + q
 	if key == m.readFor {
 		return
 	}
@@ -55,6 +57,26 @@ func (m *Model) readLines() {
 		m.read = []string{m.st.muted.Render("No text messages.")}
 		return
 	}
-	p := db.Preview{Head: []db.Message{*d.First}, Tail: d.Tail, Skipped: d.Hidden}
-	m.read = strings.Split(strings.TrimRight(m.renderConversation(p, w), "\n"), "\n")
+	// With a search, the whole conversation's messages that have it, with
+	// some around each; else, or when none has it, the first message and
+	// the latest ones.
+	rendered := ""
+	if q != "" {
+		// Until the whole conversation is read, the first message and the
+		// latest ones; the frame is rebuilt when it comes.
+		if all, ok := m.conv.full[r.s.ID]; ok {
+			if parts, after, ok := searchParts(all, m.conv.lower[r.s.ID], q); ok {
+				rendered = m.renderParts(parts, after, w)
+			}
+		}
+	}
+	if rendered == "" {
+		p := db.Preview{Head: []db.Message{*d.First}, Tail: d.Tail, Skipped: d.Hidden}
+		rendered = m.renderConversation(p, w)
+	}
+	m.read = strings.Split(strings.TrimRight(rendered, "\n"), "\n")
+	// A search carries over to the next session read in place.
+	m.findConvHits()
+	m.conv.cur = 0
+	m.showConvHit()
 }

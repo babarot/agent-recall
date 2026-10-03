@@ -120,6 +120,16 @@ func (d *DB) messages(query string, args ...any) ([]Message, error) {
 	return out, rows.Err()
 }
 
+// SessionMessages returns every text message of a session, in conversation
+// order: what SessionPreview takes its head and tail from.
+func (d *DB) SessionMessages(sessionID string) ([]Message, error) {
+	msgs, err := d.messages(`SELECT role, content, COALESCE(timestamp, '') `+textMessages+` ORDER BY turn_index, block_index`, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("session messages: %w", err)
+	}
+	return msgs, nil
+}
+
 // SessionPreview returns the first head and the last tail text messages of a
 // session, in conversation order.
 func (d *DB) SessionPreview(sessionID string, head, tail int) (Preview, error) {
