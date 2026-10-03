@@ -130,6 +130,11 @@ type Model struct {
 
 	helpOpen bool // the key list is showing
 
+	// settling holds off drawing until the terminal's size settles; sizes
+	// counts the size reports so far.
+	settling bool
+	sizes    int
+
 	// ask is the ask-Claude box, askRun how it asks. reasons are why Claude
 	// picked each session found so far; asked narrows the list to the last
 	// answer's sessions, in Claude's order, for the question askedFor.
@@ -267,7 +272,28 @@ func (m *Model) loadDetail() {
 	m.details[r.s.ID] = d
 }
 
-func (m Model) Init() tea.Cmd { return tea.RequestBackgroundColor }
+func (m Model) Init() tea.Cmd {
+	if m.settling {
+		return tea.Batch(tea.RequestBackgroundColor, tea.Tick(settleWait, func(time.Time) tea.Msg { return settledMsg{} }))
+	}
+	return tea.RequestBackgroundColor
+}
+
+// Some terminals first report a size a column off and the right one a few
+// milliseconds later, through the in-band resize Bubble Tea turns on;
+// drawn at the first, the columns right of the flexible ones jump when the
+// second arrives. Waiting for that second report, or for settleWait in a
+// terminal that sends none, draws once at the right size.
+const settleWait = 100 * time.Millisecond
+
+type settledMsg struct{}
+
+// SettleSize makes the model wait for the terminal's size to settle before
+// it first draws.
+func (m Model) SettleSize() Model {
+	m.settling = true
+	return m
+}
 
 // refresh recomputes the visible rows from the filter and sort order, keeping
 // the selected session selected when it is still visible.
@@ -466,7 +492,13 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.st = newStyles(theme.Get(m.cfg.Theme, msg.IsDark()))
 		m.readFor = "" // drawn in the old colors
 		return m, nil
+	case settledMsg:
+		m.settling = false
+		return m, nil
 	case tea.WindowSizeMsg:
+		if m.sizes++; m.sizes >= 2 {
+			m.settling = false
+		}
 		m.width, m.height = msg.Width, msg.Height
 		m.filter.SetWidth(max(10, m.width-30))
 		m.clamp()
