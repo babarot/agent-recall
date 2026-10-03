@@ -17,7 +17,7 @@ func TestQuestionMarkShowsTheKeys(t *testing.T) {
 	}
 	m = press(t, m, "?")
 	s := screen(m)
-	for _, want := range []string{"Keys", "SESSIONS", "FOLDER LIST", "DETAIL FRAMES", "FILTER", "READING (SPACE)", "resume the session", "in:bdot"} {
+	for _, want := range []string{"Keys", "SESSIONS", "FOLDER LIST", "DETAIL FRAMES", "FILTER", "READING (SPACE)", "resume the session", "folder:bdot"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("key list lacks %q:\n%s", want, s)
 		}

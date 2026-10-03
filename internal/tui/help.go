@@ -42,7 +42,7 @@ var helpGroups = []helpGroup{
 	}},
 	{"Filter", [][2]string{
 		{"words", "title, folder, branch, ID or what was said"},
-		{"in:", "folder, fuzzy (in:bdot)"},
+		{"folder:  in:", "folder, fuzzy (folder:bdot)"},
 		{"text:", "only what was said"},
 		{"title: branch:", "only that field"},
 		{"worktree: id:", "worktree name, start of the ID"},

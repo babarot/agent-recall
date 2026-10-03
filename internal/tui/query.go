@@ -10,13 +10,15 @@ import (
 )
 
 // The filter is words to find in a session's title, folder, branch, ID or
-// conversation, and key:value terms that look in one field only: in:
-// (folder), text: (conversation), title:, branch:, worktree: and id:. A new
-// one gets a field in query, a line in query.fields and a case in match;
-// one whose values are few enough to list also gets a line in completers.
+// conversation, and key:value terms that look in one field only: folder:
+// (in: for short), text: (conversation), title:, branch:, worktree: and id:.
+// A new one gets a field in query, a line in query.fields and a case in
+// match; one whose values are few enough to list also gets a line in
+// completers.
 
 const (
-	inPrefix       = "in:"
+	folderPrefix   = "folder:"
+	inPrefix       = "in:" // folder: for short
 	textPrefix     = "text:"
 	titlePrefix    = "title:"
 	branchPrefix   = "branch:"
@@ -31,7 +33,7 @@ const (
 // query is the parsed filter, lower-cased.
 type query struct {
 	words []string
-	// in are folder name fragments; a session matches when its folder
+	// in are folder: (or in:) name fragments; a session matches when its folder
 	// contains any of them. They override the folder the list is narrowed
 	// to.
 	in []string
@@ -45,7 +47,7 @@ type query struct {
 // fields maps each key to where its values go.
 func (q *query) fields() map[string]*[]string {
 	return map[string]*[]string{
-		inPrefix: &q.in, textPrefix: &q.text, titlePrefix: &q.title,
+		folderPrefix: &q.in, inPrefix: &q.in, textPrefix: &q.text, titlePrefix: &q.title,
 		branchPrefix: &q.branch, worktreePrefix: &q.worktree, idPrefix: &q.id,
 	}
 }
@@ -109,7 +111,7 @@ func (m Model) match(q query, r *row) bool {
 	return true
 }
 
-// inFolders lists the folders an in: query matches, most recent first.
+// inFolders lists the folders a folder: query matches, most recent first.
 func (m Model) inFolders(q query) []folderInfo {
 	var out []folderInfo
 	for _, f := range m.folders {
@@ -120,7 +122,7 @@ func (m Model) inFolders(q query) []folderInfo {
 	return out
 }
 
-// inFolder reports whether a folder name fuzzy-matches any in: fragment,
+// inFolder reports whether a folder name fuzzy-matches any folder: fragment,
 // as the folder list's search does.
 func (q query) inFolder(name string) bool {
 	for _, v := range q.in {
@@ -132,7 +134,7 @@ func (q query) inFolder(name string) bool {
 }
 
 // keyOrder lists the keys for the key hint.
-var keyOrder = []string{inPrefix, textPrefix, titlePrefix, branchPrefix, worktreePrefix, idPrefix}
+var keyOrder = []string{folderPrefix, inPrefix, textPrefix, titlePrefix, branchPrefix, worktreePrefix, idPrefix}
 
 // minKeyHint is how much of a key's name brings up its hint: two letters
 // tell every key apart (te for text:, ti for title:).
@@ -175,10 +177,11 @@ func (m *Model) acceptKeyHint() bool {
 }
 
 // completers are the keys whose values the filter suggests while one is
-// typed, and how: folders fuzzily, as in: matches; branches and worktrees
+// typed, and how: folders fuzzily, as folder: matches; branches and worktrees
 // by the part typed, most recently used first.
 func (m Model) completers() map[string]func(frag string) []sideEntry {
 	return map[string]func(string) []sideEntry{
+		folderPrefix:   m.rankFolders,
 		inPrefix:       m.rankFolders,
 		branchPrefix:   func(f string) []sideEntry { return containing(m.branches, f) },
 		worktreePrefix: func(f string) []sideEntry { return containing(m.worktrees, f) },
@@ -271,7 +274,7 @@ func (m Model) keyTerm() (start, end int, key, frag string, ok bool) {
 // candidates are the suggestions for a key and the value typed so far.
 func (m Model) candidates(key, frag string) []sideEntry { return m.completers()[key](frag) }
 
-// suggestions are the folders for the in: term being typed, and which one
+// suggestions are the values for the folder:, branch: or worktree: term being typed, and which one
 // is highlighted.
 func (m Model) suggestions() ([]sideEntry, int) {
 	if m.mode != modeFilter || m.sugHidden {

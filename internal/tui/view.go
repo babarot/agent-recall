@@ -134,7 +134,7 @@ func (m Model) renderScreen() string {
 		lines = append(lines, table...)
 	}
 	lines = append(lines, m.renderStatus(), m.renderHelp())
-	// Folder suggestions for the in: term open just under the filter line.
+	// Suggestions for the folder: term open just under the filter line.
 	if r, list, idx, from, ok := m.suggestRect(); ok {
 		for i, l := range m.suggestBox(list, idx, from, r.w) {
 			if j := r.y + i; j < len(lines) {
@@ -162,7 +162,7 @@ func (m Model) renderHeader() string {
 	left := m.st.app.Render("recall") + m.st.tag.Render(" // claude-recall")
 	count := fmt.Sprintf("%d / %d sessions · ", len(m.visible), len(m.rows))
 	sort := "sort: " + sorts[m.sortIdx].name
-	// Where the list is narrowed to: in: folders, else the folder scope.
+	// Where the list is narrowed to: folder: folders, else the folder scope.
 	where := ""
 	if q := parseQuery(m.filter.Value()); len(q.in) > 0 {
 		in := m.inFolders(q)
@@ -331,7 +331,7 @@ func (m Model) renderHelp() string {
 		} else if m.keyHint() != "" {
 			pairs = append([][2]string{{"tab", "key " + m.keyHintKey()}}, pairs...)
 		} else if _, _, _, _, ok := m.keyTerm(); !ok {
-			pairs = append(pairs, [2]string{"in: text: title: branch: worktree: id:", "one field"})
+			pairs = append(pairs, [2]string{"folder: text: title: branch: worktree: id:", "one field"})
 		}
 	case modeList:
 		if m.ask.stage != askClosed {
