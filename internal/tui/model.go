@@ -120,6 +120,8 @@ type Model struct {
 	expandRows int
 	read       []string
 	readFor    string
+	// images are the ones sent to the terminal, with tui.images.
+	images *termImages
 
 	// details caches the detail pane's data per session ID; detailLoading
 	// has the ones being read in the background, when background is set.
@@ -209,6 +211,7 @@ func New(sessions []db.Session, source Source, cfg config.TUI) Model {
 		details:       map[string]*db.Detail{},
 		programs:      map[string][]db.Count{},
 		built:         &builtFrames{},
+		images:        newTermImages(),
 		detailLoading: map[string]bool{},
 		text:          textSearch{found: map[string]map[string]bool{}, pending: map[string]bool{}, delay: textSearchDelay},
 		detailH:       max(config.MinDetailHeight, cfg.DetailHeight),
@@ -473,7 +476,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		load := nm.loadDetail()
 		nm.readLines()
-		return nm, tea.Batch(cmd, load, nm.scheduleTextSearch(), nm.convLoadCmd())
+		return nm, tea.Batch(cmd, load, nm.scheduleTextSearch(), nm.convLoadCmd(), nm.imageLoadCmd(), nm.imageOut())
 	}
 	return next, cmd
 }
@@ -551,6 +554,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case convTick, convLoaded:
 		m.convMsg(msg)
 		return m, nil
+	case imageLoaded:
+		m.storeImage(msg)
+		return m, nil
 	case detailLoaded:
 		delete(m.detailLoading, msg.id)
 		m.storeDetail(msg.id, msg.d, msg.programs)
@@ -573,7 +579,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.ask.stage != askClosed {
 				m.closeAsk()
 			}
-			return m, tea.Quit
+			return m, m.imagesQuit()
 		}
 		if m.ask.stage != askClosed {
 			return m.updateAsk(msg)
@@ -638,7 +644,7 @@ func (m *Model) globalKey(msg tea.KeyPressMsg) tea.Cmd {
 	g := m.km.Global
 	switch {
 	case key.Matches(msg, g.Quit):
-		return tea.Quit
+		return m.imagesQuit()
 	case key.Matches(msg, g.FocusNext):
 		m.cycleFocus(1)
 	case key.Matches(msg, g.FocusPrev):
@@ -678,7 +684,7 @@ func (m *Model) sessionKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 			return m.showToast(toastWarn, "Folder no longer exists: "+tildePath(r.s.ProjectPath, m.home)), true
 		}
 		m.Result = &Resume{Dir: r.s.ProjectPath, SessionID: r.s.ID}
-		return tea.Quit, true
+		return m.imagesQuit(), true
 	case key.Matches(msg, s.CopyID):
 		return tea.Batch(copyCmd(r.s.ID), m.showToast(toastOK, "Copied session ID "+r.s.ID)), true
 	case key.Matches(msg, s.CopyCommand):

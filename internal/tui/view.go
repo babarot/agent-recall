@@ -452,9 +452,12 @@ func (m Model) renderParts(parts []convPart, after, w int) string {
 		fill := max(0, bw-5-ansi.StringWidth(title))
 		border := m.st.filter
 		fmt.Fprintf(&b, " %s%s%s\n", border.Render("╭─ "), title, border.Render(" "+strings.Repeat("─", fill)+"╮"))
-		for _, l := range wrapText(strings.TrimSpace(msg.Content), inner) {
-			pad := strings.Repeat(" ", max(0, inner-ansi.StringWidth(l)))
-			fmt.Fprintf(&b, " %s %s%s %s\n", border.Render("│"), m.st.strong.Bold(true).Render(l), pad, border.Render("│"))
+		for _, l := range m.messageBody(msg, inner) {
+			pad := strings.Repeat(" ", max(0, inner-ansi.StringWidth(l.s)))
+			if !l.image {
+				l.s = m.st.strong.Bold(true).Render(l.s)
+			}
+			fmt.Fprintf(&b, " %s %s%s %s\n", border.Render("│"), l.s, pad, border.Render("│"))
 		}
 		fmt.Fprintf(&b, " %s\n", border.Render("╰"+strings.Repeat("─", bw-2)+"╯"))
 	}
