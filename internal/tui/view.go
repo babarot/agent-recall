@@ -322,6 +322,9 @@ func (m Model) renderStatus() string {
 }
 
 func (m Model) renderHelp() string {
+	// Each pair is a key hint template (see hintKeys) and what it does;
+	// esc and the keys of a box or a field being typed in are written as
+	// they are, since they cannot be remapped.
 	var pairs [][2]string
 	switch m.mode {
 	case modeFilter:
@@ -348,7 +351,8 @@ func (m Model) renderHelp() string {
 			break
 		}
 		if m.focus == focusFolders {
-			pairs = [][2]string{{"↑↓", "folder"}, {"/", "search"}, {"→", "sessions"}, {"tab", "next"}, {".", "this folder"}, {"q", "quit"}}
+			pairs = [][2]string{{"{up.0}{down.0}", "folder"}, {"{search.0}", "search"}, {"{folders_back.0}", "sessions"},
+				{"{focus_next.0}", "next"}, {"{scope.0}", "this folder"}, {"{quit.0}", "quit"}}
 			if m.sideSearch.Value() != "" {
 				pairs[1] = [2]string{"esc", "clear search"}
 			}
@@ -359,20 +363,23 @@ func (m Model) renderHelp() string {
 			break
 		}
 		if m.convSearching() && m.conv.input.Value() != "" {
-			pairs = [][2]string{{"n N", "next, previous"}, {"/", "search again"}, {"esc", "clear search"}, {"j k", "scroll"}, {"tab", "sessions"}, {"?", "keys"}}
+			pairs = [][2]string{{"{next_match.0} {prev_match.0}", "next, previous"}, {"{search.0}", "search again"}, {"esc", "clear search"},
+				{"{down.1} {up.1}", "scroll"}, {"{focus_next.0}", "sessions"}, {"{help.0}", "keys"}}
 			break
 		}
 		if m.expanded && m.focus == focusConv {
-			pairs = [][2]string{{"j k", "scroll"}, {"/", "search"}, {"tab", "sessions"}, {"space esc", "close"}, {"enter", "resume"}, {"y", "copy id"}, {"?", "keys"}}
+			pairs = [][2]string{{"{down.1} {up.1}", "scroll"}, {"{search.0}", "search"}, {"{focus_next.0}", "sessions"},
+				{"{read.0} esc", "close"}, {"{resume.0}", "resume"}, {"{copy_id.0}", "copy id"}, {"{help.0}", "keys"}}
 			break
 		}
 		if m.expanded {
-			pairs = [][2]string{{"j k", "next session"}, {"tab", "conversation"}, {"space", "close"}, {"enter", "resume"}, {"+/-", "resize"}, {"?", "keys"}}
+			pairs = [][2]string{{"{down.1} {up.1}", "next session"}, {"{focus_next.0}", "conversation"}, {"{read.0}", "close"},
+				{"{resume.0}", "resume"}, {"{grow.0}/{shrink.0}", "resize"}, {"{help.0}", "keys"}}
 			break
 		}
 		if m.focus != focusList {
-			pairs = [][2]string{{"↑↓", "scroll " + strings.ToLower(frameTitles[m.focus])}, {"tab", "next"},
-				{"esc", "back to list"}, {"enter", "resume"}, {"y", "copy id"}, {"q", "quit"}}
+			pairs = [][2]string{{"{up.0}{down.0}", "scroll " + strings.ToLower(frameTitles[m.focus])}, {"{focus_next.0}", "next"},
+				{"esc", "back to list"}, {"{resume.0}", "resume"}, {"{copy_id.0}", "copy id"}, {"{quit.0}", "quit"}}
 			break
 		}
 		fallthrough
@@ -382,15 +389,19 @@ func (m Model) renderHelp() string {
 			here = "all folders"
 		}
 		// ? goes early so a narrow terminal still shows where the rest are.
-		pairs = [][2]string{{"enter", "resume"}, {"space", "read"}, {"?", "keys"}, {"/", "filter"}, {".", here},
-			{"←", "folders"}, {"tab", "focus"}, {"y", "copy id"}, {"Y", "copy cmd"}, {"+/-", "resize"}, {"s", "sort"}, {"q", "quit"}}
+		pairs = [][2]string{{"{resume.0}", "resume"}, {"{read.0}", "read"}, {"{help.0}", "keys"}, {"{search.0}", "filter"},
+			{"{scope.0}", here}, {"{folders_open.0}", "folders"}, {"{focus_next.0}", "focus"}, {"{copy_id.0}", "copy id"},
+			{"{copy_command.0}", "copy cmd"}, {"{grow.0}/{shrink.0}", "resize"}, {"{sort.0}", "sort"}, {"{quit.0}", "quit"}}
 		if m.sidebarShown() {
-			pairs[5] = [2]string{"→", "close folders"}
+			pairs[5] = [2]string{"{folders_close.0}", "close folders"}
 		}
 	}
-	parts := make([]string, len(pairs))
-	for i, p := range pairs {
-		parts[i] = m.st.key.Render(p[0]) + " " + m.st.muted.Render(p[1])
+	var parts []string
+	for _, p := range pairs {
+		// A hint whose keys were all remapped away is left out.
+		if k := m.hintKeys(p[0]); k != "" {
+			parts = append(parts, m.st.key.Render(k)+" "+m.st.muted.Render(p[1]))
+		}
 	}
 	return " " + ansi.Truncate(strings.Join(parts, m.st.helpSep.Render(" · ")), m.width-2, ellipsis)
 }

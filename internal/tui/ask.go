@@ -198,10 +198,6 @@ func (m Model) resolveHits(hits []askHit) []askHit {
 // updateAsk handles a key while the box shows.
 func (m Model) updateAsk(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
-	if key == "ctrl+c" {
-		m.closeAsk()
-		return m, tea.Quit
-	}
 	switch m.ask.stage {
 	case askTyping:
 		switch key {

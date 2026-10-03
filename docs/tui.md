@@ -8,14 +8,14 @@ The title is the session's `/rename` name, or else the title Claude Code generat
 
 | Key | Action |
 |-----|--------|
-| `↑` `↓` / `j` `k` | Move (`g` `G` for top and bottom, PgUp and PgDn by page) |
+| `↑` `↓` / `j` `k` | Move (`g` `G` for top and bottom, PgUp and PgDn or `ctrl+d` and `ctrl+u` by page) |
 | `Enter` | Resume the session: `claude -r <id>` from the session's folder |
 | `y` | Copy the session ID, to hand it to another agent ("look this session up with claude-recall") |
 | `Y` | Copy the resume command |
 | `Space` | Read the conversation over the detail pane (see [Reading a conversation](#reading-a-conversation)) |
 | `/` | Filter the list (see [Filter](#filter)); `Esc` clears it |
 | `a` | Ask Claude to find sessions (see [Ask Claude](#ask-claude)) |
-| `s` | Choose the sort order (ended, started, message count or size) from a menu: `↑` `↓` or a number and `Enter`, or a click; on the session list only |
+| `s` | Choose the sort order (ended, started, message count or size) from a menu: `↑` `↓` or a number and `Enter`, or a click; from any pane |
 | `.` | Switch between the folder `recall` was started in and all folders |
 | `←` `→` / `h` `l` | Show or hide the folder list (see [Folders](#folders)) |
 | `+` `-` | Make the detail pane taller or shorter |
@@ -56,7 +56,7 @@ claude -p <question> --model <ask_model> --no-session-persistence \
 
 It runs signed in as you, a Claude plan included, so recall needs no API key. It runs from a directory of its own, so no project's settings apply, and no session is saved.
 
-- While it works, the box shows each search it makes; `Esc` cancels.
+- While it works, the box shows each search it makes; `Esc` or `q` cancels.
 - The answer lists the sessions found with why each matched, the model, the time taken and the cost claude reports.
 - `Enter` jumps to one (clearing a folder or filter that hides it), `f` narrows the list to all of them in Claude's order with the reason under each row, and `r` asks again. `Esc` clears the narrowed list.
 - The reason stays in Conversation for a session Claude picked.
@@ -88,7 +88,7 @@ Below the list, Details sits under Conversation in a few wide lines and What was
 
 ### Reading a conversation
 
-`Space` spreads the conversation over the detail pane, wrapped, and the pane grows to leave the list a few rows (`+` `-` or dragging its edge change how many, and they are remembered). `Tab` back to the list and `j` `k` read the next session in place; `Space` or `Esc` puts the pane back.
+`Space` spreads the conversation over the detail pane, wrapped, and the pane grows to leave the list a few rows (`+` `-` or dragging its edge change how many, and they are remembered). `Tab` back to the list and `j` `k` read the next session in place; `Space` or `Esc` puts the pane back (from the list, `Esc` first clears the filter and Claude's answer, if any).
 
 `/` searches the spread conversation, all of it, the messages the pane skips too. While there is a search, the pane shows the messages that have it, with two on each side and a marker for the ones between; every line with it is highlighted, and the pane scrolls to the first. `Enter` keeps the search, `n` and `N` go to the next and previous match, and `Esc` drops it and shows the conversation as before, from the top (a second `Esc` puts the pane back). The search carries over to the next session read in place. With the list focused, `/` is the list's filter as before.
 

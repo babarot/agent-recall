@@ -853,3 +853,37 @@ func TestListPagesWithCtrlD(t *testing.T) {
 		t.Fatalf("ctrl+u: cursor %d", m.cursor)
 	}
 }
+
+// ctrl+c quits from every pane, box and field, a running ask stopped.
+func TestCtrlCQuitsFromAnywhere(t *testing.T) {
+	ctrlC := tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}
+	quits := func(name string, m Model) {
+		t.Helper()
+		next, cmd := m.Update(ctrlC)
+		if cmd == nil {
+			t.Errorf("%s: ctrl+c returned no command", name)
+			return
+		}
+		if _, ok := cmd().(tea.QuitMsg); !ok {
+			t.Errorf("%s: ctrl+c did not quit", name)
+		}
+		if next.(Model).ask.stage != askClosed {
+			t.Errorf("%s: the ask is still open", name)
+		}
+	}
+	m, _ := newTestModel(t, config.Default().TUI, 140, 40)
+	quits("list", m)
+	quits("frame", press(t, m, "tab"))
+	quits("reading", press(t, m, "space"))
+	quits("conversation search", press(t, m, "space", "/"))
+	quits("filter", press(t, m, "/"))
+	quits("key list", press(t, m, "?"))
+	quits("sort menu", press(t, m, "s"))
+	a := m
+	a.ask.stage = askRunning
+	quits("ask", a)
+	f := newFolderFixture(t)
+	fm := press(t, folderModel(t, config.Default().TUI, f, 140, 40), "left", "left")
+	quits("folder list", fm)
+	quits("folder search", press(t, fm, "/"))
+}

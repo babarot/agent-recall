@@ -169,8 +169,6 @@ func (m Model) updateConvSearch(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		m.clearConvSearch()
 		return m, nil
-	case "ctrl+c":
-		return m, tea.Quit
 	}
 	// Once typing pauses, the search is applied and readLines rebuilds the
 	// frame for it, going to the first hit.

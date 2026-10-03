@@ -299,8 +299,6 @@ func (m Model) updateSideSearch(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		m.clearSideSearch()
 		return m, nil
-	case "ctrl+c":
-		return m, tea.Quit
 	}
 	before := m.sideSearch.Value()
 	var cmd tea.Cmd

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
@@ -96,6 +97,8 @@ type Model struct {
 	sideTyping bool
 	// conv is the search in the spread conversation.
 	conv convSearch
+	// km is which keys do what.
+	km keyMap
 
 	cursor, offset int
 	width, height  int
@@ -186,6 +189,7 @@ func New(sessions []db.Session, source Source, cfg config.TUI) Model {
 		reasons:       map[string]string{},
 		sideSearch:    ss,
 		conv:          newConvSearch(),
+		km:            defaultKeyMap(),
 		resolver:      resolver,
 		folders:       groupRows(rows),
 		cfg:           cfg,
@@ -437,29 +441,6 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-// action handles the keys that work on the selected session in both the list
-// and the preview.
-func (m *Model) action(key string) (tea.Cmd, bool) {
-	r := m.current()
-	if r == nil {
-		return nil, false
-	}
-	switch key {
-	case "enter":
-		if r.gone {
-			return m.showToast(toastWarn, "Folder no longer exists: "+tildePath(r.s.ProjectPath, m.home)), true
-		}
-		m.Result = &Resume{Dir: r.s.ProjectPath, SessionID: r.s.ID}
-		return tea.Quit, true
-	case "y":
-		return tea.Batch(copyCmd(r.s.ID), m.showToast(toastOK, "Copied session ID "+r.s.ID)), true
-	case "Y":
-		cmd := resumeCommand(r)
-		return tea.Batch(copyCmd(cmd), m.showToast(toastOK, "Copied "+cmd)), true
-	}
-	return nil, false
-}
-
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	next, cmd := m.update(msg)
 	if nm, ok := next.(Model); ok {
@@ -562,6 +543,13 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.KeyPressMsg:
+		// ctrl+c quits from anywhere, a running ask stopped first.
+		if msg.String() == "ctrl+c" {
+			if m.ask.stage != askClosed {
+				m.closeAsk()
+			}
+			return m, tea.Quit
+		}
 		if m.ask.stage != askClosed {
 			return m.updateAsk(msg)
 		}
@@ -569,15 +557,13 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateSortMenu(msg)
 		}
 		if m.helpOpen {
-			switch msg.String() {
-			case "?", "esc", "q":
+			// The key list closes on esc, q or the key that opened it.
+			if s := msg.String(); s == "esc" || s == "q" || key.Matches(msg, m.km.Global.Help) {
 				m.helpOpen = false
-			case "ctrl+c":
-				return m, tea.Quit
 			}
 			return m, nil
 		}
-		if msg.String() == "?" && m.mode != modeFilter && !(m.focus == focusFolders && m.sideTyping) && !m.conv.typing {
+		if key.Matches(msg, m.km.Global.Help) && m.mode != modeFilter && !(m.focus == focusFolders && m.sideTyping) && !m.conv.typing {
 			m.helpOpen = true
 			return m, nil
 		}
@@ -598,130 +584,113 @@ func (m Model) updateList(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.conv.typing {
 		return m.updateConvSearch(msg)
 	}
-	key := msg.String()
-	switch key {
-	case "tab", "]":
+	// A frame with no room to show is the list's.
+	if f := m.focus; f != focusList && f != focusFolders {
+		if _, ok := m.paneRects(); !ok {
+			m.focus = focusList
+		}
+	}
+	// The focused pane first; what it does not take, the keys that work
+	// anywhere.
+	var cmd tea.Cmd
+	var ok bool
+	switch m.keyContext() {
+	case ctxList:
+		cmd, ok = m.listKey(msg)
+	case ctxFrame, ctxReading:
+		cmd, ok = m.frameKey(msg)
+	case ctxFolders:
+		cmd, ok = m.folderKey(msg)
+	}
+	if !ok {
+		cmd = m.globalKey(msg)
+	}
+	return m, cmd
+}
+
+// globalKey handles a key that works in any pane.
+func (m *Model) globalKey(msg tea.KeyPressMsg) tea.Cmd {
+	g := m.km.Global
+	switch {
+	case key.Matches(msg, g.Quit):
+		return tea.Quit
+	case key.Matches(msg, g.FocusNext):
 		m.cycleFocus(1)
-		return m, nil
-	case "shift+tab", "[":
+	case key.Matches(msg, g.FocusPrev):
 		m.cycleFocus(-1)
-		return m, nil
-	case ".":
-		return m, m.toggleScope()
-	case "a":
-		return m, m.openAsk()
-	case "s":
+	case key.Matches(msg, g.Scope):
+		return m.toggleScope()
+	case key.Matches(msg, g.Ask):
+		return m.openAsk()
+	case key.Matches(msg, g.Sort):
 		m.openSortMenu()
-		return m, nil
 	}
-	if m.focus == focusFolders {
-		page := max(1, m.sidebarRows()-1)
-		switch key {
-		case "down", "j", "ctrl+n":
-			m.moveFolder(1)
-		case "up", "k", "ctrl+p":
-			m.moveFolder(-1)
-		case "pgdown", "ctrl+f", "ctrl+d":
-			m.moveFolder(page)
-		case "pgup", "ctrl+b", "ctrl+u":
-			m.moveFolder(-page)
-		case "home", "g":
-			m.moveFolder(-len(m.folders) - 1)
-		case "end", "G":
-			m.moveFolder(len(m.folders) + 1)
-		case "/":
-			return m, m.searchFolders()
-		case "esc":
-			if m.sideSearch.Value() != "" {
-				m.clearSideSearch()
-				break
-			}
-			m.focus = focusList
-		case "enter", "right", "l":
-			m.focus = focusList
-		case "q", "ctrl+c":
-			return m, tea.Quit
-		}
-		return m, nil
-	}
-	if cmd, ok := m.action(key); ok {
-		return m, cmd
-	}
-	if m.focus != focusList {
-		if rects, ok := m.paneRects(); ok {
-			page := max(1, rects[m.focus].h-4)
-			switch key {
-			case "esc":
-				if m.convSearching() && m.conv.input.Value() != "" {
-					m.clearConvSearch()
-					break
-				}
-				if m.expanded {
-					m.toggleExpand()
-					break
-				}
-				m.focus = focusList
-			case "/":
-				// The spread conversation searches itself; elsewhere / is
-				// the list's filter.
-				if !m.convSearching() {
-					goto list
-				}
-				return m, m.startConvSearch()
-			case "n", "N":
-				if !m.convSearching() || len(m.conv.hits) == 0 {
-					goto list
-				}
-				if key == "n" {
-					m.nextConvHit(1)
-				} else {
-					m.nextConvHit(-1)
-				}
-			case "down", "j", "ctrl+n":
-				m.scrollFrame(m.focus, 1)
-			case "up", "k", "ctrl+p":
-				m.scrollFrame(m.focus, -1)
-			case "pgdown", "ctrl+f", "ctrl+d":
-				m.scrollFrame(m.focus, page)
-			case "pgup", "ctrl+b", "ctrl+u":
-				m.scrollFrame(m.focus, -page)
-			case "home", "g":
-				m.scrollFrame(m.focus, -1<<20)
-			case "end", "G":
-				m.scrollFrame(m.focus, 1<<20)
-			default:
-				goto list
-			}
-			return m, nil
-		}
-		m.focus = focusList
-	}
-list:
-	switch key {
-	case "q", "ctrl+c":
-		return m, tea.Quit
-	case "down", "j", "ctrl+n":
-		m.move(1)
-	case "up", "k", "ctrl+p":
-		m.move(-1)
-	case "pgdown", "ctrl+f", "ctrl+d":
-		m.move(max(1, m.listRows()))
-	case "pgup", "ctrl+b", "ctrl+u":
-		m.move(-max(1, m.listRows()))
-	case "home", "g":
-		m.move(-len(m.visible))
-	case "end", "G":
-		m.move(len(m.visible))
-	case "+", "=":
+	return nil
+}
+
+// sessionKey handles a key that acts on the selected session, from the
+// list, a frame or the spread conversation.
+func (m *Model) sessionKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	s := m.km.Session
+	switch {
+	case key.Matches(msg, s.Read):
+		m.toggleExpand()
+		return nil, true
+	case key.Matches(msg, s.Grow):
 		m.resizeDetail(m.paneHeight() + 2)
-		return m, m.saveState()
-	case "-":
+		return m.saveState(), true
+	case key.Matches(msg, s.Shrink):
 		m.resizeDetail(m.paneHeight() - 2)
-		return m, m.saveState()
-	case "/":
-		m.mode = modeFilter
-		return m, m.filter.Focus()
-	case "esc":
+		return m.saveState(), true
+	}
+	r := m.current()
+	if r == nil {
+		return nil, false
+	}
+	switch {
+	case key.Matches(msg, s.Resume):
+		if r.gone {
+			return m.showToast(toastWarn, "Folder no longer exists: "+tildePath(r.s.ProjectPath, m.home)), true
+		}
+		m.Result = &Resume{Dir: r.s.ProjectPath, SessionID: r.s.ID}
+		return tea.Quit, true
+	case key.Matches(msg, s.CopyID):
+		return tea.Batch(copyCmd(r.s.ID), m.showToast(toastOK, "Copied session ID "+r.s.ID)), true
+	case key.Matches(msg, s.CopyCommand):
+		cmd := resumeCommand(r)
+		return tea.Batch(copyCmd(cmd), m.showToast(toastOK, "Copied "+cmd)), true
+	}
+	return nil, false
+}
+
+// openFilter starts typing the session list's filter.
+func (m *Model) openFilter() tea.Cmd {
+	m.mode = modeFilter
+	return m.filter.Focus()
+}
+
+// listKey handles a key on the session list.
+func (m *Model) listKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	if cmd, ok := m.sessionKey(msg); ok {
+		return cmd, true
+	}
+	n, l := m.km.Nav, m.km.List
+	switch {
+	case key.Matches(msg, n.Down):
+		m.move(1)
+	case key.Matches(msg, n.Up):
+		m.move(-1)
+	case key.Matches(msg, n.PageDown):
+		m.move(max(1, m.listRows()))
+	case key.Matches(msg, n.PageUp):
+		m.move(-max(1, m.listRows()))
+	case key.Matches(msg, n.Top):
+		m.move(-len(m.visible))
+	case key.Matches(msg, n.Bottom):
+		m.move(len(m.visible))
+	case key.Matches(msg, n.Search):
+		return m.openFilter(), true
+	case msg.String() == "esc":
 		// One step back: the filter, then Claude's answer, then the spread
 		// conversation.
 		switch {
@@ -734,25 +703,104 @@ list:
 		case m.expanded:
 			m.toggleExpand()
 		}
-	case "space":
-		m.toggleExpand()
 	// ← ← (h h) opens the folder list and moves into it, → → (l l) comes
 	// back and closes it.
-	case "left", "h":
-		if m.focus != focusList {
-			break
-		}
+	case key.Matches(msg, l.FoldersOpen):
 		if m.sidebarShown() {
 			m.focus = focusFolders
-			return m, nil
+			return nil, true
 		}
-		return m, m.openSidebar(false)
-	case "right", "l":
-		if m.focus == focusList && m.sidebarShown() {
-			return m, m.closeSidebar()
+		return m.openSidebar(false), true
+	case key.Matches(msg, l.FoldersClose):
+		if m.sidebarShown() {
+			return m.closeSidebar(), true
 		}
+	default:
+		return nil, false
 	}
-	return m, nil
+	return nil, true
+}
+
+// frameKey handles a key on a detail frame, or on the Conversation spread
+// over the pane, which searches itself.
+func (m *Model) frameKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	if cmd, ok := m.sessionKey(msg); ok {
+		return cmd, true
+	}
+	reading := m.keyContext() == ctxReading
+	rects, _ := m.paneRects()
+	page := max(1, rects[m.focus].h-4)
+	n := m.km.Nav
+	switch {
+	case key.Matches(msg, n.Down):
+		m.scrollFrame(m.focus, 1)
+	case key.Matches(msg, n.Up):
+		m.scrollFrame(m.focus, -1)
+	case key.Matches(msg, n.PageDown):
+		m.scrollFrame(m.focus, page)
+	case key.Matches(msg, n.PageUp):
+		m.scrollFrame(m.focus, -page)
+	case key.Matches(msg, n.Top):
+		m.scrollFrame(m.focus, -1<<20)
+	case key.Matches(msg, n.Bottom):
+		m.scrollFrame(m.focus, 1<<20)
+	case key.Matches(msg, n.Search):
+		// The spread conversation searches itself; a frame, which has no
+		// search, opens the list's filter.
+		if reading {
+			return m.startConvSearch(), true
+		}
+		return m.openFilter(), true
+	case reading && len(m.conv.hits) > 0 && key.Matches(msg, n.NextMatch):
+		m.nextConvHit(1)
+	case reading && len(m.conv.hits) > 0 && key.Matches(msg, n.PrevMatch):
+		m.nextConvHit(-1)
+	case msg.String() == "esc":
+		switch {
+		case reading && m.conv.input.Value() != "":
+			m.clearConvSearch()
+		case m.expanded:
+			m.toggleExpand()
+		default:
+			m.focus = focusList
+		}
+	default:
+		return nil, false
+	}
+	return nil, true
+}
+
+// folderKey handles a key in the folder list.
+func (m *Model) folderKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	page := max(1, m.sidebarRows()-1)
+	n := m.km.Nav
+	switch {
+	case key.Matches(msg, n.Down):
+		m.moveFolder(1)
+	case key.Matches(msg, n.Up):
+		m.moveFolder(-1)
+	case key.Matches(msg, n.PageDown):
+		m.moveFolder(page)
+	case key.Matches(msg, n.PageUp):
+		m.moveFolder(-page)
+	case key.Matches(msg, n.Top):
+		m.moveFolder(-len(m.folders) - 1)
+	case key.Matches(msg, n.Bottom):
+		m.moveFolder(len(m.folders) + 1)
+	case key.Matches(msg, n.Search):
+		return m.searchFolders(), true
+	case msg.String() == "esc":
+		if m.sideSearch.Value() != "" {
+			m.clearSideSearch()
+			break
+		}
+		m.focus = focusList
+	case key.Matches(msg, m.km.Folders.FoldersBack):
+		m.focus = focusList
+	default:
+		return nil, false
+	}
+	return nil, true
 }
 
 // cycleFocus moves the focus along the folder list (when shown), the
@@ -824,8 +872,6 @@ func (m Model) updateFilter(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "up", "ctrl+p":
 		m.move(-1)
 		return m, nil
-	case "ctrl+c":
-		return m, tea.Quit
 	case "tab", "right":
 		// The hinted key first; then tab completes a value.
 		if m.acceptKeyHint() {

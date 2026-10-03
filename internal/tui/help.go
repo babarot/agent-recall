@@ -14,30 +14,37 @@ type helpGroup struct {
 	keys  [][2]string
 }
 
+// move is the key hint of the four arrows' keys, as ↑ ↓  j k.
+const move = "{up.0} {down.0}  {down.1} {up.1}"
+
+// helpGroups are the key list's rows: a key hint template (see hintKeys)
+// and what it does, which may name keys the same way. Rows that are not
+// keys (the filter's syntax) and fixed keys (esc, a field's own keys) are
+// written as they are.
 var helpGroups = []helpGroup{
 	{"Sessions", [][2]string{
-		{"↑ ↓  j k", "move; g G top and bottom, PgUp PgDn by page"},
-		{"enter", "resume the session"},
-		{"space", "read the conversation over the pane"},
-		{"y  Y", "copy the session ID, the resume command"},
-		{"/", "filter (see below)"},
-		{"a", "ask Claude to find sessions (claude -p)"},
-		{"s", "choose the sort order"},
-		{".", "this folder or all folders"},
-		{"← h", "open the folder list, then move into it"},
-		{"→ l", "close the folder list"},
-		{"tab  ⇧tab", "next or previous frame ([ and ] too)"},
-		{"+ -", "resize the detail pane (or drag its edge)"},
-		{"q", "quit"},
+		{move, "move; {top.1} {bottom.1} top and bottom, {page_up.0} {page_down.0} by page"},
+		{"{resume.0}", "resume the session"},
+		{"{read.0}", "read the conversation over the pane"},
+		{"{copy_id.0}  {copy_command.0}", "copy the session ID, the resume command"},
+		{"{search.0}", "filter (see below)"},
+		{"{ask.0}", "ask Claude to find sessions (claude -p)"},
+		{"{sort.0}", "choose the sort order"},
+		{"{scope.0}", "this folder or all folders"},
+		{"{folders_open.0} {folders_open.1}", "open the folder list, then move into it"},
+		{"{folders_close.0} {folders_close.1}", "close the folder list"},
+		{"{focus_next.0}  {focus_prev.0}", "next or previous frame ({focus_prev.1} and {focus_next.1} too)"},
+		{"{grow.0} {shrink.0}", "resize the detail pane (or drag its edge)"},
+		{"{quit.0}", "quit"},
 	}},
 	{"Folder list", [][2]string{
-		{"↑ ↓  j k", "pick a folder; the sessions follow"},
-		{"/", "search folders by fuzzy match"},
+		{move, "pick a folder; the sessions follow"},
+		{"{search.0}", "search folders by fuzzy match"},
 		{"esc", "clear the search, then back to the sessions"},
-		{"→ l enter", "back to the sessions"},
+		{"{folders_back.0} {folders_back.1} {folders_back.2}", "back to the sessions"},
 	}},
 	{"Detail frames", [][2]string{
-		{"↑ ↓  j k", "scroll; g G, PgUp PgDn too"},
+		{move, "scroll; {top.1} {bottom.1}, {page_up.0} {page_down.0} too"},
 		{"esc", "back to the sessions"},
 	}},
 	{"Filter", [][2]string{
@@ -51,12 +58,12 @@ var helpGroups = []helpGroup{
 		{"esc", "close suggestions, then clear the filter"},
 	}},
 	{"Reading (space)", [][2]string{
-		{"↑ ↓  j k", "scroll; g G, PgUp PgDn too"},
-		{"tab", "to the sessions: j k read the next one"},
-		{"+ -", "more or fewer session rows (or drag)"},
-		{"/", "search the conversation"},
-		{"n N", "next, previous match; esc clears"},
-		{"space esc", "put the pane back"},
+		{move, "scroll; {top.1} {bottom.1}, {page_up.0} {page_down.0} too"},
+		{"{focus_next.0}", "to the sessions: {down.1} {up.1} read the next one"},
+		{"{grow.0} {shrink.0}", "more or fewer session rows (or drag)"},
+		{"{search.0}", "search the conversation"},
+		{"{next_match.0} {prev_match.0}", "next, previous match; esc clears"},
+		{"{read.0} esc", "put the pane back"},
 	}},
 }
 
@@ -74,15 +81,19 @@ func (m Model) helpBox(w, h int) []string {
 		}
 		body = append(body, m.section(g.title))
 		for _, k := range g.keys {
-			key := m.st.key.Render(k[0]) + strings.Repeat(" ", max(1, helpKeyWidth-ansi.StringWidth(k[0])))
-			body = append(body, ansi.Truncate(key+m.st.subtle.Render(k[1]), inner, ellipsis))
+			keys := m.hintKeys(k[0])
+			if keys == "" {
+				continue // remapped away
+			}
+			key := m.st.key.Render(keys) + strings.Repeat(" ", max(1, helpKeyWidth-ansi.StringWidth(keys)))
+			body = append(body, ansi.Truncate(key+m.st.subtle.Render(m.hintKeys(k[1])), inner, ellipsis))
 		}
 	}
 	if len(body) > h-2 {
 		body = append(body[:max(0, h-3)], m.st.muted.Render("… a taller terminal shows the rest"))
 	}
 	title := " Keys "
-	hint := " ? esc q close "
+	hint := " " + m.hintKeys("{help.0} esc q close") + " "
 	fill := max(0, w-4-len(title)-ansi.StringWidth(hint))
 	out := []string{b.Render("╭─") + m.st.key.Render(title) + b.Render(strings.Repeat("─", fill)) + m.st.muted.Render(hint) + b.Render("─╮")}
 	for _, l := range body {
