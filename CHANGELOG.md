@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.3.1](https://github.com/babarot/claude-recall/compare/1.3.0...1.3.1) - 2026-10-03
+### Bug fixes
+- Draw the TUI once the terminal's size settles by @babarot in https://github.com/babarot/claude-recall/pull/26
+
 ## [1.3.0](https://github.com/babarot/claude-recall/compare/1.2.0...1.3.0) - 2026-10-02
 ### New Features
 - Search the conversation from the TUI filter and add field keys by @babarot in https://github.com/babarot/claude-recall/pull/21
