@@ -53,7 +53,8 @@ func TestWithKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	footer := ansi.Strip(m.renderHelp())
-	if !strings.HasPrefix(footer, " space resume · enter read") || strings.Contains(footer, "sort") {
+	// The keys keep their places; what they do changes.
+	if !strings.HasPrefix(footer, " enter read · space resume") || strings.Contains(footer, "sort") {
 		t.Fatalf("footer %q", footer)
 	}
 	if r := press(t, m, "enter"); !r.expanded {
@@ -121,7 +122,7 @@ func TestWithKeysTakesOverDefaults(t *testing.T) {
 	}
 	// resume, without a key, leaves the footer and the key list.
 	footer := ansi.Strip(m.renderHelp())
-	if !strings.HasPrefix(footer, " space read") || strings.Contains(footer, "resume") {
+	if !strings.HasPrefix(footer, " enter continue · space read") || strings.Contains(footer, "resume") {
 		t.Fatalf("footer %q", footer)
 	}
 	if strings.Contains(ansi.Strip(press(t, m, "?").render()), "resume the session") {
@@ -135,6 +136,23 @@ func TestWithKeysTakesOverDefaults(t *testing.T) {
 	}
 	if got := m.km.Nav.Down.Keys(); !slices.Equal(got, []string{"down", "ctrl+n"}) {
 		t.Fatalf("down is %q", got)
+	}
+	// Swapped, each key keeps its place in the footer.
+	m, _ = newTestModel(t, config.Default().TUI, 200, 40)
+	if m, err = m.WithKeys(map[string]config.KeyList{"continue": list("enter"), "resume": list("c")}); err != nil {
+		t.Fatal(err)
+	}
+	if footer := ansi.Strip(m.renderHelp()); !strings.HasPrefix(footer, " enter continue · space read") ||
+		!strings.Contains(footer, "← folders · c resume · tab focus") {
+		t.Fatalf("footer %q", footer)
+	}
+	// A key none of the defaults have goes after them.
+	m, _ = newTestModel(t, config.Default().TUI, 200, 40)
+	if m, err = m.WithKeys(map[string]config.KeyList{"resume": list("x")}); err != nil {
+		t.Fatal(err)
+	}
+	if footer := ansi.Strip(m.renderHelp()); !strings.HasPrefix(footer, " space read") || !strings.HasSuffix(footer, "q quit · x resume") {
+		t.Fatalf("footer %q", footer)
 	}
 	// Setting both keeps the key on the one set, the other moving away.
 	m, _ = newTestModel(t, config.Default().TUI, 140, 40)

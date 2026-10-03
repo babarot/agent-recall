@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -406,13 +407,39 @@ func (m Model) renderHelp() string {
 		}
 	}
 	var parts []string
-	for _, p := range pairs {
+	for _, p := range m.byDefaultKey(pairs) {
 		// A hint whose keys were all remapped away is left out.
 		if k := m.hintKeys(p[0]); k != "" {
 			parts = append(parts, m.st.key.Render(k)+" "+m.st.muted.Render(p[1]))
 		}
 	}
 	return " " + ansi.Truncate(strings.Join(parts, m.st.helpSep.Render(" · ")), m.width-2, ellipsis)
+}
+
+// byDefaultKey orders the footer's hints by where their keys stand by
+// default, so a key keeps its place when it moves to another operation:
+// with continue = "enter" and resume = "c", enter still comes first, now
+// continuing. A hint whose keys are none of the defaults' goes after them.
+func (m Model) byDefaultKey(pairs [][2]string) [][2]string {
+	d := m
+	d.km = defaultKeyMap()
+	rank := map[string]int{}
+	for i, p := range pairs {
+		if k := d.hintKeys(p[0]); k != "" {
+			if _, ok := rank[k]; !ok {
+				rank[k] = i
+			}
+		}
+	}
+	at := func(p [2]string) int {
+		if i, ok := rank[m.hintKeys(p[0])]; ok {
+			return i
+		}
+		return len(pairs)
+	}
+	out := slices.Clone(pairs)
+	slices.SortStableFunc(out, func(a, b [2]string) int { return at(a) - at(b) })
+	return out
 }
 
 // skipLine marks the messages the preview leaves out: a rule across w

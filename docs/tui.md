@@ -115,7 +115,7 @@ Click a session to select it, click a frame to focus it, scroll the wheel over t
 
 ## Changing keys
 
-Under `[keys]` in the [config file](../README.md#configuration), an operation takes a key or a list of keys in place of its own, or `[]` to turn it off. A key you give an operation leaves the operations that have it by default where they would meet: `continue = "enter"` makes `Enter` continue and leaves `resume` with no key, as if `Enter` itself were set, and `resume = "j"` leaves `down` its arrow and `ctrl+n`. The footer and the `?` key list show the keys you set. The file `recall` writes on first run lists every operation with its keys, commented out, so a key is changed by uncommenting its line and editing it; a file written by an older `recall` lacks them, and the README shows the whole file to copy them from.
+Under `[keys]` in the [config file](../README.md#configuration), an operation takes a key or a list of keys in place of its own, or `[]` to turn it off. A key you give an operation leaves the operations that have it by default where they would meet: `continue = "enter"` makes `Enter` continue and leaves `resume` with no key, as if `Enter` itself were set, and `resume = "j"` leaves `down` its arrow and `ctrl+n`. The footer and the `?` key list show the keys you set. In the footer a key keeps the place it has by default, so with `continue = "enter"` and `resume = "c"`, `Enter` still comes first, now continuing. The file `recall` writes on first run lists every operation with its keys, commented out, so a key is changed by uncommenting its line and editing it; a file written by an older `recall` lacks them, and the README shows the whole file to copy them from.
 
 ```toml
 [keys]
