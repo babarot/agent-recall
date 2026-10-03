@@ -274,7 +274,15 @@ recall ui stop                Stop the server
 
 ```
 --db <path>   Database file (default: ~/.claude/vault.db)
---help        Show help
+-h, --help    Show help; recall <command> --help shows a command's flags
+```
+
+A flag a command does not take is an error, not ignored.
+
+### Shell completion
+
+```bash
+source <(recall completion zsh)    # also bash, fish and powershell
 ```
 
 ## Development

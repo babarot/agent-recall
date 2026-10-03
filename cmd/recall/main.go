@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"net"
@@ -16,12 +15,14 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/spf13/cobra"
 
 	"github.com/babarot/claude-recall/internal/cli"
 	"github.com/babarot/claude-recall/internal/config"
@@ -33,48 +34,6 @@ import (
 	"github.com/babarot/claude-recall/internal/watcher"
 	"github.com/babarot/claude-recall/internal/web"
 )
-
-const usage = `recall - Archive and search coding agent sessions
-
-Usage:
-  recall [tui]                  Browse sessions interactively
-  recall import [options]       Import sessions into the vault
-  recall search <query> [opts]  Full-text search across sessions
-  recall list [options]         List archived sessions
-  recall export <id> [options]  Export a session
-  recall stats [options]        Show archive statistics
-  recall mcp                    Start MCP server (stdio transport)
-  recall ui [--port <n>]        Start web UI in background (default: 6276)
-  recall ui --foreground        Start web UI in foreground
-  recall ui stop                Stop running UI server
-  recall ui status              Show UI server status
-  recall version                Show the version
-
-Global Options:
-  --db <path>     Database path (default: ~/.claude/vault.db)
-  --help          Show this help
-
-Import Options:
-  --session <id>  Import a specific session
-  --project <name> Import sessions for a project
-  --dry-run       Show what would be imported
-
-Search Options:
-  --project <name> Limit to a project
-  --limit <n>     Max results (default: 20)
-  --from <date>   Start date (YYYY-MM-DD)
-  --to <date>     End date (YYYY-MM-DD)
-  --format <fmt>  Output format: text, json (default: text)
-
-List Options:
-  --project <name> Filter by project
-  --limit <n>     Max sessions (default: 50)
-  --format <fmt>  Output format: text, json (default: text)
-
-Export Options:
-  --format <fmt>  Output format: markdown, json, text (default: markdown)
-  --output <file> Write to file instead of stdout
-`
 
 // exitError carries an exit status for errors already reported to stderr.
 type exitError int
@@ -93,114 +52,207 @@ func main() {
 	}
 }
 
-// options are the flags every subcommand accepts. They may appear anywhere
-// on the command line.
-type options struct {
-	db, session, project, format, from, to, output, port, limit string
-	help, dryRun, foreground, version                           bool
-	limitSet, portSet                                           bool
-	positional                                                  []string
-}
-
-func parse(args []string) (*options, error) {
-	o := &options{}
-	fs := flag.NewFlagSet("recall", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	fs.StringVar(&o.db, "db", config.DefaultDBPath(), "")
-	fs.StringVar(&o.session, "session", "", "")
-	fs.StringVar(&o.project, "project", "", "")
-	fs.StringVar(&o.format, "format", "", "")
-	fs.StringVar(&o.from, "from", "", "")
-	fs.StringVar(&o.to, "to", "", "")
-	fs.StringVar(&o.output, "output", "", "")
-	fs.StringVar(&o.port, "port", "", "")
-	fs.StringVar(&o.limit, "limit", "", "")
-	fs.BoolVar(&o.help, "help", false, "")
-	fs.BoolVar(&o.help, "h", false, "")
-	fs.BoolVar(&o.dryRun, "dry-run", false, "")
-	fs.BoolVar(&o.dryRun, "n", false, "")
-	fs.BoolVar(&o.foreground, "foreground", false, "")
-	fs.BoolVar(&o.version, "version", false, "")
-	// Flags may appear before, between or after positional arguments.
-	for {
-		if err := fs.Parse(args); err != nil {
-			return nil, err
-		}
-		args = fs.Args()
-		if len(args) == 0 {
-			break
-		}
-		o.positional = append(o.positional, args[0])
-		args = args[1:]
-	}
-	fs.Visit(func(f *flag.Flag) {
-		switch f.Name {
-		case "limit":
-			o.limitSet = true
-		case "port":
-			o.portSet = true
-		}
-	})
-	return o, nil
-}
-
-// limitArg is `args.limit ? Number(args.limit) : undefined`.
-func (o *options) limitArg() (*int, error) {
-	if !o.limitSet || o.limit == "" {
-		return nil, nil
-	}
-	f, err := strconv.ParseFloat(strings.TrimSpace(o.limit), 64)
-	if err != nil {
-		return nil, fmt.Errorf("--limit: not a number: %s", o.limit)
-	}
-	n := int(f)
-	return &n, nil
-}
-
-func (o *options) portArg() (int, error) {
-	if !o.portSet || o.port == "" {
-		return web.DefaultPort, nil
-	}
-	return strconv.Atoi(o.port)
-}
-
 func run(args []string, stdout, stderr io.Writer) error {
-	o, err := parse(args)
-	if err != nil {
-		return err
-	}
-	if o.version || (len(o.positional) == 1 && o.positional[0] == "version") {
-		fmt.Fprintf(stdout, "recall %s\n", version.Version)
+	root := newRootCmd()
+	root.SetArgs(args)
+	root.SetOut(stdout)
+	root.SetErr(stderr)
+	return root.Execute()
+}
+
+// options are the flags of every subcommand, each defined only on the
+// commands it applies to.
+type options struct {
+	db, session, project, format, from, to, output string
+	limit, port                                    int
+	dryRun, foreground                             bool
+	limitSet                                       bool
+}
+
+// limitArg is the --limit given, or nil to use the command's default.
+func (o *options) limitArg() *int {
+	if !o.limitSet {
 		return nil
 	}
-	if o.help {
-		fmt.Fprint(stdout, usage+"\n") // console.log(USAGE)
+	n := o.limit
+	return &n
+}
+
+func newRootCmd() *cobra.Command {
+	o := &options{}
+	root := &cobra.Command{
+		Use:   "recall",
+		Short: "Archive and search coding agent sessions",
+		Long: `recall archives Claude Code sessions in SQLite and lets you find them again:
+a TUI to browse them, a CLI to search them, an MCP server for agents and a web UI.
+
+Run without a command, it opens the TUI.`,
+		Version:       version.Version,
+		Args:          cobra.NoArgs,
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE:          func(*cobra.Command, []string) error { return runTUI(o) },
+	}
+	root.SetVersionTemplate("recall {{.Version}}\n")
+	root.SetFlagErrorFunc(func(c *cobra.Command, err error) error {
+		return fmt.Errorf("%w\nRun '%s --help' for usage.", err, c.CommandPath())
+	})
+	root.PersistentFlags().StringVar(&o.db, "db", config.DefaultDBPath(), "database path")
+
+	project := func(c *cobra.Command, what string) {
+		c.Flags().StringVar(&o.project, "project", "", what)
+	}
+	// --limit and --format default differently per command, so each command
+	// has its own variable and copies it into o when it runs: pflag writes
+	// the default when a flag is defined, so a shared variable would end up
+	// with the last command's default.
+	limit := func(c *cobra.Command, def int, what string) func() {
+		n := c.Flags().Int("limit", def, what)
+		return func() { o.limit, o.limitSet = *n, c.Flags().Changed("limit") }
+	}
+	format := func(c *cobra.Command, allowed ...string) func() error {
+		f := c.Flags().String("format", allowed[0], "output format: "+strings.Join(allowed, ", "))
+		return func() error {
+			if !slices.Contains(allowed, *f) {
+				return fmt.Errorf("--format must be %s, got %q", strings.Join(allowed, ", "), *f)
+			}
+			o.format = *f
+			return nil
+		}
+	}
+
+	tuiCmd := &cobra.Command{
+		Use:   "tui",
+		Short: "Browse sessions interactively (the default)",
+		Args:  cobra.NoArgs,
+		RunE:  func(*cobra.Command, []string) error { return runTUI(o) },
+	}
+
+	importCmd := &cobra.Command{
+		Use:   "import",
+		Short: "Import sessions into the vault",
+		Args:  cobra.NoArgs,
+		RunE:  func(c *cobra.Command, _ []string) error { return runImport(o, c.OutOrStdout()) },
+	}
+	importCmd.Flags().StringVar(&o.session, "session", "", "import a specific session (an ID prefix works)")
+	project(importCmd, "import sessions whose project matches")
+	importCmd.Flags().BoolVarP(&o.dryRun, "dry-run", "n", false, "show what would be imported without writing")
+
+	searchCmd := &cobra.Command{
+		Use:   "search <query>",
+		Short: "Full-text search across sessions",
+		Example: `  recall search "terraform module"
+  recall search deploy --project oksskolten --from 2026-03-01`,
+		Args: usageArgs(cobra.MinimumNArgs(1)),
+	}
+	project(searchCmd, "limit to a project")
+	searchLimit := limit(searchCmd, 20, "max results")
+	searchCmd.Flags().StringVar(&o.from, "from", "", "start date (YYYY-MM-DD)")
+	searchCmd.Flags().StringVar(&o.to, "to", "", "end date (YYYY-MM-DD)")
+	searchFormat := format(searchCmd, "text", "json")
+	searchCmd.RunE = func(c *cobra.Command, args []string) error {
+		searchLimit()
+		if err := searchFormat(); err != nil {
+			return err
+		}
+		return runSearch(o, strings.Join(args, " "), c.OutOrStdout())
+	}
+
+	listCmd := &cobra.Command{
+		Use:   "list",
+		Short: "List archived sessions",
+		Args:  cobra.NoArgs,
+	}
+	project(listCmd, "filter by project")
+	listLimit := limit(listCmd, 50, "max sessions")
+	listFormat := format(listCmd, "text", "json")
+	listCmd.RunE = func(c *cobra.Command, _ []string) error {
+		listLimit()
+		if err := listFormat(); err != nil {
+			return err
+		}
+		return runList(o, c.OutOrStdout())
+	}
+
+	exportCmd := &cobra.Command{
+		Use:     "export <session-id>",
+		Short:   "Export a session",
+		Long:    "Export a session's conversation. A session ID prefix works.",
+		Example: "  recall export a1b2 --format json --output session.json",
+		Args:    usageArgs(cobra.ExactArgs(1)),
+	}
+	exportFormat := format(exportCmd, "markdown", "json", "text")
+	exportCmd.Flags().StringVar(&o.output, "output", "", "write to a file instead of stdout")
+	exportCmd.RunE = func(c *cobra.Command, args []string) error {
+		if err := exportFormat(); err != nil {
+			return err
+		}
+		return runExport(o, args[0], c.OutOrStdout(), c.ErrOrStderr())
+	}
+
+	statsCmd := &cobra.Command{
+		Use:   "stats",
+		Short: "Show archive statistics",
+		Args:  cobra.NoArgs,
+		RunE:  func(c *cobra.Command, _ []string) error { return runStats(o, c.OutOrStdout()) },
+	}
+	project(statsCmd, "limit to a project")
+
+	mcpCmd := &cobra.Command{
+		Use:   "mcp",
+		Short: "Start the MCP server (stdio transport)",
+		Args:  cobra.NoArgs,
+		RunE:  func(*cobra.Command, []string) error { return runMCP(o) },
+	}
+
+	uiCmd := &cobra.Command{
+		Use:   "ui",
+		Short: "Start the web UI in the background",
+		Long: fmt.Sprintf(`Start the web UI in the background, on http://localhost:%d unless --port says
+otherwise. If it is already running, print its URL.`, web.DefaultPort),
+		Args: cobra.NoArgs,
+		RunE: func(c *cobra.Command, _ []string) error {
+			if o.foreground {
+				return serveUI(o, c.OutOrStdout())
+			}
+			return startBackground(o, c.OutOrStdout(), c.ErrOrStderr())
+		},
+	}
+	uiCmd.PersistentFlags().IntVar(&o.port, "port", web.DefaultPort, "port of the web UI")
+	uiCmd.Flags().BoolVar(&o.foreground, "foreground", false, "run in the foreground")
+	uiCmd.AddCommand(
+		&cobra.Command{
+			Use:   "stop",
+			Short: "Stop the running web UI",
+			Args:  cobra.NoArgs,
+			RunE:  func(c *cobra.Command, _ []string) error { return stopUI(o, c.OutOrStdout()) },
+		},
+		&cobra.Command{
+			Use:   "status",
+			Short: "Show whether the web UI is running",
+			Args:  cobra.NoArgs,
+			RunE:  func(c *cobra.Command, _ []string) error { return uiStatus(o, c.OutOrStdout()) },
+		},
+	)
+
+	versionCmd := &cobra.Command{
+		Use:   "version",
+		Short: "Show the version",
+		Args:  cobra.NoArgs,
+		Run:   func(c *cobra.Command, _ []string) { fmt.Fprintf(c.OutOrStdout(), "recall %s\n", version.Version) },
+	}
+
+	root.AddCommand(tuiCmd, importCmd, searchCmd, listCmd, exportCmd, statsCmd, mcpCmd, uiCmd, versionCmd)
+	return root
+}
+
+// usageArgs adds the usage line to an argument count error.
+func usageArgs(check cobra.PositionalArgs) cobra.PositionalArgs {
+	return func(c *cobra.Command, args []string) error {
+		if err := check(c, args); err != nil {
+			return fmt.Errorf("%w\nUsage: %s", err, c.UseLine())
+		}
 		return nil
-	}
-	if len(o.positional) == 0 {
-		return runTUI(o)
-	}
-	switch sub := o.positional[0]; sub {
-	case "tui":
-		return runTUI(o)
-	case "import":
-		return runImport(o, stdout)
-	case "search":
-		return runSearch(o, stdout, stderr)
-	case "list":
-		return runList(o, stdout)
-	case "export":
-		return runExport(o, stdout, stderr)
-	case "stats":
-		return runStats(o, stdout)
-	case "mcp":
-		return runMCP(o)
-	case "ui":
-		return runUI(o, stdout, stderr)
-	default:
-		fmt.Fprintf(stderr, "Unknown command: %s\n", sub)
-		fmt.Fprint(stdout, usage+"\n")
-		return exitError(1)
 	}
 }
 
@@ -237,21 +289,12 @@ func runImport(o *options, stdout io.Writer) error {
 	return importer.Run(d, opts, stdout)
 }
 
-func runSearch(o *options, stdout, stderr io.Writer) error {
-	query := strings.Join(o.positional[1:], " ")
-	if query == "" {
-		fmt.Fprintln(stderr, "Usage: recall search <query>")
-		return exitError(1)
-	}
-	limit, err := o.limitArg()
-	if err != nil {
-		return err
-	}
+func runSearch(o *options, query string, stdout io.Writer) error {
 	d, err := openRead(o)
 	if err != nil {
 		return err
 	}
-	results, err := d.Search(query, db.SearchOptions{Project: o.project, Limit: limit, From: o.from, To: o.to})
+	results, err := d.Search(query, db.SearchOptions{Project: o.project, Limit: o.limitArg(), From: o.from, To: o.to})
 	d.Close()
 	if err != nil {
 		return err
@@ -268,15 +311,11 @@ func runSearch(o *options, stdout, stderr io.Writer) error {
 }
 
 func runList(o *options, stdout io.Writer) error {
-	limit, err := o.limitArg()
-	if err != nil {
-		return err
-	}
 	d, err := openRead(o)
 	if err != nil {
 		return err
 	}
-	sessions, err := d.ListSessions(db.ListOptions{Project: o.project, Limit: limit})
+	sessions, err := d.ListSessions(db.ListOptions{Project: o.project, Limit: o.limitArg()})
 	d.Close()
 	if err != nil {
 		return err
@@ -292,12 +331,7 @@ func runList(o *options, stdout io.Writer) error {
 	return nil
 }
 
-func runExport(o *options, stdout, stderr io.Writer) error {
-	if len(o.positional) < 2 {
-		fmt.Fprintln(stderr, "Usage: recall export <session-id>")
-		return exitError(1)
-	}
-	id := o.positional[1]
+func runExport(o *options, id string, stdout, stderr io.Writer) error {
 	d, err := openRead(o)
 	if err != nil {
 		return err
@@ -365,46 +399,35 @@ func runMCP(o *options) error {
 	return mcp.Run(ctx, d)
 }
 
-func runUI(o *options, stdout, stderr io.Writer) error {
-	port, err := o.portArg()
+func uiAddr(o *options) string { return fmt.Sprintf("http://localhost:%d", o.port) }
+
+func stopUI(o *options, stdout io.Writer) error {
+	addr := uiAddr(o)
+	resp, err := http.Post(addr+"/api/shutdown", "", nil)
 	if err != nil {
-		return fmt.Errorf("--port: %w", err)
-	}
-	action := "start"
-	if len(o.positional) > 1 {
-		action = o.positional[1]
-	}
-	addr := fmt.Sprintf("http://localhost:%d", port)
-	switch {
-	case action == "stop":
-		resp, err := http.Post(addr+"/api/shutdown", "", nil)
-		if err != nil {
-			fmt.Fprintln(stdout, "UI server is not running.")
-			return nil
-		}
-		resp.Body.Close()
-		if resp.StatusCode == http.StatusAccepted {
-			fmt.Fprintf(stdout, "Shutdown request sent to %s.\n", addr)
-		} else {
-			fmt.Fprintf(stdout, "Unexpected response: %d\n", resp.StatusCode)
-		}
+		fmt.Fprintln(stdout, "UI server is not running.")
 		return nil
-	case action == "status":
-		var st struct {
-			PID  int `json:"pid"`
-			Port int `json:"port"`
-		}
-		if err := getStatus(addr, &st); err != nil {
-			fmt.Fprintln(stdout, "UI server is not running.")
-			return nil
-		}
-		fmt.Fprintf(stdout, "UI server is running (pid: %d, port: %d).\n", st.PID, st.Port)
-		return nil
-	case o.foreground:
-		return serveUI(o, port, stdout)
-	default:
-		return startBackground(o, port, addr, stdout, stderr)
 	}
+	resp.Body.Close()
+	if resp.StatusCode == http.StatusAccepted {
+		fmt.Fprintf(stdout, "Shutdown request sent to %s.\n", addr)
+	} else {
+		fmt.Fprintf(stdout, "Unexpected response: %d\n", resp.StatusCode)
+	}
+	return nil
+}
+
+func uiStatus(o *options, stdout io.Writer) error {
+	var st struct {
+		PID  int `json:"pid"`
+		Port int `json:"port"`
+	}
+	if err := getStatus(uiAddr(o), &st); err != nil {
+		fmt.Fprintln(stdout, "UI server is not running.")
+		return nil
+	}
+	fmt.Fprintf(stdout, "UI server is running (pid: %d, port: %d).\n", st.PID, st.Port)
+	return nil
 }
 
 func getStatus(addr string, v any) error {
@@ -419,7 +442,7 @@ func getStatus(addr string, v any) error {
 	return json.NewDecoder(resp.Body).Decode(v)
 }
 
-func serveUI(o *options, port int, stdout io.Writer) error {
+func serveUI(o *options, stdout io.Writer) error {
 	d, err := openWrite(o)
 	if err != nil {
 		return err
@@ -428,7 +451,7 @@ func serveUI(o *options, port int, stdout io.Writer) error {
 
 	// Loopback only: the API serves transcripts and local images, which
 	// must not be reachable from the network.
-	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", o.port))
 	if err != nil {
 		return err
 	}
@@ -444,12 +467,13 @@ func serveUI(o *options, port int, stdout io.Writer) error {
 
 // startBackground runs `recall ui --foreground` detached and waits for it
 // to answer.
-func startBackground(o *options, port int, addr string, stdout, stderr io.Writer) error {
+func startBackground(o *options, stdout, stderr io.Writer) error {
+	addr := uiAddr(o)
 	self, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(self, "ui", "--foreground", "--port", strconv.Itoa(port), "--db", o.db)
+	cmd := exec.Command(self, "ui", "--foreground", "--port", strconv.Itoa(o.port), "--db", o.db)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		return err
