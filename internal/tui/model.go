@@ -704,9 +704,9 @@ list:
 		m.move(1)
 	case "up", "k", "ctrl+p":
 		m.move(-1)
-	case "pgdown", "ctrl+f":
+	case "pgdown", "ctrl+f", "ctrl+d":
 		m.move(max(1, m.listRows()))
-	case "pgup", "ctrl+b":
+	case "pgup", "ctrl+b", "ctrl+u":
 		m.move(-max(1, m.listRows()))
 	case "home", "g":
 		m.move(-len(m.visible))

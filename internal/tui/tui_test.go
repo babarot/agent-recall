@@ -838,3 +838,18 @@ func TestSettleSizeDrawsOnceTheSizeSettles(t *testing.T) {
 		t.Fatal("after the wait the screen should be drawn")
 	}
 }
+
+// ctrl+d and ctrl+u page the session list, as they page a frame and the
+// folder list, and as pgdown and pgup page the list.
+func TestListPagesWithCtrlD(t *testing.T) {
+	m := manyFolders(t)
+	page := max(1, m.listRows())
+	ctrl := func(r rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: r, Mod: tea.ModCtrl} }
+	m = update(t, m, ctrl('d'))
+	if m.cursor != min(page, len(m.visible)-1) {
+		t.Fatalf("ctrl+d: cursor %d, page %d", m.cursor, page)
+	}
+	if m = update(t, m, ctrl('u')); m.cursor != 0 {
+		t.Fatalf("ctrl+u: cursor %d", m.cursor)
+	}
+}
