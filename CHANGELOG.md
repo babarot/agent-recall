@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.5.0](https://github.com/babarot/claude-recall/compare/1.4.0...1.5.0) - 2026-10-03
+### New Features
+- Change the TUI's keys under [keys] in the config file by @babarot in https://github.com/babarot/claude-recall/pull/41
+- Show where a detail frame is scrolled to with a scrollbar by @babarot in https://github.com/babarot/claude-recall/pull/42
+- Show pasted images in the spread Conversation by @babarot in https://github.com/babarot/claude-recall/pull/46
+### Bug fixes
+- Paste into the TUI's text fields with cmd+v and ctrl+v by @babarot in https://github.com/babarot/claude-recall/pull/47
+### Improvements
+- Look up the TUI's keys in a keymap, with keys that agree across panes by @babarot in https://github.com/babarot/claude-recall/pull/39
+- Make scrolling a detail frame light on a long session by @babarot in https://github.com/babarot/claude-recall/pull/43
+- Show where a mistake in the config file is, as linters do by @babarot in https://github.com/babarot/claude-recall/pull/44
+- Show the focus on the spread Conversation and close it with q by @babarot in https://github.com/babarot/claude-recall/pull/45
+
 ## [1.4.0](https://github.com/babarot/claude-recall/compare/1.3.1...1.4.0) - 2026-10-03
 ### New Features
 - Set the archive and the web UI port in the config file by @babarot in https://github.com/babarot/claude-recall/pull/31
