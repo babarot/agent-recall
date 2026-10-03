@@ -77,7 +77,7 @@ The filter matches words against titles, folders, branches, IDs and the conversa
 | `text:<word>` | Only what was said in the conversation |
 | `title:` `branch:` `worktree:` | Part of that field |
 | `id:<prefix>` | The start of the session ID |
-| `in:<folder>` | Folders whose name matches fuzzily (`in:bdot` for babarot/dotfiles) |
+| `folder:<name>` | Folders whose name matches fuzzily (`folder:bdot` for babarot/dotfiles); `in:` for short |
 
 `a` runs Claude Code itself (`claude -p`, signed in as you, with recall's search as its only tools), so no API key is needed. It lists the sessions it found with why each matched; Enter jumps to one, `f` narrows the list to all of them.
 

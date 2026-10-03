@@ -166,7 +166,7 @@ func New(sessions []db.Session, source Source, cfg config.TUI) Model {
 
 	fi := textinput.New()
 	fi.Prompt = "/ "
-	fi.Placeholder = "filter by title, folder, branch, ID or what was said · in:folder · text:word"
+	fi.Placeholder = "filter by title, folder, branch, ID or what was said · folder:name · text:word"
 
 	ss := textinput.New()
 	ss.Prompt = "/ "
@@ -305,7 +305,7 @@ func (m *Model) refresh() {
 	q := parseQuery(m.filter.Value())
 	m.visible = m.visible[:0]
 	for i := range m.rows {
-		// Claude's answer, or in:, picks the sessions itself, over the
+		// Claude's answer, or folder:, picks the sessions itself, over the
 		// folder the list is narrowed to.
 		if m.asked != nil {
 			if _, ok := m.asked[m.rows[i].s.ID]; !ok {

@@ -33,7 +33,7 @@ Sleep 800ms
 # another.
 Type "/"
 Sleep 300ms
-Type@30ms "in:api"
+Type@30ms "folder:api"
 Sleep 400ms
 Type@70ms " logout"
 Sleep 1.3s

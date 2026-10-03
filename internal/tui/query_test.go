@@ -25,6 +25,8 @@ func TestParseQuery(t *testing.T) {
 		{"in:Dotfiles nix", []string{"nix"}, []string{"dotfiles"}},
 		{"in:a in:b", nil, []string{"a", "b"}},
 		{"in: http://x", []string{"http://x"}, nil}, // an empty in: is nothing, other keys are words
+		{"folder:Dotfiles nix", []string{"nix"}, []string{"dotfiles"}},
+		{"folder:a in:b", nil, []string{"a", "b"}}, // in: is folder: for short
 	}
 	for _, c := range cases {
 		q := parseQuery(c.in)
@@ -87,6 +89,14 @@ func TestInSuggestsAndCompletes(t *testing.T) {
 	}
 	if got := visibleIDs(m); got != "repo-1,sub-1,wt-1,herdr-1" {
 		t.Fatalf("completed in: shows %s", got)
+	}
+	// folder: suggests and completes the same folders.
+	m = typeFilter(t, folderModel(t, config.Default().TUI, f, 140, 40), "folder:")
+	if list, _ := m.suggestions(); len(list) != len(m.folders) {
+		t.Fatalf("folder: suggests %+v", list)
+	}
+	if m = press(t, m, "tab"); m.filter.Value() != folderPrefix+m.folders[0].name {
+		t.Fatalf("tab after folder: gave %q", m.filter.Value())
 	}
 	// A plain word shows no suggestions; tab leaves it alone.
 	m = typeFilter(t, folderModel(t, config.Default().TUI, f, 140, 40), "wt")
@@ -312,6 +322,7 @@ func TestKeyHint(t *testing.T) {
 		"ti":        "tle:",
 		"wo":        "rktree:",
 		"in":        ":",
+		"fo":        "lder:",
 		"id":        ":",
 		"nix BR":    "anch:", // the last word, any case
 		"t":         "",      // one letter could be text: or title:

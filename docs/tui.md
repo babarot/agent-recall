@@ -35,14 +35,14 @@ The title is the session's `/rename` name, or else the title Claude Code generat
 | `branch:<part>` | Part of the branch |
 | `worktree:<part>` | Part of the worktree name |
 | `id:<prefix>` | The start of the session ID |
-| `in:<folder>` | Folders whose name matches fuzzily, as the folder list's search does (`in:bdot` for babarot/dotfiles), within the folder the list is narrowed to |
+| `folder:<name>` | Folders whose name matches fuzzily, as the folder list's search does (`folder:bdot` for babarot/dotfiles), within the folder the list is narrowed to; `in:` is the same, for short |
 
 Several of one key match any of them.
 
 While typing:
 
 - Two letters of a key, such as `bra`, show the rest faintly; `Tab` or `→` types it.
-- `in:`, `branch:` and `worktree:` suggest their values as you type. While the suggestions show, `↑` `↓` and `Enter` pick one, `Tab` completes the highlighted one and `Esc` closes them. The mouse clicks and scrolls them too.
+- `folder:` (and `in:`), `branch:` and `worktree:` suggest their values as you type. While the suggestions show, `↑` `↓` and `Enter` pick one, `Tab` completes the highlighted one and `Esc` closes them. The mouse clicks and scrolls them too.
 
 ## Ask Claude
 
