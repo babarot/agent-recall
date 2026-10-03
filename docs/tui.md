@@ -104,7 +104,12 @@ Under `[keys]` in the [config file](../README.md#configuration), an operation ta
 [keys]
 resume = "space"
 read = "enter"
+
+[keys.list]
+folders_open = "o"
 ```
+
+An operation that works in one pane only goes in that pane's table, `[keys.list]` or `[keys.folders]`, after the lines directly under `[keys]` (TOML reads a line after a table header as part of that table). A key written in the wrong place is reported with where it goes.
 
 | Operation | Keys | What it does |
 |---|---|---|
@@ -126,9 +131,9 @@ read = "enter"
 | `top` `bottom` | `home` `g`, `end` `G` | The first, the last |
 | `search` | `/` | Search what has focus: the list's filter, the folder search, the conversation search |
 | `next_match` `prev_match` | `n`, `N` | The next, the previous match of the conversation search |
-| `folders_open` | `left` `h` | Open the folder list, then move into it |
-| `folders_close` | `right` `l` | Close the folder list |
-| `folders_back` | `right` `l` `enter` | Go from the folder list back to the sessions |
+| `[keys.list]` `folders_open` | `left` `h` | Open the folder list, then move into it |
+| `[keys.list]` `folders_close` | `right` `l` | Close the folder list |
+| `[keys.folders]` `back` | `right` `l` `enter` | Go from the folder list back to the sessions |
 
 Keys are written as key presses are read:
 

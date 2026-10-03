@@ -44,7 +44,36 @@ type File struct {
 	// Keys changes which keys do what in the TUI, by operation name. The TUI
 	// checks the names and keys when it starts, so a mistake here stops only
 	// the TUI, as one under [tui] does.
-	Keys map[string]KeyList `toml:"keys"`
+	Keys Keys `toml:"keys"`
+}
+
+// Keys are the operations under [keys], by name. An operation that works
+// in one pane only is written in that pane's table, as [keys.list] or
+// [keys.folders], and named with it: list.folders_open, folders.back.
+type Keys map[string]KeyList
+
+// UnmarshalTOML reads [keys], naming the operations in a pane's table after
+// the table.
+func (k *Keys) UnmarshalTOML(v any) error {
+	t, ok := v.(map[string]any)
+	if !ok {
+		return errors.New("keys must be a table")
+	}
+	*k = Keys{}
+	for name, val := range t {
+		if pane, ok := val.(map[string]any); ok {
+			for op, pv := range pane {
+				var l KeyList
+				_ = l.UnmarshalTOML(pv)
+				(*k)[name+"."+op] = l
+			}
+			continue
+		}
+		var l KeyList
+		_ = l.UnmarshalTOML(val)
+		(*k)[name] = l
+	}
+	return nil
 }
 
 // KeyList is an operation's keys as written under [keys]: a key or a list
@@ -217,10 +246,15 @@ const Template = `# claude-recall settings. Uncomment a line to change it.
 # next_match = "n"
 # prev_match = "N"
 #
-# The folder list:
+# Keys that work in one pane go in its table, after the lines above.
+# The session list:
+# [keys.list]
 # folders_open = ["left", "h"]
 # folders_close = ["right", "l"]
-# folders_back = ["right", "l", "enter"]
+#
+# The folder list:
+# [keys.folders]
+# back = ["right", "l", "enter"]
 `
 
 // WriteTemplate writes Template to path unless a file is already there.

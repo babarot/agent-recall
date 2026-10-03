@@ -108,8 +108,12 @@ func TestDocsListEveryOperation(t *testing.T) {
 	}
 	k := defaultKeyMap()
 	for name := range k.refs() {
-		if !strings.Contains(string(doc), "`"+name+"`") {
-			t.Errorf("docs/tui.md does not list %s", name)
+		want := "`" + name + "`"
+		if pane, op, ok := strings.Cut(name, "."); ok {
+			want = "`[keys." + pane + "]` `" + op + "`"
+		}
+		if !strings.Contains(string(doc), want) {
+			t.Errorf("docs/tui.md does not list %s as %s", name, want)
 		}
 	}
 }
@@ -121,7 +125,8 @@ func TestTemplateListsEveryKey(t *testing.T) {
 	section := config.Template[strings.Index(config.Template, "[keys]"):]
 	var b strings.Builder
 	b.WriteString("[keys]\n")
-	setting := regexp.MustCompile(`^# ([a-z_]+ = (".*"|\[.*\]))$`)
+	// A setting, or a pane's table.
+	setting := regexp.MustCompile(`^# ([a-z_]+ = (".*"|\[.*\])|\[keys\.[a-z]+\])$`)
 	for _, l := range strings.Split(section, "\n") {
 		if m := setting.FindStringSubmatch(l); m != nil {
 			b.WriteString(m[1] + "\n")
@@ -150,5 +155,29 @@ func TestTemplateListsEveryKey(t *testing.T) {
 		if g := got.byName()[name]; !slices.Equal(g.Keys(), b.Keys()) {
 			t.Errorf("keys.%s in the template is %q, the default is %q", name, g.Keys(), b.Keys())
 		}
+	}
+}
+
+// An operation written in the wrong place is pointed to where it goes.
+func TestWithKeysMisplaced(t *testing.T) {
+	m, _ := newTestModel(t, config.Default().TUI, 140, 40)
+	for name, want := range map[string]string{
+		"list.resume":          "resume goes directly under [keys], before [keys.list] and [keys.folders]",
+		"folders_open":         "folders_open goes under [keys.list]",
+		"back":                 "back goes under [keys.folders]",
+		"folders.folders_open": "folders_open goes under [keys.list]",
+	} {
+		_, err := m.WithKeys(config.Keys{name: list("x")})
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: got %v, want %q", name, err, want)
+		}
+	}
+	// In its pane's table, it works.
+	m, err := m.WithKeys(config.Keys{"list.folders_open": list("o"), "folders.back": list("b")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m = press(t, m, "o"); !m.sidebarShown() {
+		t.Fatal("o should open the folder list")
 	}
 }

@@ -272,10 +272,15 @@ Sessions are imported from `~/.claude/projects` (`$CLAUDE_CONFIG_DIR/projects` w
 # next_match = "n"
 # prev_match = "N"
 #
-# The folder list:
+# Keys that work in one pane go in its table, after the lines above.
+# The session list:
+# [keys.list]
 # folders_open = ["left", "h"]
 # folders_close = ["right", "l"]
-# folders_back = ["right", "l", "enter"]
+#
+# The folder list:
+# [keys.folders]
+# back = ["right", "l", "enter"]
 ```
 
 ## CLI

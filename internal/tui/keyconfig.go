@@ -121,7 +121,7 @@ func (k *keyMap) refs() map[string]*key.Binding {
 		"up": &k.Nav.Up, "down": &k.Nav.Down, "page_up": &k.Nav.PageUp, "page_down": &k.Nav.PageDown,
 		"top": &k.Nav.Top, "bottom": &k.Nav.Bottom, "search": &k.Nav.Search,
 		"next_match": &k.Nav.NextMatch, "prev_match": &k.Nav.PrevMatch,
-		"folders_open": &k.List.FoldersOpen, "folders_close": &k.List.FoldersClose, "folders_back": &k.Folders.FoldersBack,
+		"list.folders_open": &k.List.FoldersOpen, "list.folders_close": &k.List.FoldersClose, "folders.back": &k.Folders.FoldersBack,
 	}
 }
 
@@ -141,12 +141,7 @@ func applyKeys(base keyMap, set map[string]config.KeyList) (keyMap, error) {
 		ref, ok := refs[name]
 		switch {
 		case !ok:
-			known := make([]string, 0, len(refs))
-			for n := range refs {
-				known = append(known, n)
-			}
-			slices.Sort(known)
-			errs = append(errs, fmt.Errorf("keys.%s: no such operation (known: %s)", name, strings.Join(known, ", ")))
+			errs = append(errs, fmt.Errorf("keys.%s: %s", name, unknownOperation(name, refs)))
 			continue
 		case v.Err != nil:
 			errs = append(errs, fmt.Errorf("keys.%s: %w", name, v.Err))
@@ -169,6 +164,26 @@ func applyKeys(base keyMap, set map[string]config.KeyList) (keyMap, error) {
 		}
 	}
 	return k, errors.Join(errs...)
+}
+
+// unknownOperation explains a name under [keys] that is no operation,
+// pointing one written in the wrong place to where it goes: a key that
+// works anywhere goes directly under [keys], before any pane's table, and
+// one that works in a pane goes in that pane's table.
+func unknownOperation(name string, refs map[string]*key.Binding) string {
+	op := name[strings.LastIndex(name, ".")+1:]
+	var known []string
+	for n := range refs {
+		known = append(known, n)
+		if n == op {
+			return fmt.Sprintf("no such operation; %s goes directly under [keys], before [keys.list] and [keys.folders]", op)
+		}
+		if pane, o, ok := strings.Cut(n, "."); ok && o == op {
+			return fmt.Sprintf("no such operation; %s goes under [keys.%s]", o, pane)
+		}
+	}
+	slices.Sort(known)
+	return "no such operation (known: " + strings.Join(known, ", ") + ")"
 }
 
 // WithKeys gives operations the keys set under [keys] in the config file,

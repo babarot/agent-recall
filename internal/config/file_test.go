@@ -205,3 +205,17 @@ func TestLoadKeys(t *testing.T) {
 		t.Errorf("Load leaves the keys to the TUI: %v", err)
 	}
 }
+
+// A pane's table under [keys] names its operations after the pane.
+func TestLoadPaneKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	os.WriteFile(path, []byte("[keys]\nresume = \"space\"\n\n[keys.list]\nfolders_open = \"o\"\n\n[keys.folders]\nback = [\"b\"]\n"), 0o644)
+	got, err := LoadCore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Keys{"resume": {Keys: []string{"space"}}, "list.folders_open": {Keys: []string{"o"}}, "folders.back": {Keys: []string{"b"}}}
+	if !reflect.DeepEqual(got.Keys, want) {
+		t.Fatalf("got %+v", got.Keys)
+	}
+}

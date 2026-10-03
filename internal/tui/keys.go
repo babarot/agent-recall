@@ -126,7 +126,7 @@ func keyGlyph(k string) string {
 	return k
 }
 
-var keyRef = regexp.MustCompile(`\{([a-z_]+)\.(\d+)\}`)
+var keyRef = regexp.MustCompile(`\{([a-z_.]+)\.(\d+)\}`)
 
 // hintKeys fills in a key hint template: {op.N} is operation op's N-th key
 // (from 0) and the rest is printed as written, so a template lays the keys
@@ -215,9 +215,9 @@ func (k keyMap) keyScopes() []struct {
 		ops   []namedKey
 		fixed []string
 	}{
-		{"the session list", pick(all, cat(global, session, nav, []string{"folders_open", "folders_close"})...), []string{"esc"}},
+		{"the session list", pick(all, cat(global, session, nav, []string{"list.folders_open", "list.folders_close"})...), []string{"esc"}},
 		{"a frame or the spread conversation", pick(all, cat(global, session, nav)...), []string{"esc"}},
-		{"the folder list", pick(all, cat(global, nav, []string{"folders_back"})...), []string{"esc"}},
+		{"the folder list", pick(all, cat(global, nav, []string{"folders.back"})...), []string{"esc"}},
 		// Boxes close on the key that opened them, beside their own keys.
 		{"the key list", pick(all, "help"), []string{"esc", "q"}},
 		{"the sort menu", pick(all, "sort"), []string{"down", "j", "ctrl+n", "tab", "up", "k", "ctrl+p", "shift+tab",
