@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.4.0](https://github.com/babarot/claude-recall/compare/1.3.1...1.4.0) - 2026-10-03
+### New Features
+- Set the archive and the web UI port in the config file by @babarot in https://github.com/babarot/claude-recall/pull/31
+- Read transcripts from CLAUDE_CONFIG_DIR, add recall --all, and test the CLI by @babarot in https://github.com/babarot/claude-recall/pull/32
+- Add folder: to the TUI filter, with in: for short by @babarot in https://github.com/babarot/claude-recall/pull/35
+- Search the spread conversation with / by @babarot in https://github.com/babarot/claude-recall/pull/36
+### Improvements
+- Parse the CLI with cobra by @babarot in https://github.com/babarot/claude-recall/pull/30
+- Keep the TUI moving while a long session's detail loads by @babarot in https://github.com/babarot/claude-recall/pull/37
+### Others
+- Add a demo GIF of the TUI, recorded with VHS by @babarot in https://github.com/babarot/claude-recall/pull/33
+
 ## [1.3.1](https://github.com/babarot/claude-recall/compare/1.3.0...1.3.1) - 2026-10-03
 ### Bug fixes
 - Draw the TUI once the terminal's size settles by @babarot in https://github.com/babarot/claude-recall/pull/26
